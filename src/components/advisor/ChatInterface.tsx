@@ -13,9 +13,10 @@ interface Message {
 interface ChatInterfaceProps {
   messages: Message[];
   onSendMessage: (content: string) => void;
+  isLoading?: boolean;
 }
 
-export function ChatInterface({ messages, onSendMessage }: ChatInterfaceProps) {
+export function ChatInterface({ messages, onSendMessage, isLoading = false }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -76,6 +77,16 @@ export function ChatInterface({ messages, onSendMessage }: ChatInterfaceProps) {
               </div>
             </div>
           ))}
+          {isLoading && (
+            <div className="flex gap-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
+                <Bot className="h-4 w-4 text-primary" />
+              </div>
+              <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-2.5">
+                <p className="text-sm text-muted-foreground">Thinking...</p>
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
@@ -90,7 +101,7 @@ export function ChatInterface({ messages, onSendMessage }: ChatInterfaceProps) {
           placeholder="Ask about investing, markets, or financial concepts..."
           className="flex-1"
         />
-        <Button type="submit" size="icon" disabled={!input.trim()}>
+        <Button type="submit" size="icon" disabled={!input.trim() || isLoading}>
           <Send className="h-4 w-4" />
         </Button>
       </form>

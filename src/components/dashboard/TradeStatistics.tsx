@@ -1,38 +1,67 @@
 import { Target, TrendingUp, TrendingDown, BarChart2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-
-const stats = [
-  {
-    label: "Win Rate",
-    value: "68%",
-    subtext: "34 of 50 trades",
-    icon: Target,
-    trend: "positive",
-  },
-  {
-    label: "Avg. Profit",
-    value: "+$342",
-    subtext: "per winning trade",
-    icon: TrendingUp,
-    trend: "positive",
-  },
-  {
-    label: "Avg. Loss",
-    value: "-$187",
-    subtext: "per losing trade",
-    icon: TrendingDown,
-    trend: "negative",
-  },
-  {
-    label: "Profit Factor",
-    value: "2.14",
-    subtext: "gross profit/loss",
-    icon: BarChart2,
-    trend: "positive",
-  },
-];
+import { useTradeStatistics } from "@/hooks/use-data";
 
 export function TradeStatistics() {
+  const { data: stats, isLoading } = useTradeStatistics();
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg font-semibold">Trade Statistics</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">Loading...</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!stats || stats.totalTrades === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-lg font-semibold">Trade Statistics</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">No trades yet. Start trading to see statistics!</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const displayStats = [
+    {
+      label: "Win Rate",
+      value: `${stats.winRate.toFixed(0)}%`,
+      subtext: `${stats.winningTrades} of ${stats.totalTrades} trades`,
+      icon: Target,
+      trend: stats.winRate >= 50 ? "positive" : "negative",
+    },
+    {
+      label: "Avg. Profit",
+      value: `+$${Math.abs(stats.avgProfit).toFixed(0)}`,
+      subtext: "per winning trade",
+      icon: TrendingUp,
+      trend: "positive",
+    },
+    {
+      label: "Avg. Loss",
+      value: `-$${stats.avgLoss.toFixed(0)}`,
+      subtext: "per losing trade",
+      icon: TrendingDown,
+      trend: "negative",
+    },
+    {
+      label: "Profit Factor",
+      value: stats.profitFactor.toFixed(2),
+      subtext: "gross profit/loss",
+      icon: BarChart2,
+      trend: stats.profitFactor >= 1 ? "positive" : "negative",
+    },
+  ];
+
   return (
     <Card>
       <CardHeader className="pb-2">
@@ -40,7 +69,7 @@ export function TradeStatistics() {
       </CardHeader>
       <CardContent>
         <div className="grid grid-cols-2 gap-4">
-          {stats.map((stat) => (
+          {displayStats.map((stat) => (
             <div
               key={stat.label}
               className="rounded-lg border bg-muted/30 p-4"

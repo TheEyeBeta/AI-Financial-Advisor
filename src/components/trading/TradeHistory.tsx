@@ -10,77 +10,30 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-
-const trades = [
-  {
-    id: 1,
-    symbol: "GOOGL",
-    type: "LONG",
-    action: "CLOSED",
-    quantity: 12,
-    entryPrice: 142.50,
-    exitPrice: 156.80,
-    entryDate: "2024-01-15",
-    exitDate: "2024-01-22",
-    pnl: 171.60,
-  },
-  {
-    id: 2,
-    symbol: "AMD",
-    type: "LONG",
-    action: "CLOSED",
-    quantity: 30,
-    entryPrice: 165.00,
-    exitPrice: 158.20,
-    entryDate: "2024-01-10",
-    exitDate: "2024-01-18",
-    pnl: -204.00,
-  },
-  {
-    id: 3,
-    symbol: "META",
-    type: "LONG",
-    action: "CLOSED",
-    quantity: 8,
-    entryPrice: 485.00,
-    exitPrice: 512.30,
-    entryDate: "2024-01-08",
-    exitDate: "2024-01-16",
-    pnl: 218.40,
-  },
-  {
-    id: 4,
-    symbol: "AMZN",
-    type: "LONG",
-    action: "CLOSED",
-    quantity: 15,
-    entryPrice: 178.50,
-    exitPrice: 185.20,
-    entryDate: "2024-01-05",
-    exitDate: "2024-01-12",
-    pnl: 100.50,
-  },
-  {
-    id: 5,
-    symbol: "NFLX",
-    type: "LONG",
-    action: "CLOSED",
-    quantity: 5,
-    entryPrice: 545.00,
-    exitPrice: 532.80,
-    entryDate: "2024-01-02",
-    exitDate: "2024-01-08",
-    pnl: -61.00,
-  },
-];
+import { useClosedTrades } from "@/hooks/use-data";
+import { format, parseISO } from "date-fns";
 
 export function TradeHistory() {
-  const winningTrades = trades.filter((t) => t.pnl > 0).length;
-  const totalPnL = trades.reduce((sum, t) => sum + t.pnl, 0);
+  const { data: trades = [], isLoading } = useClosedTrades();
+  
+  const winningTrades = trades.filter((t) => (t.pnl || 0) > 0).length;
+  const totalPnL = trades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+
+  if (isLoading) {
+    return (
+      <div className="space-y-6">
+        <Card>
+          <CardContent className="p-6">
+            <div className="text-sm text-muted-foreground">Loading trade history...</div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="space-y-1">
           <h2 className="text-xl font-semibold">Trade History</h2>
           <p className="text-sm text-muted-foreground">
@@ -101,7 +54,8 @@ export function TradeHistory() {
 
       <Card>
         <CardContent className="p-0">
-          <Table>
+          <div className="overflow-x-auto">
+            <Table className="min-w-[800px]">
             <TableHeader>
               <TableRow>
                 <TableHead>Symbol</TableHead>
@@ -114,38 +68,57 @@ export function TradeHistory() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {trades.map((trade) => {
-                const isProfit = trade.pnl >= 0;
-                const entryDate = new Date(trade.entryDate);
-                const exitDate = new Date(trade.exitDate);
-                const duration = Math.ceil((exitDate.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
+              {trades.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
+                    No closed trades yet. Start trading to see your history here!
+                  </TableCell>
+                </TableRow>
+              ) : (
+                trades.map((trade) => {
+                  const isProfit = (trade.pnl || 0) >= 0;
+                  const entryDate = parseISO(trade.entry_date);
+                  const exitDate = trade.exit_date ? parseISO(trade.exit_date) : null;
+                  const duration = exitDate
+                    ? Math.ceil((exitDate.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24))
+                    : 0;
 
-                return (
-                  <TableRow key={trade.id}>
-                    <TableCell className="font-medium">{trade.symbol}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{trade.type}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">{trade.quantity}</TableCell>
-                    <TableCell className="text-right">
-                      <div className="font-mono">${trade.entryPrice.toFixed(2)}</div>
-                      <div className="text-xs text-muted-foreground">{trade.entryDate}</div>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="font-mono">${trade.exitPrice.toFixed(2)}</div>
-                      <div className="text-xs text-muted-foreground">{trade.exitDate}</div>
-                    </TableCell>
-                    <TableCell>{duration} days</TableCell>
-                    <TableCell className="text-right">
-                      <span className={`font-mono font-medium ${isProfit ? "text-profit" : "text-loss"}`}>
-                        {isProfit ? "+" : ""}${trade.pnl.toFixed(2)}
-                      </span>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+                  return (
+                    <TableRow key={trade.id}>
+                      <TableCell className="font-medium">{trade.symbol}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{trade.type}</Badge>
+                      </TableCell>
+                      <TableCell className="text-right font-mono">{trade.quantity}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="font-mono">${trade.entry_price.toFixed(2)}</div>
+                        <div className="text-xs text-muted-foreground">{format(entryDate, "yyyy-MM-dd")}</div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {trade.exit_price ? (
+                          <>
+                            <div className="font-mono">${trade.exit_price.toFixed(2)}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {exitDate ? format(exitDate, "yyyy-MM-dd") : "N/A"}
+                            </div>
+                          </>
+                        ) : (
+                          <div className="text-xs text-muted-foreground">N/A</div>
+                        )}
+                      </TableCell>
+                      <TableCell>{duration > 0 ? `${duration} days` : "N/A"}</TableCell>
+                      <TableCell className="text-right">
+                        <span className={`font-mono font-medium ${isProfit ? "text-profit" : "text-loss"}`}>
+                          {isProfit ? "+" : ""}${(trade.pnl || 0).toFixed(2)}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
+              )}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
 

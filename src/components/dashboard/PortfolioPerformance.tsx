@@ -1,23 +1,47 @@
 import { TrendingUp, TrendingDown, DollarSign } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-
-const portfolioData = [
-  { date: "Jan", value: 10000 },
-  { date: "Feb", value: 10450 },
-  { date: "Mar", value: 10200 },
-  { date: "Apr", value: 11100 },
-  { date: "May", value: 11800 },
-  { date: "Jun", value: 11600 },
-  { date: "Jul", value: 12400 },
-  { date: "Aug", value: 12100 },
-  { date: "Sep", value: 13200 },
-  { date: "Oct", value: 13800 },
-  { date: "Nov", value: 14200 },
-  { date: "Dec", value: 15340 },
-];
+import { usePortfolioHistory } from "@/hooks/use-data";
+import { format, parseISO } from "date-fns";
 
 export function PortfolioPerformance() {
+  const { data: portfolioHistory = [], isLoading } = usePortfolioHistory();
+
+  // Transform data for chart (group by month and format)
+  const portfolioData = portfolioHistory.map((entry) => ({
+    date: format(parseISO(entry.date), "MMM"),
+    value: entry.value,
+    fullDate: entry.date,
+  })).sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime());
+
+  if (isLoading) {
+    return (
+      <Card className="lg:col-span-2">
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-lg font-semibold">Portfolio Performance</CardTitle>
+          <DollarSign className="h-5 w-5 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">Loading...</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (portfolioData.length === 0) {
+    return (
+      <Card className="lg:col-span-2">
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
+          <CardTitle className="text-lg font-semibold">Portfolio Performance</CardTitle>
+          <DollarSign className="h-5 w-5 text-muted-foreground" />
+        </CardHeader>
+        <CardContent>
+          <div className="text-sm text-muted-foreground">No portfolio data available. Start trading to see your performance!</div>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const currentValue = portfolioData[portfolioData.length - 1].value;
   const startValue = portfolioData[0].value;
   const totalReturn = currentValue - startValue;

@@ -1,74 +1,85 @@
-import { useState } from "react";
+import { useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatInterface } from "@/components/advisor/ChatInterface";
 import { SuggestedTopics } from "@/components/advisor/SuggestedTopics";
+import { useChatMessages, useSendChatMessage } from "@/hooks/use-data";
+import { useAuth } from "@/hooks/use-auth";
+import { chatApi } from "@/services/api";
+import type { ChatMessage } from "@/types/database";
 
 const Advisor = () => {
-  const [messages, setMessages] = useState<Array<{ role: "user" | "assistant"; content: string }>>([
-    {
-      role: "assistant",
-      content: "Hello! I'm your AI Financial Advisor. I'm here to help you learn about investing, trading strategies, market concepts, and personal finance. What would you like to explore today?",
-    },
-  ]);
+  const { userId, isAuthenticated } = useAuth();
+  const { data: messages = [], isLoading } = useChatMessages();
+  const sendMessageMutation = useSendChatMessage();
 
-  const handleSendMessage = (content: string) => {
-    setMessages((prev) => [...prev, { role: "user", content }]);
-    
-    // Simulate AI response
-    setTimeout(() => {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: getSimulatedResponse(content),
-        },
-      ]);
-    }, 1000);
+  // Initialize with welcome message if no messages exist
+  useEffect(() => {
+    const initializeChat = async () => {
+      if (isAuthenticated && userId && messages.length === 0 && !isLoading) {
+        const welcomeMessage: ChatMessage = {
+          id: 'welcome',
+          user_id: userId,
+          role: 'assistant',
+          content: "Hello! I'm your AI Financial Advisor. I'm here to help you learn about investing, trading strategies, market concepts, and personal finance. What would you like to explore today?",
+          created_at: new Date().toISOString(),
+        };
+        
+        try {
+          await chatApi.addMessage(userId, 'assistant', welcomeMessage.content);
+        } catch (error) {
+          console.error('Error initializing chat:', error);
+        }
+      }
+    };
+
+    initializeChat();
+  }, [isAuthenticated, userId, messages.length, isLoading]);
+
+  const handleSendMessage = async (content: string) => {
+    if (!isAuthenticated) {
+      console.error('User not authenticated');
+      return;
+    }
+
+    try {
+      await sendMessageMutation.mutateAsync({ message: content });
+    } catch (error) {
+      console.error('Error sending message:', error);
+    }
   };
 
   const handleTopicSelect = (topic: string) => {
     handleSendMessage(topic);
   };
 
+  // Convert database messages to component format
+  const chatMessages = messages.map(msg => ({
+    role: msg.role as "user" | "assistant",
+    content: msg.content,
+  }));
+
+  // If no messages yet, show welcome message in UI
+  const displayMessages = chatMessages.length === 0 
+    ? [{
+        role: "assistant" as const,
+        content: "Hello! I'm your AI Financial Advisor. I'm here to help you learn about investing, trading strategies, market concepts, and personal finance. What would you like to explore today?",
+      }]
+    : chatMessages;
+
   return (
     <AppLayout title="AI Financial Advisor">
-      <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-4xl flex-col">
-        {messages.length === 1 && (
+      <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-4xl w-full flex-col">
+        {displayMessages.length === 1 && (
           <SuggestedTopics onSelectTopic={handleTopicSelect} />
         )}
         <ChatInterface
-          messages={messages}
+          messages={displayMessages}
           onSendMessage={handleSendMessage}
+          isLoading={sendMessageMutation.isPending}
         />
       </div>
     </AppLayout>
   );
 };
-
-function getSimulatedResponse(question: string): string {
-  const responses: Record<string, string> = {
-    default: "That's a great question! As your AI financial educator, I'd be happy to explain this concept. In finance, understanding the fundamentals is key to making informed decisions. Would you like me to break this down further or explore a related topic?",
-  };
-  
-  const lowerQuestion = question.toLowerCase();
-  
-  if (lowerQuestion.includes("options")) {
-    return "Options are financial derivatives that give buyers the right, but not the obligation, to buy or sell an underlying asset at a specified price before a certain date. There are two main types: **Call options** (right to buy) and **Put options** (right to sell). They're used for hedging, speculation, and generating income. Would you like to learn about specific options strategies?";
-  }
-  
-  if (lowerQuestion.includes("dollar-cost averaging") || lowerQuestion.includes("dca")) {
-    return "Dollar-cost averaging (DCA) is an investment strategy where you invest a fixed amount at regular intervals, regardless of market conditions. This approach helps reduce the impact of volatility and removes the emotional aspect of trying to 'time the market.' For example, investing $500 monthly into an index fund means you buy more shares when prices are low and fewer when they're high.";
-  }
-  
-  if (lowerQuestion.includes("etf")) {
-    return "An ETF (Exchange-Traded Fund) is a basket of securities that trades on an exchange like a stock. ETFs can contain stocks, bonds, commodities, or a mix. They offer diversification, lower fees than mutual funds, and tax efficiency. Popular examples include SPY (S&P 500), QQQ (Nasdaq 100), and VTI (Total Stock Market). Would you like to compare ETFs vs mutual funds?";
-  }
-  
-  if (lowerQuestion.includes("risk")) {
-    return "Understanding risk is fundamental to investing. Key concepts include: **Market Risk** (overall market declines), **Credit Risk** (default on debt), **Liquidity Risk** (inability to sell quickly), and **Inflation Risk** (purchasing power erosion). Risk tolerance varies by individual and should align with your investment timeline and goals. How would you like to assess your risk profile?";
-  }
-  
-  return responses.default;
-}
 
 export default Advisor;
