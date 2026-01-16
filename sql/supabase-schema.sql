@@ -1,5 +1,6 @@
--- Supabase Database Schema for Advisor Ally
--- This schema supports paper trading, portfolio tracking, chat history, and learning progress
+-- Supabase Database Schema for FinanceAI (Advisor Ally)
+-- WARNING: This is a reference schema. Your database may already have these tables.
+-- Only run specific parts if you're setting up a new database.
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -7,22 +8,42 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- Create ENUM types
 CREATE TYPE experience_level_enum AS ENUM ('beginner', 'intermediate', 'advanced');
 CREATE TYPE risk_level_enum AS ENUM ('low', 'mid', 'high', 'very_high');
+CREATE TYPE type_of_user AS ENUM ('User', 'Admin');
 
--- Users table (extends Supabase auth.users)
--- Password authentication is handled by auth.users table (Supabase built-in)
--- This table extends user profile with additional fields
+-- Users table (extends Supabase auth.users via auth_id)
 CREATE TABLE IF NOT EXISTS public.users (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    first_name TEXT, -- User's first name
-    last_name TEXT, -- User's last name
-    age INTEGER CHECK (age >= 13 AND age <= 150), -- User's age
-    email TEXT, -- User's email
-    experience_level experience_level_enum DEFAULT 'beginner', -- Finance experience level
-    risk_level risk_level_enum DEFAULT 'mid', -- Risk tolerance level
-    is_verified BOOLEAN DEFAULT FALSE, -- Email verification status (synced with auth.users.email_confirmed_at)
-    email_verified_at TIMESTAMPTZ, -- When email was verified (synced with auth.users.email_confirmed_at)
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    auth_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
+    first_name TEXT,
+    last_name TEXT,
+    age INTEGER CHECK (age >= 13 AND age <= 150),
+    email TEXT,
+    experience_level experience_level_enum DEFAULT 'beginner',
+    risk_level risk_level_enum DEFAULT 'mid',
+    is_verified BOOLEAN DEFAULT FALSE,
+    email_verified_at TIMESTAMPTZ,
+    userType type_of_user NOT NULL DEFAULT 'User',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Chats table (conversation sessions)
+CREATE TABLE IF NOT EXISTS public.chats (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    title TEXT DEFAULT 'New Chat',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Chat Messages (AI Advisor conversations)
+CREATE TABLE IF NOT EXISTS public.chat_messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
+    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Portfolio Performance History
@@ -79,18 +100,9 @@ CREATE TABLE IF NOT EXISTS public.trade_journal (
     price DECIMAL(10, 2) NOT NULL,
     strategy TEXT,
     notes TEXT,
-    tags TEXT[], -- Array of tags
+    tags TEXT[],
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Chat Messages (AI Advisor conversations)
-CREATE TABLE IF NOT EXISTS public.chat_messages (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-    content TEXT NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Learning Progress
@@ -115,7 +127,7 @@ CREATE TABLE IF NOT EXISTS public.achievements (
     UNIQUE(user_id, name)
 );
 
--- Market Data (Indices and trending stocks - can be updated by Python backend)
+-- Market Data (Indices - can be updated by backend)
 CREATE TABLE IF NOT EXISTS public.market_indices (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     symbol TEXT NOT NULL UNIQUE,
@@ -126,6 +138,7 @@ CREATE TABLE IF NOT EXISTS public.market_indices (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Trending Stocks
 CREATE TABLE IF NOT EXISTS public.trending_stocks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     symbol TEXT NOT NULL,
@@ -135,108 +148,125 @@ CREATE TABLE IF NOT EXISTS public.trending_stocks (
 );
 
 -- Indexes for performance
+CREATE INDEX IF NOT EXISTS idx_users_auth_id ON public.users(auth_id);
+CREATE INDEX IF NOT EXISTS idx_chats_user_id ON public.chats(user_id);
+CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON public.chats(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON public.chat_messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON public.chat_messages(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_portfolio_history_user_date ON public.portfolio_history(user_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_open_positions_user ON public.open_positions(user_id);
 CREATE INDEX IF NOT EXISTS idx_trades_user ON public.trades(user_id, exit_date DESC);
 CREATE INDEX IF NOT EXISTS idx_trade_journal_user ON public.trade_journal(user_id, date DESC);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON public.chat_messages(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_learning_topics_user ON public.learning_topics(user_id);
 
--- Row Level Security (RLS) Policies
+-- Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.portfolio_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.open_positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trades ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trade_journal ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_topics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.achievements ENABLE ROW LEVEL SECURITY;
 
--- Users can only see their own data
+-- RLS Policies (using auth_id for user lookup)
+
+-- Users policies
 CREATE POLICY "Users can view own profile" ON public.users
-    FOR SELECT USING (auth.uid() = id);
+    FOR SELECT USING (auth_id = auth.uid());
 
 CREATE POLICY "Users can update own profile" ON public.users
-    FOR UPDATE USING (auth.uid() = id);
+    FOR UPDATE USING (auth_id = auth.uid());
+
+-- Chats policies
+CREATE POLICY "Users can view own chats" ON public.chats
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+
+CREATE POLICY "Users can create own chats" ON public.chats
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+
+CREATE POLICY "Users can update own chats" ON public.chats
+    FOR UPDATE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+
+CREATE POLICY "Users can delete own chats" ON public.chats
+    FOR DELETE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+
+-- Chat Messages policies
+CREATE POLICY "Users can view own chat messages" ON public.chat_messages
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+
+CREATE POLICY "Users can insert own chat messages" ON public.chat_messages
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+
+CREATE POLICY "Users can delete own chat messages" ON public.chat_messages
+    FOR DELETE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Portfolio History policies
 CREATE POLICY "Users can view own portfolio history" ON public.portfolio_history
-    FOR SELECT USING (auth.uid() = user_id);
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own portfolio history" ON public.portfolio_history
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own portfolio history" ON public.portfolio_history
-    FOR UPDATE USING (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Open Positions policies
 CREATE POLICY "Users can view own positions" ON public.open_positions
-    FOR SELECT USING (auth.uid() = user_id);
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own positions" ON public.open_positions
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own positions" ON public.open_positions
-    FOR UPDATE USING (auth.uid() = user_id);
+    FOR UPDATE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can delete own positions" ON public.open_positions
-    FOR DELETE USING (auth.uid() = user_id);
+    FOR DELETE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Trades policies
 CREATE POLICY "Users can view own trades" ON public.trades
-    FOR SELECT USING (auth.uid() = user_id);
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own trades" ON public.trades
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
-
-CREATE POLICY "Users can update own trades" ON public.trades
-    FOR UPDATE USING (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Trade Journal policies
 CREATE POLICY "Users can view own journal" ON public.trade_journal
-    FOR SELECT USING (auth.uid() = user_id);
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own journal entries" ON public.trade_journal
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own journal entries" ON public.trade_journal
-    FOR UPDATE USING (auth.uid() = user_id);
+    FOR UPDATE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can delete own journal entries" ON public.trade_journal
-    FOR DELETE USING (auth.uid() = user_id);
-
--- Chat Messages policies
-CREATE POLICY "Users can view own messages" ON public.chat_messages
-    FOR SELECT USING (auth.uid() = user_id);
-
-CREATE POLICY "Users can insert own messages" ON public.chat_messages
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+    FOR DELETE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Learning Topics policies
 CREATE POLICY "Users can view own learning topics" ON public.learning_topics
-    FOR SELECT USING (auth.uid() = user_id);
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own learning topics" ON public.learning_topics
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own learning topics" ON public.learning_topics
-    FOR UPDATE USING (auth.uid() = user_id);
+    FOR UPDATE USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Achievements policies
 CREATE POLICY "Users can view own achievements" ON public.achievements
-    FOR SELECT USING (auth.uid() = user_id);
+    FOR SELECT USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own achievements" ON public.achievements
-    FOR INSERT WITH CHECK (auth.uid() = user_id);
+    FOR INSERT WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
--- Market data is public (read-only for all authenticated users)
-CREATE POLICY "Authenticated users can view market indices" ON public.market_indices
+-- Market data is public read
+CREATE POLICY "Anyone can view market indices" ON public.market_indices
     FOR SELECT TO authenticated USING (true);
 
-CREATE POLICY "Authenticated users can view trending stocks" ON public.trending_stocks
+CREATE POLICY "Anyone can view trending stocks" ON public.trending_stocks
     FOR SELECT TO authenticated USING (true);
 
--- Functions for updating timestamps
+-- Trigger function for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -245,8 +275,11 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- Triggers for updated_at
+-- Apply updated_at triggers
 CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON public.users
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_chats_updated_at BEFORE UPDATE ON public.chats
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_open_positions_updated_at BEFORE UPDATE ON public.open_positions
@@ -261,12 +294,11 @@ CREATE TRIGGER update_trade_journal_updated_at BEFORE UPDATE ON public.trade_jou
 CREATE TRIGGER update_learning_topics_updated_at BEFORE UPDATE ON public.learning_topics
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
--- Function to sync email verification status from auth.users to public.users
+-- Trigger to create public.users when auth.users is created
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Create user profile in public.users when auth user is created
-    INSERT INTO public.users (id, first_name, last_name, age, email, experience_level, risk_level, is_verified, email_verified_at, created_at, updated_at)
+    INSERT INTO public.users (auth_id, first_name, last_name, age, email, experience_level, risk_level, is_verified, email_verified_at)
     VALUES (
         NEW.id,
         COALESCE((NEW.raw_user_meta_data->>'first_name')::TEXT, NULL),
@@ -276,52 +308,24 @@ BEGIN
         COALESCE((NEW.raw_user_meta_data->>'experience_level')::experience_level_enum, 'beginner'),
         COALESCE((NEW.raw_user_meta_data->>'risk_level')::risk_level_enum, 'mid'),
         COALESCE(NEW.email_confirmed_at IS NOT NULL, false),
-        NEW.email_confirmed_at,
-        NOW(),
-        NOW()
+        NEW.email_confirmed_at
     )
-    ON CONFLICT (id) DO UPDATE SET
-        first_name = COALESCE(EXCLUDED.first_name, public.users.first_name),
-        last_name = COALESCE(EXCLUDED.last_name, public.users.last_name),
-        age = COALESCE(EXCLUDED.age, public.users.age),
+    ON CONFLICT (auth_id) DO UPDATE SET
         email = COALESCE(EXCLUDED.email, public.users.email),
-        experience_level = COALESCE(EXCLUDED.experience_level, public.users.experience_level),
-        risk_level = COALESCE(EXCLUDED.risk_level, public.users.risk_level),
-        is_verified = COALESCE(NEW.email_confirmed_at IS NOT NULL, false),
-        email_verified_at = NEW.email_confirmed_at,
+        is_verified = COALESCE(NEW.email_confirmed_at IS NOT NULL, public.users.is_verified),
+        email_verified_at = COALESCE(NEW.email_confirmed_at, public.users.email_verified_at),
         updated_at = NOW();
     
+    RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+    RAISE LOG 'Error in handle_new_user: %', SQLERRM;
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Trigger to automatically create/update public.users when auth.users changes
+-- Trigger on auth.users
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT OR UPDATE ON auth.users
     FOR EACH ROW
     EXECUTE FUNCTION public.handle_new_user();
-
--- Function to update verification status when email is confirmed
-CREATE OR REPLACE FUNCTION public.handle_email_verification()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Update public.users when email_confirmed_at changes in auth.users
-    IF NEW.email_confirmed_at IS NOT NULL AND (OLD.email_confirmed_at IS NULL OR OLD.email_confirmed_at != NEW.email_confirmed_at) THEN
-        UPDATE public.users
-        SET 
-            is_verified = true,
-            email_verified_at = NEW.email_confirmed_at,
-            updated_at = NOW()
-        WHERE id = NEW.id;
-    END IF;
-    
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Trigger to sync email verification status
-CREATE TRIGGER on_email_verified
-    AFTER UPDATE OF email_confirmed_at ON auth.users
-    FOR EACH ROW
-    WHEN (OLD.email_confirmed_at IS DISTINCT FROM NEW.email_confirmed_at)
-    EXECUTE FUNCTION public.handle_email_verification();
