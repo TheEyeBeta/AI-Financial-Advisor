@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/error";
 import { useNavigate } from "react-router-dom";
 
 export function UserAuth() {
@@ -45,10 +46,10 @@ export function UserAuth() {
       });
       setShowJohnDoeDialog(false);
       navigate("/advisor");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to sign in. Make sure John Doe user exists in Supabase Auth.",
+        description: getErrorMessage(error) || "Failed to sign in. Make sure John Doe user exists in Supabase Auth.",
         variant: "destructive",
       });
     } finally {
@@ -78,10 +79,10 @@ export function UserAuth() {
       setEmail("");
       setPassword("");
       navigate("/advisor");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to sign in. Please check your credentials.",
+        description: getErrorMessage(error) || "Failed to sign in. Please check your credentials.",
         variant: "destructive",
       });
     } finally {
@@ -97,10 +98,10 @@ export function UserAuth() {
         description: "Signed out successfully",
       });
       navigate("/advisor");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to sign out",
+        description: getErrorMessage(error) || "Failed to sign out",
         variant: "destructive",
       });
     }
@@ -147,10 +148,10 @@ export function UserAuth() {
       setEmail("");
       setPassword("");
       setConfirmPassword("");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to create account. Please try again.",
+        description: getErrorMessage(error) || "Failed to create account. Please try again.",
         variant: "destructive",
       });
     } finally {

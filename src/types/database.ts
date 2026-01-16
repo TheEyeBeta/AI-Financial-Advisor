@@ -205,10 +205,34 @@ export interface Database {
           updated_at?: string;
         };
       };
+      chats: {
+        Row: {
+          id: string;
+          user_id: string;
+          title: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          title?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          title?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       chat_messages: {
         Row: {
           id: string;
           user_id: string;
+          chat_id: string | null;
           role: 'user' | 'assistant';
           content: string;
           created_at: string;
@@ -216,6 +240,7 @@ export interface Database {
         Insert: {
           id?: string;
           user_id: string;
+          chat_id?: string | null;
           role: 'user' | 'assistant';
           content: string;
           created_at?: string;
@@ -223,6 +248,7 @@ export interface Database {
         Update: {
           id?: string;
           user_id?: string;
+          chat_id?: string | null;
           role?: 'user' | 'assistant';
           content?: string;
           created_at?: string;
@@ -341,8 +367,16 @@ export type PortfolioHistory = Database['public']['Tables']['portfolio_history']
 export type OpenPosition = Database['public']['Tables']['open_positions']['Row'];
 export type Trade = Database['public']['Tables']['trades']['Row'];
 export type TradeJournalEntry = Database['public']['Tables']['trade_journal']['Row'];
+export type Chat = Database['public']['Tables']['chats']['Row'];
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row'];
 export type LearningTopic = Database['public']['Tables']['learning_topics']['Row'];
 export type Achievement = Database['public']['Tables']['achievements']['Row'];
 export type MarketIndex = Database['public']['Tables']['market_indices']['Row'];
 export type TrendingStock = Database['public']['Tables']['trending_stocks']['Row'];
+
+// Extended types with relations
+export interface ChatWithMessages extends Chat {
+  messages: ChatMessage[];
+  messageCount: number;
+  lastMessage?: ChatMessage;
+}

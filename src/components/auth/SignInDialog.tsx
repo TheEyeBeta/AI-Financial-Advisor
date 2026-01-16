@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/error";
 import { useNavigate } from "react-router-dom";
 
 interface SignInDialogProps {
@@ -49,10 +50,10 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
       setEmail("");
       setPassword("");
       navigate("/advisor");
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to sign in. Please check your credentials.",
+        description: getErrorMessage(error) || "Failed to sign in. Please check your credentials.",
         variant: "destructive",
       });
     } finally {

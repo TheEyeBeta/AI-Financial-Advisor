@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { CheckCircle2, XCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { getErrorMessage } from '@/lib/error';
 
 interface ConnectionStatus {
   status: 'checking' | 'connected' | 'error' | 'tables-missing' | 'auth-required';
@@ -89,11 +90,11 @@ export function SupabaseConnectionTest() {
         details: 'All systems operational'
       });
 
-    } catch (error: any) {
+    } catch (error: unknown) {
       setConnectionStatus({
         status: 'error',
         message: 'Connection test failed',
-        details: error.message || 'Unknown error'
+        details: getErrorMessage(error) || 'Unknown error'
       });
     }
   }

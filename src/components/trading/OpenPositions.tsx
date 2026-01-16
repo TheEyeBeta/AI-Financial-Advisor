@@ -119,19 +119,19 @@ export function OpenPositions() {
         </CardHeader>
         <CardContent className="p-0">
           <div className="overflow-x-auto">
-            <Table className="min-w-[800px]">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">Entry</TableHead>
-                <TableHead className="text-right">Current</TableHead>
-                <TableHead className="text-right">P&L</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+            <Table className="min-w-full">
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead className="text-right hidden md:table-cell">Qty</TableHead>
+                  <TableHead className="text-right hidden md:table-cell">Entry</TableHead>
+                  <TableHead className="text-right hidden lg:table-cell">Current</TableHead>
+                  <TableHead className="text-right">P&L</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
               {displayPositions.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
@@ -150,6 +150,12 @@ export function OpenPositions() {
                         <div>
                           <div className="font-medium">{position.symbol}</div>
                           <div className="text-xs text-muted-foreground">{position.name || position.symbol}</div>
+                          <div className="text-xs text-muted-foreground md:hidden">
+                            Qty {position.quantity} • Entry ${position.entry_price.toFixed(2)}
+                          </div>
+                          <div className="text-xs text-muted-foreground lg:hidden md:block">
+                            Current ${currentPrice.toFixed(2)}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -157,13 +163,13 @@ export function OpenPositions() {
                           {position.type}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-right font-mono">
+                      <TableCell className="text-right font-mono hidden md:table-cell">
                         {position.quantity}
                       </TableCell>
-                      <TableCell className="text-right font-mono">
+                      <TableCell className="text-right font-mono hidden md:table-cell">
                         ${position.entry_price.toFixed(2)}
                       </TableCell>
-                      <TableCell className="text-right font-mono">
+                      <TableCell className="text-right font-mono hidden lg:table-cell">
                         ${currentPrice.toFixed(2)}
                       </TableCell>
                       <TableCell className="text-right">
@@ -195,8 +201,8 @@ export function OpenPositions() {
                   );
                 })
               )}
-            </TableBody>
-          </Table>
+              </TableBody>
+            </Table>
           </div>
         </CardContent>
       </Card>

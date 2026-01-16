@@ -8,33 +8,33 @@ interface SuggestedTopicsProps {
 const topics = [
   {
     icon: TrendingUp,
-    label: "Options Trading",
-    question: "Explain options trading and how calls and puts work",
+    label: "Getting Started",
+    question: "I'm new to investing. What are the first steps I should take to start building wealth? Please explain the basics of stocks, bonds, and index funds.",
   },
   {
     icon: Coins,
-    label: "Dollar-Cost Averaging",
-    question: "What is dollar-cost averaging and why is it effective?",
+    label: "Smart Saving",
+    question: "What's the best strategy for someone who wants to invest consistently but doesn't have a lot of money to start with? Explain dollar-cost averaging and how much I should be investing monthly.",
   },
   {
     icon: BarChart3,
-    label: "ETFs vs Mutual Funds",
-    question: "What are ETFs and how do they compare to mutual funds?",
+    label: "Portfolio Building",
+    question: "How do I build a diversified investment portfolio? What's the right mix of stocks, bonds, and other assets for someone my age? Explain asset allocation strategies.",
   },
   {
     icon: Shield,
-    label: "Risk Management",
-    question: "How should I think about risk when investing?",
+    label: "Risk & Protection",
+    question: "How do I protect my investments during market downturns? Explain risk management strategies, stop-losses, and how to avoid emotional investing decisions.",
   },
   {
     icon: PiggyBank,
     label: "Retirement Planning",
-    question: "What are the basics of retirement planning and 401(k) accounts?",
+    question: "Help me understand retirement accounts. What's the difference between a 401(k), IRA, and Roth IRA? How much should I be saving for retirement and what's compound interest?",
   },
   {
     icon: Lightbulb,
     label: "Market Analysis",
-    question: "What's the difference between fundamental and technical analysis?",
+    question: "How do professional investors analyze stocks before buying? Explain fundamental analysis (P/E ratio, earnings) vs technical analysis (charts, trends). Which should I use?",
   },
 ];
 

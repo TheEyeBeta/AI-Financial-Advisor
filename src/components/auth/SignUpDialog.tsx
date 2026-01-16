@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/error";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 
@@ -139,7 +140,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
         setConfirmPassword("");
         setExperienceLevel("beginner");
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       // #region agent log
       console.error('[DEBUG] SignUp error caught:', {
         message: error?.message,
@@ -153,7 +154,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
       fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SignUpDialog.tsx:handleEmailSignUp:catch',message:'SignUp error caught',data:{errorMessage:error?.message,errorCode:error?.code,errorDetails:error?.details,errorHint:error?.hint,errorStack:error?.stack,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,E'})}).catch(()=>{});
       // #endregion
 
-      const errorMessage = error?.message || error?.details || "Failed to create account";
+      const errorMessage = getErrorMessage(error) || "Failed to create account";
       toast({
         title: "Error",
         description: errorMessage,

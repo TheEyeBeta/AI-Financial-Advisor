@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Advisor from "./pages/Advisor";
+import ChatHistory from "./pages/ChatHistory";
 import Dashboard from "./pages/Dashboard";
 import PaperTrading from "./pages/PaperTrading";
 import Admin from "./pages/Admin";
@@ -33,6 +34,14 @@ const App = () => (
               element={
                 <ProtectedRoute>
                   <Advisor />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/chat-history"
+              element={
+                <ProtectedRoute>
+                  <ChatHistory />
                 </ProtectedRoute>
               }
             />

@@ -9,7 +9,7 @@ type UserProfile = Database['public']['Tables']['users']['Row'];
  */
 export async function getUserProfile(authId: string): Promise<UserProfile | null> {
   // Try new structure first (auth_id column exists)
-  let { data, error } = await supabase
+  const { data, error } = await supabase
     .from('users')
     .select('*')
     .eq('auth_id', authId)

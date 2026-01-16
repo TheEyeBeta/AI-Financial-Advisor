@@ -4,7 +4,9 @@ import type {
   OpenPosition,
   Trade,
   TradeJournalEntry,
+  Chat,
   ChatMessage,
+  ChatWithMessages,
   LearningTopic,
   Achievement,
   MarketIndex,
@@ -192,8 +194,122 @@ export const journalApi = {
 };
 
 // Chat API
+// Chats API - for managing chat sessions
+export const chatsApi = {
+  // Get all chats for a user with message counts
+  async getAll(userId: string): Promise<ChatWithMessages[]> {
+    const { data: chats, error: chatsError } = await supabase
+      .from('chats')
+      .select('*')
+      .eq('user_id', userId)
+      .order('updated_at', { ascending: false });
+    
+    if (chatsError) throw chatsError;
+    if (!chats || chats.length === 0) return [];
+
+    // Get message counts and last messages for each chat
+    const chatIds = chats.map(c => c.id);
+    const { data: messages, error: messagesError } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .in('chat_id', chatIds)
+      .order('created_at', { ascending: false });
+    
+    if (messagesError) throw messagesError;
+
+    // Group messages by chat_id
+    const messagesByChat = (messages || []).reduce((acc, msg) => {
+      if (!acc[msg.chat_id!]) acc[msg.chat_id!] = [];
+      acc[msg.chat_id!].push(msg);
+      return acc;
+    }, {} as Record<string, ChatMessage[]>);
+
+    return chats.map(chat => ({
+      ...chat,
+      messages: (messagesByChat[chat.id] || []).reverse(),
+      messageCount: (messagesByChat[chat.id] || []).length,
+      lastMessage: messagesByChat[chat.id]?.[0],
+    }));
+  },
+
+  // Create a new chat
+  async create(userId: string, title?: string): Promise<Chat> {
+    const { data, error } = await supabase
+      .from('chats')
+      .insert({ user_id: userId, title: title || 'New Chat' })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  // Update chat title
+  async updateTitle(chatId: string, title: string): Promise<Chat> {
+    const { data, error } = await supabase
+      .from('chats')
+      .update({ title, updated_at: new Date().toISOString() })
+      .eq('id', chatId)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  // Delete a chat (cascade deletes messages)
+  async delete(chatId: string): Promise<void> {
+    const { error } = await supabase
+      .from('chats')
+      .delete()
+      .eq('id', chatId);
+    
+    if (error) throw error;
+  },
+
+  // Get single chat with messages
+  async getWithMessages(chatId: string): Promise<ChatWithMessages | null> {
+    const { data: chat, error: chatError } = await supabase
+      .from('chats')
+      .select('*')
+      .eq('id', chatId)
+      .single();
+    
+    if (chatError) throw chatError;
+    if (!chat) return null;
+
+    const { data: messages, error: messagesError } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
+    
+    if (messagesError) throw messagesError;
+
+    return {
+      ...chat,
+      messages: messages || [],
+      messageCount: (messages || []).length,
+      lastMessage: messages?.[messages.length - 1],
+    };
+  },
+};
+
 export const chatApi = {
-  async getMessages(userId: string): Promise<ChatMessage[]> {
+  // Get messages for a specific chat
+  async getMessages(chatId: string): Promise<ChatMessage[]> {
+    const { data, error } = await supabase
+      .from('chat_messages')
+      .select('*')
+      .eq('chat_id', chatId)
+      .order('created_at', { ascending: true });
+    
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Legacy: Get all messages for a user (for backward compatibility)
+  async getAllUserMessages(userId: string): Promise<ChatMessage[]> {
     const { data, error } = await supabase
       .from('chat_messages')
       .select('*')
@@ -204,15 +320,31 @@ export const chatApi = {
     return data || [];
   },
 
-  async addMessage(userId: string, role: 'user' | 'assistant', content: string): Promise<ChatMessage> {
+  async addMessage(userId: string, chatId: string, role: 'user' | 'assistant', content: string): Promise<ChatMessage> {
     const { data, error } = await supabase
       .from('chat_messages')
-      .insert({ user_id: userId, role, content })
+      .insert({ user_id: userId, chat_id: chatId, role, content })
       .select()
       .single();
     
     if (error) throw error;
+
+    // Update chat's updated_at timestamp
+    await supabase
+      .from('chats')
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', chatId);
+    
     return data;
+  },
+
+  async clearMessages(chatId: string): Promise<void> {
+    const { error } = await supabase
+      .from('chat_messages')
+      .delete()
+      .eq('chat_id', chatId);
+    
+    if (error) throw error;
   },
 };
 
@@ -295,14 +427,67 @@ export const marketApi = {
   },
 };
 
+// Experience level type
+type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
+
+// Generate system prompt based on user's experience level
+function getSystemPrompt(experienceLevel: ExperienceLevel): string {
+  const baseRules = `
+IMPORTANT RULES:
+1. You are ONLY allowed to discuss topics related to finance, investing, trading, economics, personal finance, and money management.
+2. If the user asks about anything unrelated to finance (e.g., cooking, sports, entertainment, general knowledge, coding, etc.), politely decline and redirect them to ask a finance-related question instead.
+3. Always remind users that this is educational content and they should consult with licensed financial advisors for specific investment decisions.
+4. Never provide specific buy/sell recommendations for individual securities.
+`;
+
+  switch (experienceLevel) {
+    case 'beginner':
+      return `You are a patient and encouraging Financial Teacher for beginners. Your role is to:
+- Explain financial concepts in simple, everyday language
+- Use relatable analogies and real-world examples
+- Break down complex topics into digestible pieces
+- Avoid jargon, or explain it clearly when necessary
+- Encourage questions and celebrate learning progress
+- Start with foundational concepts before building to more complex ideas
+- Use a warm, supportive tone like a friendly mentor
+${baseRules}`;
+
+    case 'intermediate':
+      return `You are a knowledgeable Financial Advisor for intermediate-level investors. Your role is to:
+- Assume familiarity with basic concepts (stocks, bonds, ETFs, diversification)
+- Discuss more nuanced strategies and market dynamics
+- Introduce intermediate concepts like options basics, sector analysis, and portfolio rebalancing
+- Provide balanced perspectives on different investment approaches
+- Use some technical terminology while still being clear
+- Encourage deeper exploration of topics they're interested in
+${baseRules}`;
+
+    case 'advanced':
+      return `You are an expert-level Financial Advisor for sophisticated investors. Your role is to:
+- Engage in technical discussions about complex financial instruments
+- Discuss advanced strategies: derivatives, hedging, arbitrage, quantitative analysis
+- Reference academic research and market microstructure when relevant
+- Assume strong familiarity with financial metrics, ratios, and analysis methods
+- Discuss macroeconomic factors and their market implications
+- Provide nuanced analysis without oversimplifying
+${baseRules}`;
+
+    default:
+      return `You are a helpful and knowledgeable AI Financial Advisor. Adapt your explanations to the user's apparent level of understanding. Be clear, educational, and provide practical advice.
+${baseRules}`;
+  }
+}
+
 // Python Backend API endpoint helpers
 // These can be configured to call your Python backend for AI responses, live market data, etc.
 export const pythonApi = {
   // Call OpenAI directly for AI chat response
   // Using gpt-4o-mini - best cost/performance model (cheapest while still being very capable)
-  async getChatResponse(message: string, userId: string): Promise<string> {
+  async getChatResponse(message: string, userId: string, experienceLevel?: ExperienceLevel): Promise<string> {
     const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
     const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
+    
+    const systemPrompt = getSystemPrompt(experienceLevel ?? null);
     
     // Option 1: Use OpenAI directly if API key is set
     if (openaiApiKey) {
@@ -314,11 +499,11 @@ export const pythonApi = {
             'Authorization': `Bearer ${openaiApiKey}`,
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini', // Best cost/performance model - cheapest while still very capable
+            model: 'gpt-4o-mini',
             messages: [
               {
                 role: 'system',
-                content: 'You are a helpful and knowledgeable AI Financial Advisor. You help users learn about investing, trading strategies, market concepts, and personal finance. Be clear, educational, and provide practical advice while always reminding users to do their own research and consult with licensed financial advisors for specific investment advice.'
+                content: systemPrompt
               },
               {
                 role: 'user',
@@ -326,7 +511,7 @@ export const pythonApi = {
               }
             ],
             temperature: 0.7,
-            max_tokens: 500,
+            max_tokens: 400, // Reduced for shorter, more focused responses
           }),
         });
         
@@ -337,7 +522,7 @@ export const pythonApi = {
         
         const data = await response.json();
         return data.choices[0]?.message?.content || 'I apologize, but I encountered an error processing your request.';
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error('Error calling OpenAI API:', error);
         // Fallback to Python backend if configured
         if (pythonBackendUrl) {
@@ -354,6 +539,52 @@ export const pythonApi = {
     
     // Option 3: Fallback response if neither is configured
     return 'I apologize, but the AI service is not configured. Please set VITE_OPENAI_API_KEY in your .env file or configure a Python backend.';
+  },
+
+  // Generate a short title for a chat based on the first user message
+  async generateChatTitle(firstMessage: string): Promise<string> {
+    const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
+    
+    if (!openaiApiKey) {
+      // Fallback: use first 30 chars of message
+      return firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
+    }
+
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openaiApiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: 'Generate a short, concise title (3-6 words max) for this chat conversation about finance. Only return the title, nothing else.'
+            },
+            {
+              role: 'user',
+              content: `First message: "${firstMessage}"`
+            }
+          ],
+          temperature: 0.5,
+          max_tokens: 20,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to generate title');
+      }
+
+      const data = await response.json();
+      const title = data.choices[0]?.message?.content?.trim();
+      return title || firstMessage.substring(0, 30);
+    } catch (error) {
+      console.error('Error generating chat title:', error);
+      return firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
+    }
   },
 
   // Helper method for Python backend (if using that instead)

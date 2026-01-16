@@ -15,6 +15,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/error";
 import { SupabaseConnectionTest } from "@/utils/test-connection";
 
 interface User {
@@ -45,11 +46,11 @@ export default function Admin() {
 
       if (error) throw error;
       setUsers(data || []);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error fetching users:", error);
       toast({
         title: "Error",
-        description: "Failed to load users",
+        description: getErrorMessage(error) || "Failed to load users",
         variant: "destructive",
       });
     } finally {
@@ -73,11 +74,11 @@ export default function Admin() {
 
       // Refresh users list
       fetchUsers();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error updating admin status:", error);
       toast({
         title: "Error",
-        description: "Failed to update admin status",
+        description: getErrorMessage(error) || "Failed to update admin status",
         variant: "destructive",
       });
     }

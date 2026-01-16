@@ -17,6 +17,7 @@ import { useTradeJournal, useCreateJournalEntry } from "@/hooks/use-data";
 import { format, parseISO } from "date-fns";
 import { useForm, Controller } from "react-hook-form";
 import { toast } from "@/hooks/use-toast";
+import { getErrorMessage } from "@/lib/error";
 
 interface JournalFormData {
   symbol: string;
@@ -64,10 +65,10 @@ export function TradeJournal() {
 
       reset();
       setShowForm(false);
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: "Error",
-        description: error.message || "Failed to create journal entry",
+        description: getErrorMessage(error) || "Failed to create journal entry",
         variant: "destructive",
       });
     }
