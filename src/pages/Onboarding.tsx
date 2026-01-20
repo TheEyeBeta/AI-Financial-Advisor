@@ -121,6 +121,8 @@ const Onboarding = () => {
         .from("users")
         .update({
           age: parseInt(answers.age, 10),
+          marital_status: answers.maritalStatus,
+          investment_goal: answers.goal,
           risk_level: calculatedRiskLevel,
           onboarding_complete: true,
           updated_at: new Date().toISOString(),
