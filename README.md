@@ -1,4 +1,4 @@
-# FinanceAI - AI Financial Advisor
+# Financial Advisor
 
 An AI-powered financial education platform with paper trading capabilities.
 

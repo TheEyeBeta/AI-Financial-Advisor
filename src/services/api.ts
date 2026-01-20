@@ -594,7 +594,7 @@ ${baseRules}`;
 ${baseRules}`;
 
     default:
-      return `You are a helpful and knowledgeable AI Financial Advisor. Adapt your explanations to the user's apparent level of understanding. Be clear, educational, and provide practical advice.
+      return `You are a helpful and knowledgeable Financial Advisor. Adapt your explanations to the user's apparent level of understanding. Be clear, educational, and provide practical advice.
 ${baseRules}`;
   }
 }

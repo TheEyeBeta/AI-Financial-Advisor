@@ -115,7 +115,7 @@ const Advisor = () => {
   const isLoading = chatsLoading || chatLoading || sendMessageMutation.isPending || createChatMutation.isPending;
 
   return (
-    <AppLayout title="AI Financial Advisor">
+    <AppLayout title="Financial Advisor">
       <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-4xl w-full flex-col">
         {showTopics && displayMessages.length <= 1 && (
           <SuggestedTopics onSelectTopic={handleTopicSelect} />
@@ -140,7 +140,7 @@ function getWelcomeMessage(
   
   switch (experienceLevel) {
     case 'beginner':
-      return `${greeting} I'm your AI Financial Teacher, and I'm here to help you start your financial journey! 🎓
+      return `${greeting} I'm your Financial Advisor, and I'm here to help you start your financial journey! 🎓
 
 I'll explain everything in simple terms and make sure you understand each concept before moving forward. Here's what I can help you with:
 
@@ -153,7 +153,7 @@ I'll explain everything in simple terms and make sure you understand each concep
 Don't worry if something seems confusing - just ask me to explain it differently! What would you like to learn about first?`;
 
     case 'intermediate':
-      return `${greeting} I'm your AI Financial Advisor, ready to help you take your investing knowledge to the next level! 📈
+      return `${greeting} I'm your Financial Advisor, ready to help you take your investing knowledge to the next level! 📈
 
 I'll assume you know the basics and dive into more nuanced strategies and concepts. Here's how I can help:
 
@@ -166,7 +166,7 @@ I'll assume you know the basics and dive into more nuanced strategies and concep
 What area would you like to explore or improve?`;
 
     case 'advanced':
-      return `${greeting} I'm your AI Financial Advisor, here to engage in sophisticated financial discussions! 💼
+      return `${greeting} I'm your Financial Advisor, here to engage in sophisticated financial discussions! 💼
 
 I'll discuss complex strategies and advanced concepts with you. Here's what we can dive into:
 
@@ -179,7 +179,7 @@ I'll discuss complex strategies and advanced concepts with you. Here's what we c
 What complex topic or strategy would you like to analyze?`;
 
     default:
-      return `${greeting} I'm your AI Financial Advisor. I can help you learn about:
+      return `${greeting} I'm your Financial Advisor. I can help you learn about:
 
 • **Investing basics** - stocks, bonds, ETFs, mutual funds
 • **Portfolio building** - diversification and asset allocation

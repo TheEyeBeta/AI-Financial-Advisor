@@ -110,7 +110,7 @@ const ChatHistory = () => {
               <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No chat history yet</h3>
               <p className="text-muted-foreground text-center mb-4">
-                Start a conversation with your AI Financial Advisor to see your history here.
+                Start a conversation with your Financial Advisor to see your history here.
               </p>
               <Button onClick={() => navigate('/advisor')}>
                 Start Chatting
