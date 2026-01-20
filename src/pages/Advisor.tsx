@@ -108,7 +108,7 @@ const Advisor = () => {
   const displayMessages = chatMessages.length === 0 
     ? [{
         role: "assistant" as const,
-        content: getWelcomeMessage(userProfile?.first_name),
+        content: getWelcomeMessage(userProfile?.first_name, userProfile?.experience_level),
       }]
     : chatMessages;
 
@@ -132,9 +132,54 @@ const Advisor = () => {
   );
 };
 
-function getWelcomeMessage(firstName?: string | null): string {
+function getWelcomeMessage(
+  firstName?: string | null,
+  experienceLevel?: 'beginner' | 'intermediate' | 'advanced' | null
+): string {
   const greeting = firstName ? `Hello ${firstName}!` : "Hello!";
-  return `${greeting} I'm your AI Financial Advisor. I can help you learn about:
+  
+  switch (experienceLevel) {
+    case 'beginner':
+      return `${greeting} I'm your AI Financial Teacher, and I'm here to help you start your financial journey! 🎓
+
+I'll explain everything in simple terms and make sure you understand each concept before moving forward. Here's what I can help you with:
+
+• **Getting Started** - What is investing? How does the stock market work?
+• **Basic Concepts** - Stocks, bonds, ETFs, and how they differ
+• **Building Your First Portfolio** - Simple strategies to get started
+• **Saving for the Future** - Retirement accounts, compound interest basics
+• **Understanding Risk** - How to protect your money while growing it
+
+Don't worry if something seems confusing - just ask me to explain it differently! What would you like to learn about first?`;
+
+    case 'intermediate':
+      return `${greeting} I'm your AI Financial Advisor, ready to help you take your investing knowledge to the next level! 📈
+
+I'll assume you know the basics and dive into more nuanced strategies and concepts. Here's how I can help:
+
+• **Advanced Portfolio Strategies** - Sector analysis, rebalancing, tax optimization
+• **Options & Derivatives** - Understanding options basics and when to use them
+• **Market Dynamics** - Technical analysis, market cycles, economic indicators
+• **Risk Management** - Hedging strategies, position sizing, stop losses
+• **Performance Analysis** - Evaluating your trades and improving your strategy
+
+What area would you like to explore or improve?`;
+
+    case 'advanced':
+      return `${greeting} I'm your AI Financial Advisor, here to engage in sophisticated financial discussions! 💼
+
+I'll discuss complex strategies and advanced concepts with you. Here's what we can dive into:
+
+• **Advanced Strategies** - Derivatives, arbitrage, quantitative analysis, algorithmic trading
+• **Market Microstructure** - Order flow, liquidity, execution strategies
+• **Portfolio Optimization** - Modern portfolio theory, factor investing, risk parity
+• **Macro Analysis** - Economic indicators, central bank policy, global markets
+• **Performance Metrics** - Sharpe ratio, Sortino ratio, alpha generation, risk-adjusted returns
+
+What complex topic or strategy would you like to analyze?`;
+
+    default:
+      return `${greeting} I'm your AI Financial Advisor. I can help you learn about:
 
 • **Investing basics** - stocks, bonds, ETFs, mutual funds
 • **Portfolio building** - diversification and asset allocation
@@ -143,6 +188,7 @@ function getWelcomeMessage(firstName?: string | null): string {
 • **Market analysis** - understanding trends and indicators
 
 What would you like to explore today?`;
+  }
 }
 
 export default Advisor;

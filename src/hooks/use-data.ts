@@ -10,13 +10,16 @@ import {
   learningApi,
   achievementsApi,
   marketApi,
+  newsApi,
   pythonApi,
+  eyeApi,
 } from '@/services/api';
 import type {
   OpenPosition,
   Trade,
   TradeJournalEntry,
   LearningTopic,
+  EyeSnapshot,
 } from '@/types/database';
 
 // Portfolio hooks
@@ -61,7 +64,11 @@ export function useDeletePosition() {
   return useMutation({
     mutationFn: (id: string) => positionsApi.delete(id),
     onSuccess: () => {
+      // Invalidate all related queries so all components refresh
       queryClient.invalidateQueries({ queryKey: ['open-positions', userId] });
+      queryClient.invalidateQueries({ queryKey: ['trades', userId] });
+      queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
     },
   });
 }
@@ -113,10 +120,15 @@ export function useCreateJournalEntry() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: (entry: Omit<TradeJournalEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'trade_id'>) =>
+    mutationFn: (entry: Omit<TradeJournalEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'trade_id'> & { trade_id?: string | null }) =>
       journalApi.create(userId!, entry),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['trade-journal', userId] });
+      // Invalidate related queries so all components refresh
+      queryClient.invalidateQueries({ queryKey: ['open-positions', userId] });
+      queryClient.invalidateQueries({ queryKey: ['trades', userId] });
+      queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
     },
   });
 }
@@ -184,9 +196,38 @@ export function useSendChatMessage() {
       // Save user message
       await chatApi.addMessage(userId, chatId, 'user', message);
       
-      // Get AI response with user's experience level
+      // Fetch conversation history for context
+      const history = await chatApi.getMessages(chatId);
+      const chatHistory = history.map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content
+      }));
+      
+      // Check if message contains quantitative keywords that might need The Eye data
+      const quantitativeKeywords = [
+        'portfolio', 'performance', 'profit', 'loss', 'pnl', 'win rate', 'trades', 
+        'positions', 'statistics', 'metrics', 'return', 'equity', 'value', 
+        'how much', 'how many', 'what is my', 'show me my', 'analyze my', 'the eye', 'eye'
+      ];
+      const needsEyeData = quantitativeKeywords.some(keyword => 
+        message.toLowerCase().includes(keyword)
+      );
+      
+      // Fetch The Eye snapshot if needed (only if user has connected The Eye)
+      let eyeSnapshot = null;
+      if (needsEyeData) {
+        try {
+          // Get the latest active snapshot from The Eye
+          eyeSnapshot = await eyeApi.getLatestSnapshot(userId);
+        } catch (error) {
+          console.error('Error fetching The Eye snapshot for AI:', error);
+          // Continue without The Eye data - AI will inform user
+        }
+      }
+      
+      // Get AI response with user's experience level, conversation history, and The Eye snapshot
       const experienceLevel = userProfile?.experience_level ?? null;
-      const aiResponse = await pythonApi.getChatResponse(message, userId, experienceLevel);
+      const aiResponse = await pythonApi.getChatResponse(message, userId, experienceLevel, chatHistory, eyeSnapshot);
       
       // Save AI response
       await chatApi.addMessage(userId, chatId, 'assistant', aiResponse);
@@ -289,6 +330,102 @@ export function useTrendingStocks() {
     queryFn: () => marketApi.getTrendingStocks(),
     refetchInterval: 60000, // Refetch every minute
     staleTime: 30000, // Consider data fresh for 30 seconds
+  });
+}
+
+// News hooks
+export function useLatestNews(limit: number = 5) {
+  return useQuery({
+    queryKey: ['news-articles', limit],
+    queryFn: () => newsApi.getLatest(limit),
+    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
+    staleTime: 2 * 60 * 1000, // Consider data fresh for 2 minutes
+  });
+}
+
+export function useAllNews() {
+  return useQuery({
+    queryKey: ['news-articles', 'all'],
+    queryFn: () => newsApi.getAll(),
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
+// The Eye API hooks
+export function useEyeSnapshot() {
+  const { userId } = useAuth();
+  
+  return useQuery({
+    queryKey: ['eye-snapshot', userId],
+    queryFn: () => eyeApi.getLatestSnapshot(userId!),
+    enabled: !!userId,
+  });
+}
+
+export function useEyeSnapshots() {
+  const { userId } = useAuth();
+  
+  return useQuery({
+    queryKey: ['eye-snapshots', userId],
+    queryFn: () => eyeApi.getAllSnapshots(userId!),
+    enabled: !!userId,
+  });
+}
+
+export function useCreateEyeSnapshot() {
+  const { userId } = useAuth();
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (snapshot: Omit<EyeSnapshot, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
+      snapshot_name?: string | null;
+      is_latest?: boolean;
+    }) => eyeApi.createSnapshot(userId!, snapshot),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
+    },
+  });
+}
+
+export function useUpdateEyeSnapshot() {
+  const { userId } = useAuth();
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ id, updates }: { id: string; updates: Partial<EyeSnapshot> }) =>
+      eyeApi.updateSnapshot(id, updates),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
+    },
+  });
+}
+
+export function useDeleteEyeSnapshot() {
+  const { userId } = useAuth();
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (id: string) => eyeApi.deleteSnapshot(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
+    },
+  });
+}
+
+export function useDisconnectEye() {
+  const { userId } = useAuth();
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: () => eyeApi.deactivateAll(userId!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
+      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
+    },
   });
 }
 

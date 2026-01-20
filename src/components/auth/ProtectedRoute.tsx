@@ -9,11 +9,11 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requireVerification = false }: ProtectedRouteProps) {
-  const { user, loading, isAuthenticated } = useAuth();
+  const { user, loading, isAuthenticated, userProfile, profileLoading } = useAuth();
   const location = useLocation();
 
   // Only show loading on initial auth check, not during navigation
-  if (loading) {
+  if (loading || profileLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center space-y-4">
@@ -27,6 +27,28 @@ export function ProtectedRoute({ children, requireVerification = false }: Protec
   if (!isAuthenticated) {
     // Redirect to landing page if not authenticated
     return <Navigate to="/" replace state={{ from: location }} />;
+  }
+
+  // Check if user needs to complete onboarding
+  // Skip onboarding check for admins
+  // Only check if we're not already on the onboarding page
+  if (
+    userProfile && 
+    !userProfile.onboarding_complete && 
+    userProfile.userType !== "Admin" &&
+    location.pathname !== "/onboarding"
+  ) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
+  // If user is on onboarding page but has already completed it, redirect to main page
+  if (userProfile && userProfile.onboarding_complete && location.pathname === "/onboarding") {
+    return <Navigate to="/advisor" replace />;
+  }
+
+  // If admin tries to access onboarding, redirect to admin page
+  if (userProfile && userProfile.userType === "Admin" && location.pathname === "/onboarding") {
+    return <Navigate to="/admin" replace />;
   }
 
   // Render children immediately - don't wait for profile to load

@@ -13,7 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useTradeJournal, useCreateJournalEntry } from "@/hooks/use-data";
+import { useTradeJournal, useCreateJournalEntry, useOpenPositions, useCreatePosition } from "@/hooks/use-data";
+import { positionsApi, tradesApi } from "@/services/api";
+import { useAuth } from "@/hooks/use-auth";
 import { format, parseISO } from "date-fns";
 import { useForm, Controller } from "react-hook-form";
 import { toast } from "@/hooks/use-toast";
@@ -32,7 +34,10 @@ interface JournalFormData {
 
 export function TradeJournal() {
   const { data: journalEntries = [], isLoading } = useTradeJournal();
+  const { data: openPositions = [] } = useOpenPositions();
   const createEntry = useCreateJournalEntry();
+  const createPosition = useCreatePosition();
+  const { userId } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<JournalFormData>({
     defaultValues: {
@@ -42,13 +47,106 @@ export function TradeJournal() {
   });
 
   const onSubmit = async (data: JournalFormData) => {
+    if (!userId) {
+      toast({
+        title: "Error",
+        description: "User not authenticated",
+        variant: "destructive",
+      });
+      return;
+    }
+
     try {
       const tags = data.tags
         ? data.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
         : [];
 
+      const symbol = data.symbol.toUpperCase();
+      let tradeId: string | null = null;
+      let positionId: string | null = null;
+
+      // If BUY, create an open position
+      if (data.type === 'BUY') {
+        const position = await positionsApi.create(userId, {
+          symbol,
+          name: symbol, // Can be enhanced with stock name lookup
+          quantity: data.quantity,
+          entry_price: data.price,
+          current_price: data.price,
+          type: 'LONG', // Default to LONG, can add SHORT option later
+          entry_date: new Date(data.date).toISOString(),
+        });
+        positionId = position.id;
+
+        // Also create a trade record for OPENED action
+        const trade = await tradesApi.create(userId, {
+          symbol,
+          type: 'LONG',
+          action: 'OPENED',
+          quantity: data.quantity,
+          entry_price: data.price,
+          exit_price: null,
+          entry_date: new Date(data.date).toISOString(),
+          exit_date: null,
+          pnl: null,
+        });
+        tradeId = trade.id;
+      } 
+      // If SELL, try to close an existing position or create a closed trade
+      else if (data.type === 'SELL') {
+        // Find matching open position for this symbol
+        const matchingPosition = openPositions.find(
+          pos => pos.symbol === symbol && pos.type === 'LONG'
+        );
+
+        if (matchingPosition) {
+          // Calculate P&L
+          const pnl = (data.price - matchingPosition.entry_price) * Math.min(data.quantity, matchingPosition.quantity);
+          
+          // Create closed trade record
+          const trade = await tradesApi.create(userId, {
+            symbol,
+            type: 'LONG',
+            action: 'CLOSED',
+            quantity: Math.min(data.quantity, matchingPosition.quantity),
+            entry_price: matchingPosition.entry_price,
+            exit_price: data.price,
+            entry_date: matchingPosition.entry_date,
+            exit_date: new Date(data.date).toISOString(),
+            pnl,
+          });
+          tradeId = trade.id;
+
+          // Update or delete the open position
+          if (data.quantity >= matchingPosition.quantity) {
+            // Close entire position
+            await positionsApi.delete(matchingPosition.id);
+          } else {
+            // Partial close - reduce quantity
+            await positionsApi.update(matchingPosition.id, {
+              quantity: matchingPosition.quantity - data.quantity,
+            });
+          }
+        } else {
+          // No matching position, create a closed trade directly
+          const trade = await tradesApi.create(userId, {
+            symbol,
+            type: 'LONG',
+            action: 'CLOSED',
+            quantity: data.quantity,
+            entry_price: data.price, // Use sell price as entry if no position found
+            exit_price: data.price,
+            entry_date: new Date(data.date).toISOString(),
+            exit_date: new Date(data.date).toISOString(),
+            pnl: 0, // No P&L if we don't have entry price
+          });
+          tradeId = trade.id;
+        }
+      }
+
+      // Create journal entry linked to the trade/position
       await createEntry.mutateAsync({
-        symbol: data.symbol.toUpperCase(),
+        symbol,
         type: data.type,
         date: data.date,
         quantity: data.quantity,
@@ -56,11 +154,14 @@ export function TradeJournal() {
         strategy: data.strategy || null,
         notes: data.notes || null,
         tags: tags.length > 0 ? tags : null,
+        trade_id: tradeId,
       });
 
       toast({
         title: "Success",
-        description: "Trade journal entry created successfully!",
+        description: data.type === 'BUY' 
+          ? "Position opened and journal entry created!" 
+          : "Position closed and journal entry created!",
       });
 
       reset();
@@ -68,7 +169,7 @@ export function TradeJournal() {
     } catch (error: unknown) {
       toast({
         title: "Error",
-        description: getErrorMessage(error) || "Failed to create journal entry",
+        description: getErrorMessage(error) || "Failed to create trade",
         variant: "destructive",
       });
     }

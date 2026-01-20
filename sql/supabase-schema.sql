@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS public.users (
     is_verified BOOLEAN DEFAULT FALSE,
     email_verified_at TIMESTAMPTZ,
     userType type_of_user NOT NULL DEFAULT 'User',
+    onboarding_complete BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -147,6 +148,18 @@ CREATE TABLE IF NOT EXISTS public.trending_stocks (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- News Articles (Financial news - can be populated by Python backend)
+CREATE TABLE IF NOT EXISTS public.news_articles (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    link TEXT NOT NULL,
+    source TEXT,
+    published_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_users_auth_id ON public.users(auth_id);
 CREATE INDEX IF NOT EXISTS idx_chats_user_id ON public.chats(user_id);
@@ -158,6 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_open_positions_user ON public.open_positions(user
 CREATE INDEX IF NOT EXISTS idx_trades_user ON public.trades(user_id, exit_date DESC);
 CREATE INDEX IF NOT EXISTS idx_trade_journal_user ON public.trade_journal(user_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_learning_topics_user ON public.learning_topics(user_id);
+CREATE INDEX IF NOT EXISTS idx_news_articles_published_at ON public.news_articles(published_at DESC);
 
 -- Row Level Security (RLS)
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -169,6 +183,7 @@ ALTER TABLE public.trades ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trade_journal ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_topics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.achievements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.news_articles ENABLE ROW LEVEL SECURITY;
 
 -- RLS Policies (using auth_id for user lookup)
 
@@ -266,6 +281,10 @@ CREATE POLICY "Anyone can view market indices" ON public.market_indices
 CREATE POLICY "Anyone can view trending stocks" ON public.trending_stocks
     FOR SELECT TO authenticated USING (true);
 
+-- News articles are public read
+CREATE POLICY "Anyone can view news articles" ON public.news_articles
+    FOR SELECT TO authenticated USING (true);
+
 -- Trigger function for updated_at
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -298,7 +317,7 @@ CREATE TRIGGER update_learning_topics_updated_at BEFORE UPDATE ON public.learnin
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.users (auth_id, first_name, last_name, age, email, experience_level, risk_level, is_verified, email_verified_at)
+    INSERT INTO public.users (auth_id, first_name, last_name, age, email, experience_level, risk_level, is_verified, email_verified_at, onboarding_complete)
     VALUES (
         NEW.id,
         COALESCE((NEW.raw_user_meta_data->>'first_name')::TEXT, NULL),
@@ -308,7 +327,8 @@ BEGIN
         COALESCE((NEW.raw_user_meta_data->>'experience_level')::experience_level_enum, 'beginner'),
         COALESCE((NEW.raw_user_meta_data->>'risk_level')::risk_level_enum, 'mid'),
         COALESCE(NEW.email_confirmed_at IS NOT NULL, false),
-        NEW.email_confirmed_at
+        NEW.email_confirmed_at,
+        FALSE  -- New users must complete onboarding
     )
     ON CONFLICT (auth_id) DO UPDATE SET
         email = COALESCE(EXCLUDED.email, public.users.email),

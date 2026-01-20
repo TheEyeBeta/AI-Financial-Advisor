@@ -8,8 +8,12 @@ import Advisor from "./pages/Advisor";
 import ChatHistory from "./pages/ChatHistory";
 import Dashboard from "./pages/Dashboard";
 import PaperTrading from "./pages/PaperTrading";
+import News from "./pages/News";
+import Profile from "./pages/Profile";
+import Onboarding from "./pages/Onboarding";
 import Admin from "./pages/Admin";
 import AuthCallback from "./pages/AuthCallback";
+import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { AdminRoute } from "./components/auth/AdminRoute";
@@ -27,6 +31,16 @@ const App = () => (
           <Routes>
             {/* Landing page - shows when not authenticated */}
             <Route path="/" element={<Landing />} />
+            
+            {/* Onboarding - must be before other protected routes */}
+            <Route
+              path="/onboarding"
+              element={
+                <ProtectedRoute>
+                  <Onboarding />
+                </ProtectedRoute>
+              }
+            />
             
             {/* Protected routes - require authentication */}
             <Route
@@ -62,6 +76,22 @@ const App = () => (
               }
             />
             <Route
+              path="/news"
+              element={
+                <ProtectedRoute>
+                  <News />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/admin"
               element={
                 <AdminRoute>
@@ -72,6 +102,7 @@ const App = () => (
             
             {/* OAuth callback - public */}
             <Route path="/auth/callback" element={<AuthCallback />} />
+            <Route path="/auth/reset-password" element={<ResetPassword />} />
             
             {/* 404 */}
             <Route path="*" element={<NotFound />} />

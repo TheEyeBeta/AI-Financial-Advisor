@@ -6,43 +6,49 @@ export interface Database {
       users: {
         Row: {
           id: string;
+          auth_id: string;
           first_name: string | null;
           last_name: string | null;
           age: number | null;
           email: string | null;
-          experience_level: 'beginner' | 'intermediate' | 'advanced';
-          risk_level: 'low' | 'mid' | 'high' | 'very_high';
-          is_verified: boolean;
+          experience_level: 'beginner' | 'intermediate' | 'advanced' | null;
+          risk_level: 'low' | 'mid' | 'high' | 'very_high' | null;
+          is_verified: boolean | null;
           email_verified_at: string | null;
-          is_admin: boolean;
+          userType: 'User' | 'Admin';
+          onboarding_complete: boolean | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
-          id: string;
+          id?: string;
+          auth_id: string;
           first_name?: string | null;
           last_name?: string | null;
           age?: number | null;
           email?: string | null;
-          experience_level?: 'beginner' | 'intermediate' | 'advanced';
-          risk_level?: 'low' | 'mid' | 'high' | 'very_high';
-          is_verified?: boolean;
+          experience_level?: 'beginner' | 'intermediate' | 'advanced' | null;
+          risk_level?: 'low' | 'mid' | 'high' | 'very_high' | null;
+          is_verified?: boolean | null;
           email_verified_at?: string | null;
-          is_admin?: boolean;
+          userType?: 'User' | 'Admin';
+          onboarding_complete?: boolean | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           id?: string;
+          auth_id?: string;
           first_name?: string | null;
           last_name?: string | null;
           age?: number | null;
           email?: string | null;
-          experience_level?: 'beginner' | 'intermediate' | 'advanced';
-          risk_level?: 'low' | 'mid' | 'high' | 'very_high';
-          is_verified?: boolean;
+          experience_level?: 'beginner' | 'intermediate' | 'advanced' | null;
+          risk_level?: 'low' | 'mid' | 'high' | 'very_high' | null;
+          is_verified?: boolean | null;
           email_verified_at?: string | null;
-          is_admin?: boolean;
+          userType?: 'User' | 'Admin';
+          onboarding_complete?: boolean | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -358,6 +364,38 @@ export interface Database {
           updated_at?: string;
         };
       };
+      news_articles: {
+        Row: {
+          id: string;
+          title: string;
+          summary: string;
+          link: string;
+          source: string | null;
+          published_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          summary: string;
+          link: string;
+          source?: string | null;
+          published_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          title?: string;
+          summary?: string;
+          link?: string;
+          source?: string | null;
+          published_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
     };
   };
 }
@@ -373,6 +411,8 @@ export type LearningTopic = Database['public']['Tables']['learning_topics']['Row
 export type Achievement = Database['public']['Tables']['achievements']['Row'];
 export type MarketIndex = Database['public']['Tables']['market_indices']['Row'];
 export type TrendingStock = Database['public']['Tables']['trending_stocks']['Row'];
+export type NewsArticle = Database['public']['Tables']['news_articles']['Row'];
+export type EyeSnapshot = Database['public']['Tables']['eye_snapshots']['Row'];
 
 // Extended types with relations
 export interface ChatWithMessages extends Chat {

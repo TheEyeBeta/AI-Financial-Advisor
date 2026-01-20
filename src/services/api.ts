@@ -11,6 +11,8 @@ import type {
   Achievement,
   MarketIndex,
   TrendingStock,
+  NewsArticle,
+  EyeSnapshot,
 } from '@/types/database';
 
 // Portfolio API
@@ -160,7 +162,7 @@ export const journalApi = {
     return data || [];
   },
 
-  async create(userId: string, entry: Omit<TradeJournalEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'trade_id'>): Promise<TradeJournalEntry> {
+  async create(userId: string, entry: Omit<TradeJournalEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'trade_id'> & { trade_id?: string | null }): Promise<TradeJournalEntry> {
     const { data, error } = await supabase
       .from('trade_journal')
       .insert({ ...entry, user_id: userId })
@@ -427,17 +429,136 @@ export const marketApi = {
   },
 };
 
+// News API - for financial news articles
+export const newsApi = {
+  async getLatest(limit: number = 5): Promise<NewsArticle[]> {
+    const { data, error } = await supabase
+      .from('news_articles')
+      .select('*')
+      .order('published_at', { ascending: false })
+      .limit(limit);
+    
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getAll(): Promise<NewsArticle[]> {
+    const { data, error } = await supabase
+      .from('news_articles')
+      .select('*')
+      .order('published_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  },
+};
+
+// The Eye Trade Engine API - for storing and retrieving snapshots from The Eye
+export const eyeApi = {
+  // Get the latest active snapshot for a user
+  async getLatestSnapshot(userId: string): Promise<EyeSnapshot | null> {
+    const { data, error } = await supabase
+      .from('eye_snapshots')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('is_latest', true)
+      .eq('is_active', true)
+      .order('snapshot_date', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  // Get all snapshots for a user
+  async getAllSnapshots(userId: string): Promise<EyeSnapshot[]> {
+    const { data, error } = await supabase
+      .from('eye_snapshots')
+      .select('*')
+      .eq('user_id', userId)
+      .order('snapshot_date', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Create a new snapshot from The Eye data
+  async createSnapshot(
+    userId: string,
+    snapshot: Omit<EyeSnapshot, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
+      snapshot_name?: string | null;
+      is_latest?: boolean;
+    }
+  ): Promise<EyeSnapshot> {
+    const { data, error } = await supabase
+      .from('eye_snapshots')
+      .insert({
+        ...snapshot,
+        user_id: userId,
+        is_latest: snapshot.is_latest ?? true, // Default to latest
+      })
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  // Update a snapshot
+  async updateSnapshot(id: string, updates: Partial<EyeSnapshot>): Promise<EyeSnapshot> {
+    const { data, error } = await supabase
+      .from('eye_snapshots')
+      .update({ ...updates, updated_at: new Date().toISOString() })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  // Delete a snapshot
+  async deleteSnapshot(id: string): Promise<void> {
+    const { error } = await supabase
+      .from('eye_snapshots')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+  },
+
+  // Deactivate all snapshots for a user (disconnect The Eye)
+  async deactivateAll(userId: string): Promise<void> {
+    const { error } = await supabase
+      .from('eye_snapshots')
+      .update({ is_active: false, is_latest: false })
+      .eq('user_id', userId);
+    
+    if (error) throw error;
+  },
+};
+
 // Experience level type
 type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 
 // Generate system prompt based on user's experience level
-function getSystemPrompt(experienceLevel: ExperienceLevel): string {
+function getSystemPrompt(experienceLevel: ExperienceLevel, hasEyeData: boolean = false): string {
   const baseRules = `
 IMPORTANT RULES:
 1. You are ONLY allowed to discuss topics related to finance, investing, trading, economics, personal finance, and money management.
 2. If the user asks about anything unrelated to finance (e.g., cooking, sports, entertainment, general knowledge, coding, etc.), politely decline and redirect them to ask a finance-related question instead.
 3. Always remind users that this is educational content and they should consult with licensed financial advisors for specific investment decisions.
 4. Never provide specific buy/sell recommendations for individual securities.
+
+IMPORTANT DISTINCTION - "THE EYE" vs USER PORTFOLIO:
+5. "The Eye" is a SEPARATE external trade engine that users can optionally connect to. It is NOT the same as the user's portfolio in this application.
+6. The user's portfolio in this application (paper trading) is tracked separately and is different from The Eye trade engine.
+7. For ANY quantitative questions about trading performance, positions, P&L, win rate, or numerical analysis - you have TWO options:
+   a) If The Eye data is provided in the context, use The Eye data and explicitly state you're using data from "The Eye trade engine"
+   b) If The Eye data is NOT provided, you MUST explicitly state: "I don't currently have access to your trade engine data from The Eye. The Eye is a separate trade engine that you can connect to share your trading data. You can connect it in your settings, or check your portfolio directly in the trading section of this app."
+8. When The Eye data IS available, use it to answer quantitative questions accurately. Reference specific numbers, percentages, and metrics from The Eye data.
+9. Always clarify whether you're discussing The Eye trade engine data or the user's portfolio in this application.
 `;
 
   switch (experienceLevel) {
@@ -483,11 +604,96 @@ ${baseRules}`;
 export const pythonApi = {
   // Call OpenAI directly for AI chat response
   // Using gpt-4o-mini - best cost/performance model (cheapest while still being very capable)
-  async getChatResponse(message: string, userId: string, experienceLevel?: ExperienceLevel): Promise<string> {
+  async getChatResponse(
+    message: string, 
+    userId: string, 
+    experienceLevel?: ExperienceLevel,
+    chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
+    eyeSnapshot?: EyeSnapshot | null
+  ): Promise<string> {
     const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
     const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
     
-    const systemPrompt = getSystemPrompt(experienceLevel ?? null);
+    const hasEyeData = !!eyeSnapshot;
+    
+    const systemPrompt = getSystemPrompt(experienceLevel ?? null, hasEyeData);
+    
+    // Build The Eye data context if available
+    let eyeDataContext = '';
+    if (hasEyeData && eyeSnapshot) {
+      eyeDataContext = '\n\n=== THE EYE TRADE ENGINE DATA ===\n';
+      eyeDataContext += `Snapshot: ${eyeSnapshot.snapshot_name || 'Latest'} (${new Date(eyeSnapshot.snapshot_date).toLocaleDateString()})\n\n`;
+      
+      if (eyeSnapshot.portfolio_value !== null) {
+        eyeDataContext += `Portfolio Value: $${eyeSnapshot.portfolio_value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+      }
+      
+      if (eyeSnapshot.total_positions !== null) {
+        eyeDataContext += `Total Positions: ${eyeSnapshot.total_positions}\n`;
+      }
+      
+      if (eyeSnapshot.total_trades !== null) {
+        eyeDataContext += `Total Trades: ${eyeSnapshot.total_trades}\n`;
+      }
+      
+      if (eyeSnapshot.win_rate !== null) {
+        eyeDataContext += `Win Rate: ${eyeSnapshot.win_rate.toFixed(2)}%\n`;
+      }
+      
+      if (eyeSnapshot.total_pnl !== null) {
+        eyeDataContext += `Total P&L: $${eyeSnapshot.total_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+      }
+      
+      if (eyeSnapshot.realized_pnl !== null) {
+        eyeDataContext += `Realized P&L: $${eyeSnapshot.realized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+      }
+      
+      if (eyeSnapshot.unrealized_pnl !== null) {
+        eyeDataContext += `Unrealized P&L: $${eyeSnapshot.unrealized_pnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}\n`;
+      }
+      
+      if (eyeSnapshot.profit_factor !== null) {
+        eyeDataContext += `Profit Factor: ${eyeSnapshot.profit_factor.toFixed(2)}\n`;
+      }
+      
+      if (eyeSnapshot.avg_profit !== null) {
+        eyeDataContext += `Average Profit: $${eyeSnapshot.avg_profit.toFixed(2)}\n`;
+      }
+      
+      if (eyeSnapshot.avg_loss !== null) {
+        eyeDataContext += `Average Loss: $${eyeSnapshot.avg_loss.toFixed(2)}\n`;
+      }
+      
+      if (eyeSnapshot.raw_data) {
+        eyeDataContext += `\nAdditional Data Available: Yes (raw_data field contains detailed information)\n`;
+      }
+      
+      eyeDataContext += '\n=== END THE EYE TRADE ENGINE DATA ===\n';
+      eyeDataContext += '\nNOTE: This data is from The Eye trade engine, which is separate from the user\'s portfolio in this application.\n';
+    }
+    
+    // Build messages array with conversation history
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      {
+        role: 'system',
+        content: systemPrompt + eyeDataContext
+      }
+    ];
+    
+    // Add conversation history (last 20 messages to stay within token limits)
+    if (chatHistory && chatHistory.length > 0) {
+      const recentHistory = chatHistory.slice(-20); // Keep last 20 messages for context
+      messages.push(...recentHistory.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      })));
+    }
+    
+    // Add current user message
+    messages.push({
+      role: 'user',
+      content: message
+    });
     
     // Option 1: Use OpenAI directly if API key is set
     if (openaiApiKey) {
@@ -500,16 +706,7 @@ export const pythonApi = {
           },
           body: JSON.stringify({
             model: 'gpt-4o-mini',
-            messages: [
-              {
-                role: 'system',
-                content: systemPrompt
-              },
-              {
-                role: 'user',
-                content: message
-              }
-            ],
+            messages: messages,
             temperature: 0.7,
             max_tokens: 400, // Reduced for shorter, more focused responses
           }),

@@ -7,10 +7,11 @@ interface AdminRouteProps {
 }
 
 export function AdminRoute({ children }: AdminRouteProps) {
-  const { user, loading, isAuthenticated, userProfile } = useAuth();
+  const { user, loading, profileLoading, isAuthenticated, userProfile } = useAuth();
   const location = useLocation();
 
-  if (loading) {
+  // Wait for both auth and profile to load
+  if (loading || profileLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center space-y-4">
@@ -26,10 +27,16 @@ export function AdminRoute({ children }: AdminRouteProps) {
     return <Navigate to="/" replace state={{ from: location }} />;
   }
 
-  // Check if user is admin
-  if (!userProfile?.is_admin) {
-    // Redirect to dashboard if not admin
-    return <Navigate to="/dashboard" replace state={{ from: location }} />;
+  // Check if user is admin (using userType enum)
+  // Only redirect if profile is loaded and user is not admin
+  if (userProfile && userProfile.userType !== 'Admin') {
+    // Redirect to advisor if not admin
+    return <Navigate to="/advisor" replace state={{ from: location }} />;
+  }
+
+  // If profile is still null after loading, also redirect (safety check)
+  if (!userProfile) {
+    return <Navigate to="/advisor" replace state={{ from: location }} />;
   }
 
   return <>{children}</>;
