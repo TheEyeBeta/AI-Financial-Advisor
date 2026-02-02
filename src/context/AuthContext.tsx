@@ -17,6 +17,7 @@ interface AuthContextValue {
   signUp: (email: string, password: string) => Promise<unknown>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -111,6 +112,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   };
 
+  const refreshProfile = async () => {
+    if (!authUser) return;
+    
+    setProfileLoading(true);
+    setProfileFetched(null); // Reset cache to force refetch
+    try {
+      const profile = await getCurrentUserProfile();
+      setUserProfile(profile);
+      setProfileFetched(authUser.id);
+    } catch (error) {
+      console.error("Error refreshing user profile:", error);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
   const value: AuthContextValue = {
     user: authUser,
     userProfile,
@@ -122,6 +139,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signUp,
     signOut,
     resetPassword,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

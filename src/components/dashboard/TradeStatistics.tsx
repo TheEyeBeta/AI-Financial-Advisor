@@ -1,18 +1,21 @@
 import { Target, TrendingUp, TrendingDown, BarChart2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { useTradeStatistics } from "@/hooks/use-data";
+import { cn } from "@/lib/utils";
 
 export function TradeStatistics() {
   const { data: stats, isLoading } = useTradeStatistics();
 
   if (isLoading) {
     return (
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg font-semibold">Trade Statistics</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">Loading...</div>
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardContent className="pt-5 pb-4">
+          <div className="h-4 w-24 bg-muted/50 rounded animate-pulse mb-4" />
+          <div className="grid grid-cols-2 gap-3">
+            {[1, 2, 3, 4].map((i) => (
+              <div key={i} className="h-20 bg-muted/30 rounded-lg animate-pulse" />
+            ))}
+          </div>
         </CardContent>
       </Card>
     );
@@ -20,12 +23,11 @@ export function TradeStatistics() {
 
   if (!stats || stats.totalTrades === 0) {
     return (
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg font-semibold">Trade Statistics</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">No trades yet. Start trading to see statistics!</div>
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardContent className="py-10 text-center">
+          <BarChart2 className="h-8 w-8 mx-auto mb-3 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">No trades yet</p>
+          <p className="text-xs text-muted-foreground/60 mt-1">Statistics appear after your first trade</p>
         </CardContent>
       </Card>
     );
@@ -35,63 +37,63 @@ export function TradeStatistics() {
     {
       label: "Win Rate",
       value: `${stats.winRate.toFixed(0)}%`,
-      subtext: `${stats.winningTrades} of ${stats.totalTrades} trades`,
+      subtext: `${stats.winningTrades}/${stats.totalTrades}`,
       icon: Target,
       trend: stats.winRate >= 50 ? "positive" : "negative",
     },
     {
-      label: "Avg. Profit",
-      value: `+$${Math.abs(stats.avgProfit).toFixed(0)}`,
-      subtext: "per winning trade",
+      label: "Avg Profit",
+      value: `$${Math.abs(stats.avgProfit).toFixed(0)}`,
+      subtext: "per win",
       icon: TrendingUp,
       trend: "positive",
     },
     {
-      label: "Avg. Loss",
-      value: `-$${stats.avgLoss.toFixed(0)}`,
-      subtext: "per losing trade",
+      label: "Avg Loss",
+      value: `$${stats.avgLoss.toFixed(0)}`,
+      subtext: "per loss",
       icon: TrendingDown,
       trend: "negative",
     },
     {
       label: "Profit Factor",
       value: stats.profitFactor.toFixed(2),
-      subtext: "gross profit/loss",
+      subtext: "ratio",
       icon: BarChart2,
       trend: stats.profitFactor >= 1 ? "positive" : "negative",
     },
   ];
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-lg font-semibold">Trade Statistics</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="grid grid-cols-2 gap-4">
+    <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+      <CardContent className="pt-5 pb-4">
+        <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-4">Statistics</p>
+        <div className="grid grid-cols-2 gap-3">
           {displayStats.map((stat) => (
             <div
               key={stat.label}
-              className="rounded-lg border bg-muted/30 p-4"
+              className="rounded-xl bg-muted/30 p-3 transition-colors hover:bg-muted/40"
             >
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">{stat.label}</span>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] text-muted-foreground/70">{stat.label}</span>
                 <stat.icon
-                  className={`h-4 w-4 ${
-                    stat.trend === "positive" ? "text-profit" : "text-loss"
-                  }`}
+                  className={cn(
+                    "h-3.5 w-3.5",
+                    stat.trend === "positive" ? "text-profit/70" : "text-loss/70"
+                  )}
                 />
               </div>
-              <div className="mt-2">
+              <div className="flex items-baseline gap-1.5">
                 <span
-                  className={`text-2xl font-bold ${
+                  className={cn(
+                    "text-xl font-bold",
                     stat.trend === "positive" ? "text-profit" : "text-loss"
-                  }`}
+                  )}
                 >
                   {stat.value}
                 </span>
+                <span className="text-[10px] text-muted-foreground/50">{stat.subtext}</span>
               </div>
-              <span className="text-xs text-muted-foreground">{stat.subtext}</span>
             </div>
           ))}
         </div>

@@ -109,14 +109,25 @@ const Profile = () => {
   return (
     <AppLayout title="Profile & Settings">
       <div className="space-y-6 max-w-4xl">
+        {/* Page Header */}
+        <div className="flex items-center gap-3 animate-in fade-in duration-300">
+          <div className="p-2 rounded-lg bg-primary/10">
+            <User className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-xl font-semibold text-foreground">Profile & Settings</h1>
+            <p className="text-sm text-muted-foreground">Manage your account and preferences</p>
+          </div>
+        </div>
+
         {/* Account Info Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in duration-300" style={{ animationDelay: '50ms' }}>
+          <CardHeader className="pb-4">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Mail className="h-4 w-4 text-muted-foreground" />
               Account Information
             </CardTitle>
-            <CardDescription>Your account details and verification status</CardDescription>
+            <CardDescription className="text-xs">Your account details and verification status</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
@@ -164,10 +175,10 @@ const Profile = () => {
         </Card>
 
         {/* Profile Details Card */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Profile Details</CardTitle>
-            <CardDescription>Update your personal information and preferences</CardDescription>
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in duration-300" style={{ animationDelay: '100ms' }}>
+          <CardHeader className="pb-4">
+            <CardTitle className="text-base">Profile Details</CardTitle>
+            <CardDescription className="text-xs">Update your personal information and preferences</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSave} className="space-y-6">

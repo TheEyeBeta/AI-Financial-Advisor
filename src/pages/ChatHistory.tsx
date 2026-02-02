@@ -1,13 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useChats, useDeleteChat, useUpdateChatTitle } from "@/hooks/use-data";
 import { format, parseISO, isToday, isYesterday, isThisWeek } from "date-fns";
-import { MessageSquare, Trash2, ArrowRight, Calendar, Pencil, Check, X } from "lucide-react";
+import { MessageSquare, Trash2, ArrowRight, Pencil, Check, X, Plus, ChevronRight, Clock } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +18,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import type { ChatWithMessages } from "@/types/database";
+import { cn } from "@/lib/utils";
 
 const ChatHistory = () => {
   const navigate = useNavigate();
@@ -27,22 +26,19 @@ const ChatHistory = () => {
   const deleteChatMutation = useDeleteChat();
   const updateTitleMutation = useUpdateChatTitle();
   
-  const [expandedChatId, setExpandedChatId] = useState<string | null>(null);
   const [editingChatId, setEditingChatId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
 
   const handleDeleteChat = async (chatId: string) => {
     try {
       await deleteChatMutation.mutateAsync(chatId);
-      if (expandedChatId === chatId) {
-        setExpandedChatId(null);
-      }
     } catch (error) {
       console.error('Error deleting chat:', error);
     }
   };
 
-  const handleStartEdit = (chat: ChatWithMessages) => {
+  const handleStartEdit = (chat: ChatWithMessages, e: React.MouseEvent) => {
+    e.stopPropagation();
     setEditingChatId(chat.id);
     setEditTitle(chat.title);
   };
@@ -64,7 +60,6 @@ const ChatHistory = () => {
   };
 
   const handleOpenChat = (chatId: string) => {
-    // Navigate to advisor with the chat ID
     navigate(`/advisor?chat=${chatId}`);
   };
 
@@ -73,14 +68,25 @@ const ChatHistory = () => {
     if (isToday(date)) return 'Today';
     if (isYesterday(date)) return 'Yesterday';
     if (isThisWeek(date)) return format(date, 'EEEE');
-    return format(date, 'MMM d, yyyy');
+    return format(date, 'MMM d');
   };
+
+  // Group chats by date
+  const groupedChats = chats.reduce((groups, chat) => {
+    const label = getDateLabel(chat.updated_at);
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(chat);
+    return groups;
+  }, {} as Record<string, ChatWithMessages[]>);
 
   if (isLoading) {
     return (
       <AppLayout title="Chat History">
         <div className="flex items-center justify-center h-64">
-          <p className="text-muted-foreground">Loading chat history...</p>
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="h-4 w-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm">Loading...</span>
+          </div>
         </div>
       </AppLayout>
     );
@@ -88,201 +94,174 @@ const ChatHistory = () => {
 
   return (
     <AppLayout title="Chat History">
-      <div className="mx-auto max-w-4xl space-y-6">
+      <div className="mx-auto max-w-3xl">
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-6 animate-in fade-in duration-300">
           <div>
-            <h1 className="text-2xl font-bold">Chat History</h1>
-            <p className="text-muted-foreground">
+            <h1 className="text-2xl font-semibold text-foreground">Chats</h1>
+            <p className="text-sm text-muted-foreground/70">
               {chats.length} conversation{chats.length !== 1 ? 's' : ''}
             </p>
           </div>
-          <Button onClick={() => navigate('/advisor')} className="gap-2">
-            <MessageSquare className="h-4 w-4" />
-            New Chat
+          <Button 
+            onClick={() => navigate('/advisor')} 
+            size="sm" 
+            className="gap-1.5 rounded-full px-4"
+          >
+            <Plus className="h-4 w-4" />
+            New
           </Button>
         </div>
 
         {/* Empty state */}
         {chats.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <MessageSquare className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No chat history yet</h3>
-              <p className="text-muted-foreground text-center mb-4">
-                Start a conversation with your AI Financial Advisor to see your history here.
-              </p>
-              <Button onClick={() => navigate('/advisor')}>
-                Start Chatting
-              </Button>
-            </CardContent>
-          </Card>
+          <div className="flex flex-col items-center justify-center py-16 animate-in fade-in duration-300">
+            <div className="p-4 rounded-2xl bg-muted/50 mb-4">
+              <MessageSquare className="h-10 w-10 text-muted-foreground/50" />
+            </div>
+            <h3 className="text-lg font-medium mb-1">No conversations yet</h3>
+            <p className="text-sm text-muted-foreground/70 text-center mb-6 max-w-xs">
+              Start chatting with your AI advisor to see your history here
+            </p>
+            <Button onClick={() => navigate('/advisor')} className="rounded-full px-6">
+              Start a conversation
+            </Button>
+          </div>
         ) : (
-          /* Chat list */
-          <div className="space-y-3">
-            {chats.map((chat) => (
-              <Card 
-                key={chat.id}
-                className={`transition-all hover:shadow-md ${
-                  expandedChatId === chat.id ? 'ring-2 ring-primary' : ''
-                }`}
+          /* Chat list grouped by date */
+          <div className="space-y-6">
+            {Object.entries(groupedChats).map(([dateLabel, dateChats], groupIndex) => (
+              <div 
+                key={dateLabel} 
+                className="animate-in fade-in duration-300"
+                style={{ animationDelay: `${groupIndex * 50}ms` }}
               >
-                <CardContent className="p-4">
-                  {/* Chat header */}
-                  <div className="flex items-start justify-between gap-4">
-                    <div 
-                      className="flex-1 cursor-pointer"
-                      onClick={() => setExpandedChatId(expandedChatId === chat.id ? null : chat.id)}
+                {/* Date label */}
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <Clock className="h-3 w-3 text-muted-foreground/50" />
+                  <span className="text-xs font-medium text-muted-foreground/70 uppercase tracking-wide">
+                    {dateLabel}
+                  </span>
+                </div>
+                
+                {/* Chats for this date */}
+                <div className="space-y-1">
+                  {dateChats.map((chat, index) => (
+                    <div
+                      key={chat.id}
+                      className={cn(
+                        "group relative flex items-center gap-3 px-3 py-2.5 rounded-xl",
+                        "hover:bg-muted/50 cursor-pointer transition-all duration-150",
+                        "animate-in fade-in slide-in-from-left-2"
+                      )}
+                      style={{ animationDelay: `${(groupIndex * 50) + (index * 30)}ms` }}
+                      onClick={() => handleOpenChat(chat.id)}
                     >
-                      {editingChatId === chat.id ? (
-                        <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                          <Input
-                            value={editTitle}
-                            onChange={(e) => setEditTitle(e.target.value)}
-                            className="h-8 text-sm"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveTitle(chat.id);
-                              if (e.key === 'Escape') handleCancelEdit();
-                            }}
-                          />
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="h-8 w-8"
-                            onClick={() => handleSaveTitle(chat.id)}
-                          >
-                            <Check className="h-4 w-4 text-green-600" />
-                          </Button>
-                          <Button 
-                            size="icon" 
-                            variant="ghost" 
-                            className="h-8 w-8"
-                            onClick={handleCancelEdit}
-                          >
-                            <X className="h-4 w-4 text-red-600" />
-                          </Button>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold">{chat.title}</h3>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-6 w-6 opacity-0 group-hover:opacity-100"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleStartEdit(chat);
+                      {/* Chat icon */}
+                      <div className="p-2 rounded-lg bg-primary/10 shrink-0">
+                        <MessageSquare className="h-4 w-4 text-primary" />
+                      </div>
+                      
+                      {/* Chat content */}
+                      <div className="flex-1 min-w-0">
+                        {editingChatId === chat.id ? (
+                          <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                            <Input
+                              value={editTitle}
+                              onChange={(e) => setEditTitle(e.target.value)}
+                              className="h-7 text-sm bg-background"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleSaveTitle(chat.id);
+                                if (e.key === 'Escape') handleCancelEdit();
                               }}
+                            />
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              className="h-7 w-7 shrink-0"
+                              onClick={() => handleSaveTitle(chat.id)}
                             >
-                              <Pencil className="h-3 w-3" />
+                              <Check className="h-3.5 w-3.5 text-green-600" />
+                            </Button>
+                            <Button 
+                              size="icon" 
+                              variant="ghost" 
+                              className="h-7 w-7 shrink-0"
+                              onClick={handleCancelEdit}
+                            >
+                              <X className="h-3.5 w-3.5 text-red-500" />
                             </Button>
                           </div>
-                          <div className="flex items-center gap-3 text-sm text-muted-foreground mt-1">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="h-3 w-3" />
-                              {getDateLabel(chat.updated_at)}
-                            </span>
-                            <span>{chat.messageCount} messages</span>
-                          </div>
-                          {chat.lastMessage && (
-                            <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
-                              {chat.lastMessage.role === 'user' ? 'You: ' : 'AI: '}
-                              {chat.lastMessage.content.substring(0, 100)}
-                              {chat.lastMessage.content.length > 100 ? '...' : ''}
-                            </p>
-                          )}
-                        </>
+                        ) : (
+                          <>
+                            <h3 className="font-medium text-sm truncate pr-2">
+                              {chat.title}
+                            </h3>
+                            {chat.lastMessage && (
+                              <p className="text-xs text-muted-foreground/60 truncate mt-0.5">
+                                {chat.lastMessage.content.substring(0, 60)}
+                                {chat.lastMessage.content.length > 60 ? '...' : ''}
+                              </p>
+                            )}
+                          </>
+                        )}
+                      </div>
+                      
+                      {/* Message count */}
+                      {editingChatId !== chat.id && (
+                        <span className="text-[10px] text-muted-foreground/50 shrink-0">
+                          {chat.messageCount}
+                        </span>
+                      )}
+                      
+                      {/* Actions - visible on hover */}
+                      {editingChatId !== chat.id && (
+                        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                            onClick={(e) => handleStartEdit(chat, e)}
+                          >
+                            <Pencil className="h-3 w-3" />
+                          </Button>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent className="max-w-sm">
+                              <AlertDialogHeader>
+                                <AlertDialogTitle className="text-base">Delete conversation?</AlertDialogTitle>
+                                <AlertDialogDescription className="text-sm">
+                                  "{chat.title}" and all {chat.messageCount} messages will be permanently deleted.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel className="h-9">Cancel</AlertDialogCancel>
+                                <AlertDialogAction 
+                                  onClick={() => handleDeleteChat(chat.id)}
+                                  className="h-9 bg-destructive hover:bg-destructive/90"
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                          <ChevronRight className="h-4 w-4 text-muted-foreground/30 ml-1" />
+                        </div>
                       )}
                     </div>
-                    
-                    {/* Actions */}
-                    {editingChatId !== chat.id && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="icon"
-                          variant="ghost"
-                          className="h-8 w-8"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleStartEdit(chat);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              size="icon"
-                              variant="ghost"
-                              className="h-8 w-8 text-destructive hover:text-destructive"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </AlertDialogTrigger>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete chat?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently delete "{chat.title}" and all {chat.messageCount} messages. This action cannot be undone.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDeleteChat(chat.id)}>
-                                Delete
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* Expanded view */}
-                  {expandedChatId === chat.id && (
-                    <div className="mt-4 border-t pt-4">
-                      <ScrollArea className="h-64">
-                        <div className="space-y-3 pr-4">
-                          {chat.messages.map((msg) => (
-                            <div
-                              key={msg.id}
-                              className={`flex gap-3 ${
-                                msg.role === 'user' ? 'flex-row-reverse' : ''
-                              }`}
-                            >
-                              <div
-                                className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                                  msg.role === 'user'
-                                    ? 'bg-primary text-primary-foreground'
-                                    : 'bg-muted'
-                                }`}
-                              >
-                                <p className="line-clamp-4">{msg.content}</p>
-                                <p className="text-xs opacity-70 mt-1">
-                                  {format(parseISO(msg.created_at), 'h:mm a')}
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                      <div className="mt-4 flex justify-end">
-                        <Button 
-                          size="sm" 
-                          onClick={() => handleOpenChat(chat.id)}
-                          className="gap-2"
-                        >
-                          Continue this chat
-                          <ArrowRight className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
         )}

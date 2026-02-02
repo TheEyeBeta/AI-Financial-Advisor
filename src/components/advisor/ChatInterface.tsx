@@ -1,9 +1,7 @@
-import { useState, useRef, useEffect } from "react";
-import { Send, Bot, User, Plus } from "lucide-react";
+import { useRef, useEffect } from "react";
+import { Bot, User, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface Message {
   role: "user" | "assistant";
@@ -12,7 +10,6 @@ interface Message {
 
 interface ChatInterfaceProps {
   messages: Message[];
-  onSendMessage: (content: string) => void;
   onNewChat?: () => void;
   isLoading?: boolean;
   chatTitle?: string;
@@ -35,9 +32,9 @@ function formatMessage(content: string): React.ReactNode {
     if (/^\d+\.\s/.test(para)) {
       const items = para.split(/\n(?=\d+\.\s)/);
       return (
-        <ol key={pIndex} className="list-decimal list-outside space-y-1 my-2 ml-5">
+        <ol key={pIndex} className="list-decimal list-outside space-y-2 my-3 ml-6">
           {items.map((item, iIndex) => (
-            <li key={iIndex} className="text-sm leading-relaxed">
+            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90">
               {formatInlineText(item.replace(/^\d+\.\s*/, ''))}
             </li>
           ))}
@@ -49,9 +46,9 @@ function formatMessage(content: string): React.ReactNode {
     if (/^[-•*]\s/.test(para)) {
       const items = para.split(/\n(?=[-•*]\s)/);
       return (
-        <ul key={pIndex} className="list-disc list-outside space-y-1 my-2 ml-5">
+        <ul key={pIndex} className="list-disc list-outside space-y-2 my-3 ml-6">
           {items.map((item, iIndex) => (
-            <li key={iIndex} className="text-sm leading-relaxed">
+            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90">
               {formatInlineText(item.replace(/^[-•*]\s*/, ''))}
             </li>
           ))}
@@ -61,7 +58,7 @@ function formatMessage(content: string): React.ReactNode {
     
     // Regular paragraph
     return (
-      <p key={pIndex} className="text-sm leading-relaxed my-2 first:mt-0 last:mb-0">
+      <p key={pIndex} className="text-sm leading-relaxed my-3 first:mt-0 last:mb-0 text-foreground/90">
         {formatInlineText(para)}
       </p>
     );
@@ -81,9 +78,7 @@ function formatInlineText(text: string): React.ReactNode {
   });
 }
 
-export function ChatInterface({ messages, onSendMessage, onNewChat, isLoading = false, chatTitle }: ChatInterfaceProps) {
-  const [input, setInput] = useState("");
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
+export function ChatInterface({ messages, onNewChat, isLoading = false, chatTitle }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -94,113 +89,94 @@ export function ChatInterface({ messages, onSendMessage, onNewChat, isLoading = 
     scrollToBottom();
   }, [messages]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (input.trim()) {
-      onSendMessage(input.trim());
-      setInput("");
-    }
-  };
-
   return (
-    <div className="flex flex-1 flex-col rounded-xl border bg-card shadow-sm">
-      {/* Header with chat title and New Chat button */}
+    <div className="flex flex-col">
+      {/* Compact header */}
       {onNewChat && messages.length > 1 && (
-        <div className="flex items-center justify-between border-b px-4 py-3">
-          <span className="font-medium text-sm">
-            {chatTitle || 'New Chat'}
-          </span>
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="h-4 w-4 text-primary" />
+            <span className="font-medium text-sm text-foreground">
+              {chatTitle || 'New Chat'}
+            </span>
+          </div>
           <Button 
-            variant="outline" 
+            variant="ghost" 
             size="sm" 
             onClick={onNewChat}
-            className="gap-2"
+            className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
           >
-            <Plus className="h-4 w-4" />
-            New Chat
+            <Plus className="h-3.5 w-3.5" />
+            New
           </Button>
         </div>
       )}
       
-      <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
-        <div className="space-y-4">
-          {messages.map((message, index) => (
+      <div className="space-y-4">
+        {messages.map((message, index) => (
+          <div
+            key={index}
+            className={cn(
+              "flex gap-3 animate-in fade-in duration-200",
+              message.role === "user" ? "flex-row-reverse" : "flex-row"
+            )}
+          >
+            {/* Compact Avatar */}
             <div
-              key={index}
               className={cn(
-                "flex gap-3",
-                message.role === "user" ? "flex-row-reverse" : "flex-row"
+                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
+                message.role === "user"
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-muted"
               )}
             >
-              <div
-                className={cn(
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted"
-                )}
-              >
-                {message.role === "user" ? (
-                  <User className="h-4 w-4" />
-                ) : (
-                  <Bot className="h-4 w-4 text-primary" />
-                )}
-              </div>
-              <div
-                className={cn(
-                  "max-w-[80%] rounded-2xl px-4 py-3",
-                  message.role === "user"
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-foreground"
-                )}
-              >
-                {message.role === "assistant" ? (
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                    {formatMessage(message.content)}
-                  </div>
-                ) : (
-                  <p className="text-sm leading-relaxed">
-                    {message.content}
-                  </p>
-                )}
-              </div>
+              {message.role === "user" ? (
+                <User className="h-4 w-4" />
+              ) : (
+                <Bot className="h-4 w-4 text-primary" />
+              )}
             </div>
-          ))}
-          {isLoading && (
-            <div className="flex gap-3">
-              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted">
-                <Bot className="h-4 w-4 text-primary animate-pulse" />
-              </div>
-              <div className="max-w-[80%] rounded-2xl bg-muted px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1">
-                    <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
-                    <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
-                    <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '300ms' }} />
-                  </div>
-                  <span className="text-sm text-muted-foreground">Thinking...</span>
+            
+            {/* Clean Message Bubble */}
+            <div
+              className={cn(
+                "max-w-[80%] rounded-2xl px-4 py-2.5",
+                message.role === "user"
+                  ? "bg-primary text-primary-foreground rounded-br-sm"
+                  : "bg-muted/50 text-foreground rounded-bl-sm"
+              )}
+            >
+              {message.role === "assistant" ? (
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  {formatMessage(message.content)}
+                </div>
+              ) : (
+                <p className="text-sm">
+                  {message.content}
+                </p>
+              )}
+            </div>
+          </div>
+        ))}
+        
+        {isLoading && (
+          <div className="flex gap-3 animate-in fade-in duration-200">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
+              <Bot className="h-4 w-4 text-primary animate-pulse" />
+            </div>
+            <div className="rounded-2xl rounded-bl-sm bg-muted/50 px-4 py-2.5">
+              <div className="flex items-center gap-2">
+                <div className="flex gap-1">
+                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '300ms' }} />
                 </div>
               </div>
             </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-      </ScrollArea>
-
-      <form
-        onSubmit={handleSubmit}
-        className="flex items-center gap-2 border-t p-4"
-      >
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about investing, markets, or financial concepts..."
-          className="flex-1"
-        />
-        <Button type="submit" size="icon" disabled={!input.trim() || isLoading}>
-          <Send className="h-4 w-4" />
-        </Button>
-      </form>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
     </div>
   );
 }

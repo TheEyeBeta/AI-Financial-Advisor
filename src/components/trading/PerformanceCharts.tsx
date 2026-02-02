@@ -1,4 +1,4 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Area,
   AreaChart,
@@ -13,10 +13,12 @@ import {
   YAxis,
 } from "recharts";
 import { usePortfolioHistory, useClosedTrades, useOpenPositions } from "@/hooks/use-data";
-import { format, parseISO, startOfWeek, eachWeekOfInterval, subMonths, eachMonthOfInterval } from "date-fns";
+import { format, parseISO, startOfWeek } from "date-fns";
 import { useMemo, useEffect, useState } from "react";
 import { pythonApi } from "@/services/api";
 import type { OpenPosition } from "@/types/database";
+import { TrendingUp, TrendingDown, Activity, PieChart as PieChartIcon, BarChart3 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 export function PerformanceCharts() {
   const { data: portfolioHistory = [], isLoading: portfolioLoading } = usePortfolioHistory();
@@ -39,18 +41,14 @@ export function PerformanceCharts() {
             try {
               const currentPrice = await pythonApi.getStockPrice(pos.symbol);
               return { ...pos, current_price: currentPrice };
-            } catch (error) {
-              console.error(`Error fetching price for ${pos.symbol}:`, error);
-              return pos; // Fallback to stored price
+            } catch {
+              return pos;
             }
           })
         );
         
         setLivePositions(updated);
         
-        // Calculate current portfolio value
-        // This should match "Total Market Value" from OpenPositions
-        // Simply sum of (current_price * quantity) for all open positions
         const totalMarketValue = updated.reduce((sum, pos) => {
           const currentPrice = pos.current_price || pos.entry_price;
           return sum + (currentPrice * pos.quantity);
@@ -63,12 +61,11 @@ export function PerformanceCharts() {
     };
 
     updateLivePrices();
-    // Refresh prices every 30 seconds
     const interval = setInterval(updateLivePrices, 30000);
     return () => clearInterval(interval);
-  }, [positions, portfolioHistory]);
+  }, [positions]);
 
-  // Calculate equity curve from portfolio history (group by week) + current live value
+  // Calculate equity curve
   const equityData = useMemo(() => {
     const data: Array<{ date: string; value: number; fullDate: string; isLive?: boolean }> = [];
     
@@ -77,7 +74,6 @@ export function PerformanceCharts() {
         new Date(a.date).getTime() - new Date(b.date).getTime()
       );
       
-      // Group by week
       const weeklyData: Record<string, number> = {};
       sorted.forEach(entry => {
         const date = parseISO(entry.date);
@@ -86,24 +82,12 @@ export function PerformanceCharts() {
       });
       
       Object.entries(weeklyData).forEach(([date, value], index) => {
-        data.push({
-          date: `Week ${index + 1}`,
-          value,
-          fullDate: date,
-        });
+        data.push({ date: `W${index + 1}`, value, fullDate: date });
       });
     }
     
-    // Add current live value if available
     if (currentPortfolioValue !== null) {
-      const today = new Date();
-      const weekStart = format(startOfWeek(today), 'MMM d');
-      data.push({
-        date: 'Now',
-        value: currentPortfolioValue,
-        fullDate: weekStart,
-        isLive: true,
-      });
+      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
     }
     
     return data;
@@ -113,9 +97,8 @@ export function PerformanceCharts() {
   const winLossData = useMemo(() => {
     const wins = trades.filter(t => (t.pnl || 0) > 0).length;
     const losses = trades.filter(t => (t.pnl || 0) <= 0).length;
-    
     return [
-      { name: "Wins", value: wins, fill: "hsl(var(--chart-2))" },
+      { name: "Wins", value: wins, fill: "hsl(var(--profit))" },
       { name: "Losses", value: losses, fill: "hsl(var(--loss))" },
     ];
   }, [trades]);
@@ -128,364 +111,200 @@ export function PerformanceCharts() {
     
     trades.forEach(trade => {
       if (!trade.exit_date || !trade.pnl) return;
-      
       const month = format(parseISO(trade.exit_date), 'MMM');
-      if (!monthly[month]) {
-        monthly[month] = { profit: 0, loss: 0 };
-      }
-      
-      if (trade.pnl > 0) {
-        monthly[month].profit += trade.pnl;
-      } else {
-        monthly[month].loss += trade.pnl;
-      }
+      if (!monthly[month]) monthly[month] = { profit: 0, loss: 0 };
+      if (trade.pnl > 0) monthly[month].profit += trade.pnl;
+      else monthly[month].loss += trade.pnl;
     });
     
     return Object.entries(monthly).map(([month, data]) => ({
-      month,
-      profit: data.profit,
-      loss: data.loss,
-    })).slice(-6); // Last 6 months
+      month, profit: data.profit, loss: data.loss,
+    })).slice(-6);
   }, [trades]);
 
-  // Simple sector grouping (for now, based on symbols - can be enhanced)
-  const sectorData = useMemo(() => {
-    if (trades.length === 0) return [];
-    
-    const sectorMap: Record<string, number> = {};
-    
-    trades.forEach(trade => {
-      if (!trade.pnl) return;
-      
-      // Simple sector mapping (can be enhanced with actual sector data)
-      const symbol = trade.symbol;
-      let sector = 'Other';
-      
-      if (['AAPL', 'MSFT', 'GOOGL', 'META', 'NVDA', 'AMD'].includes(symbol)) {
-        sector = 'Tech';
-      } else if (['JPM', 'BAC', 'GS', 'MS'].includes(symbol)) {
-        sector = 'Finance';
-      } else if (['JNJ', 'PFE', 'UNH'].includes(symbol)) {
-        sector = 'Healthcare';
-      } else if (['AMZN', 'WMT', 'TGT'].includes(symbol)) {
-        sector = 'Consumer';
-      } else if (['XOM', 'CVX'].includes(symbol)) {
-        sector = 'Energy';
-      }
-      
-      sectorMap[sector] = (sectorMap[sector] || 0) + (trade.pnl || 0);
-    });
-    
-    return Object.entries(sectorMap).map(([sector, pnl]) => ({
-      sector,
-      pnl: Math.round(pnl * 100) / 100,
-    })).sort((a, b) => b.pnl - a.pnl);
-  }, [trades]);
-
-  // Calculate portfolio stats with live data
+  // Calculate portfolio stats
   const portfolioStats = useMemo(() => {
-    // Current portfolio value = Total Market Value (same as OpenPositions)
     const currentValue = currentPortfolioValue ?? 0;
-    
-    // Calculate total cost basis (what was paid for all open positions)
-    const totalCostBasis = livePositions.reduce((sum, pos) => {
-      return sum + (pos.entry_price * pos.quantity);
-    }, 0);
-    
-    // Calculate unrealized P&L from live positions
+    const totalCostBasis = livePositions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
     const unrealizedPnL = livePositions.reduce((sum, pos) => {
       const currentPrice = pos.current_price || pos.entry_price;
-      const pnl = (currentPrice - pos.entry_price) * pos.quantity;
-      return sum + pnl;
+      return sum + ((currentPrice - pos.entry_price) * pos.quantity);
     }, 0);
-    
-    // Calculate realized P&L from closed trades
     const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
-    
-    // Total return = current value - cost basis (or use first portfolio_history entry if available)
-    const baseValue = portfolioHistory.length > 0 
-      ? portfolioHistory[0].value 
-      : totalCostBasis; // Fallback to cost basis if no history
+    const baseValue = portfolioHistory.length > 0 ? portfolioHistory[0].value : totalCostBasis;
     const totalReturn = currentValue - baseValue;
     const percentReturn = baseValue > 0 ? ((totalReturn / baseValue) * 100) : 0;
     
-    return {
-      baseValue,
-      currentValue,
-      totalReturn,
-      percentReturn,
-      unrealizedPnL,
-      realizedPnL,
-      totalPnL: unrealizedPnL + realizedPnL,
-      totalCostBasis,
-    };
+    return { currentValue, totalReturn, percentReturn, unrealizedPnL, realizedPnL, totalPnL: unrealizedPnL + realizedPnL };
   }, [portfolioHistory, currentPortfolioValue, livePositions, trades]);
 
   if (portfolioLoading || tradesLoading || positionsLoading) {
     return (
-      <div className="grid gap-6 md:grid-cols-2">
-        <Card className="md:col-span-2">
-          <CardContent className="p-6">
-            <div className="text-sm text-muted-foreground">Loading performance data...</div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
+        {[1, 2, 3, 4].map((i) => (
+          <div key={i} className={cn("h-48 bg-muted/30 rounded-xl animate-pulse", i <= 2 && "lg:col-span-1", i > 2 && "lg:col-span-1")} />
+        ))}
       </div>
     );
   }
+
   return (
-    <div className="grid gap-4 sm:gap-6 grid-cols-1 lg:grid-cols-2">
-      {/* Portfolio Value Summary Cards */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">Current Portfolio Value</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-3xl font-bold">
-            ${portfolioStats.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-          </div>
-          <div className={`text-sm mt-1 ${portfolioStats.totalReturn >= 0 ? 'text-profit' : 'text-loss'}`}>
-            {portfolioStats.totalReturn >= 0 ? '+' : ''}${portfolioStats.totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 
-            ({portfolioStats.percentReturn >= 0 ? '+' : ''}{portfolioStats.percentReturn.toFixed(2)}%)
-          </div>
-          {currentPortfolioValue !== null && (
-            <div className="text-xs text-muted-foreground mt-1">Live prices • Updates every 30s</div>
-          )}
-        </CardContent>
-      </Card>
+    <div className="space-y-4">
+      {/* Summary Cards */}
+      <div className="grid gap-3 grid-cols-1 sm:grid-cols-2">
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center gap-2 mb-1">
+              <Activity className="h-3.5 w-3.5 text-muted-foreground/50" />
+              <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Portfolio Value</span>
+            </div>
+            <div className="text-2xl font-bold">
+              ${portfolioStats.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </div>
+            <div className={cn("flex items-center gap-1 text-sm mt-1", portfolioStats.totalReturn >= 0 ? 'text-profit' : 'text-loss')}>
+              {portfolioStats.totalReturn >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+              <span>{portfolioStats.totalReturn >= 0 ? '+' : ''}${portfolioStats.totalReturn.toFixed(2)} ({portfolioStats.percentReturn.toFixed(2)}%)</span>
+            </div>
+            {currentPortfolioValue !== null && (
+              <div className="text-[10px] text-muted-foreground/50 mt-1">Live · Updates every 30s</div>
+            )}
+          </CardContent>
+        </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">P&L Breakdown</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-2">
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Realized P&L:</span>
-              <span className={`text-sm font-medium ${portfolioStats.realizedPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
-                {portfolioStats.realizedPnL >= 0 ? '+' : ''}${portfolioStats.realizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <BarChart3 className="h-3.5 w-3.5 text-muted-foreground/50" />
+              <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">P&L Breakdown</span>
             </div>
-            <div className="flex justify-between">
-              <span className="text-sm text-muted-foreground">Unrealized P&L:</span>
-              <span className={`text-sm font-medium ${portfolioStats.unrealizedPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
-                {portfolioStats.unrealizedPnL >= 0 ? '+' : ''}${portfolioStats.unrealizedPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
+            <div className="space-y-1.5 text-xs">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground/70">Realized</span>
+                <span className={cn("font-mono font-medium", portfolioStats.realizedPnL >= 0 ? 'text-profit' : 'text-loss')}>
+                  {portfolioStats.realizedPnL >= 0 ? '+' : ''}${portfolioStats.realizedPnL.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground/70">Unrealized</span>
+                <span className={cn("font-mono font-medium", portfolioStats.unrealizedPnL >= 0 ? 'text-profit' : 'text-loss')}>
+                  {portfolioStats.unrealizedPnL >= 0 ? '+' : ''}${portfolioStats.unrealizedPnL.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex justify-between pt-1.5 border-t border-border/30">
+                <span className="font-medium">Total</span>
+                <span className={cn("font-mono font-bold", portfolioStats.totalPnL >= 0 ? 'text-profit' : 'text-loss')}>
+                  {portfolioStats.totalPnL >= 0 ? '+' : ''}${portfolioStats.totalPnL.toFixed(2)}
+                </span>
+              </div>
             </div>
-            <div className="flex justify-between pt-2 border-t">
-              <span className="text-sm font-semibold">Total P&L:</span>
-              <span className={`text-sm font-bold ${portfolioStats.totalPnL >= 0 ? 'text-profit' : 'text-loss'}`}>
-                {portfolioStats.totalPnL >= 0 ? '+' : ''}${portfolioStats.totalPnL.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
-      <Card className="md:col-span-2">
-        <CardHeader>
-          <CardTitle>Equity Curve {currentPortfolioValue !== null && <span className="text-xs text-muted-foreground font-normal">(Live)</span>}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[300px]">
+      {/* Equity Curve */}
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardContent className="pt-4 pb-3">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Equity Curve</span>
+            {currentPortfolioValue !== null && (
+              <span className="text-[10px] text-muted-foreground/50">(Live)</span>
+            )}
+          </div>
+          <div className="h-[180px]">
             {equityData.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                No portfolio history available. Start trading to see your equity curve!
+              <div className="flex items-center justify-center h-full text-xs text-muted-foreground/60">
+                Start trading to see your equity curve
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={equityData}>
-                <defs>
-                  <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <XAxis
-                  dataKey="date"
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
-                  formatter={(value: number) => [`$${value.toLocaleString()}`, "Equity"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="hsl(var(--chart-1))"
-                  strokeWidth={2}
-                  fill="url(#colorEquity)"
-                  strokeDasharray={equityData[equityData.length - 1]?.isLive ? "5 5" : "0"}
-                />
-              </AreaChart>
-            </ResponsiveContainer>
+                  <defs>
+                    <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
+                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="date" stroke="hsl(var(--muted-foreground) / 0.3)" fontSize={10} tickLine={false} axisLine={false} />
+                  <YAxis stroke="hsl(var(--muted-foreground) / 0.3)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} width={40} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border) / 0.5)", borderRadius: "8px", fontSize: "11px" }}
+                    formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
+                  />
+                  <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#colorEquity)" />
+                </AreaChart>
+              </ResponsiveContainer>
             )}
           </div>
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Win/Loss Distribution</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[250px]">
-            {winLossData.every(d => d.value === 0) ? (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                No trades yet. Start trading to see win/loss distribution!
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                <Pie
-                  data={winLossData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                  labelLine={false}
-                >
-                  {winLossData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-            )}
-          </div>
-          {winLossData.some(d => d.value > 0) && (
-            <div className="mt-2 flex justify-center gap-6 text-sm">
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full bg-chart-2" />
-                <span>Wins ({winLossData[0].value})</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="h-3 w-3 rounded-full bg-loss" />
-                <span>Losses ({winLossData[1].value})</span>
-              </div>
+      {/* Win/Loss & Monthly */}
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center gap-2 mb-3">
+              <PieChartIcon className="h-3.5 w-3.5 text-muted-foreground/50" />
+              <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Win/Loss</span>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>P&L by Sector</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[250px]">
-            {sectorData.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                No sector data available yet.
+            <div className="h-[140px]">
+              {winLossData.every(d => d.value === 0) ? (
+                <div className="flex items-center justify-center h-full text-xs text-muted-foreground/60">
+                  No trades yet
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={winLossData} cx="50%" cy="50%" innerRadius={35} outerRadius={55} paddingAngle={2} dataKey="value">
+                      {winLossData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border) / 0.5)", borderRadius: "8px", fontSize: "11px" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            {winLossData.some(d => d.value > 0) && (
+              <div className="flex justify-center gap-4 text-[10px] mt-2">
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-2 rounded-full bg-profit" />
+                  <span className="text-muted-foreground">Wins ({winLossData[0].value})</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <div className="h-2 w-2 rounded-full bg-loss" />
+                  <span className="text-muted-foreground">Losses ({winLossData[1].value})</span>
+                </div>
               </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={sectorData} layout="vertical">
-                <XAxis
-                  type="number"
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `$${value}`}
-                />
-                <YAxis
-                  dataKey="sector"
-                  type="category"
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                  width={80}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
-                  formatter={(value: number) => [`$${value}`, "P&L"]}
-                />
-                <Bar dataKey="pnl" radius={4}>
-                  {sectorData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={entry.pnl >= 0 ? "hsl(var(--chart-2))" : "hsl(var(--loss))"}
-                    />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
             )}
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
 
-      <Card className="md:col-span-2">
-        <CardHeader>
-          <CardTitle>Monthly Performance</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-[250px]">
-            {monthlyData.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-                No monthly performance data available yet.
-              </div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={monthlyData}>
-                <XAxis
-                  dataKey="month"
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="hsl(var(--muted-foreground))"
-                  fontSize={12}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(value) => `$${value}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: "8px",
-                  }}
-                />
-                <Bar dataKey="profit" fill="hsl(var(--chart-2))" radius={[4, 4, 0, 0]} name="Profit" />
-                <Bar dataKey="loss" fill="hsl(var(--loss))" radius={[4, 4, 0, 0]} name="Loss" />
-              </BarChart>
-            </ResponsiveContainer>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardContent className="pt-4 pb-3">
+            <div className="flex items-center gap-2 mb-3">
+              <BarChart3 className="h-3.5 w-3.5 text-muted-foreground/50" />
+              <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Monthly P&L</span>
+            </div>
+            <div className="h-[140px]">
+              {monthlyData.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-xs text-muted-foreground/60">
+                  No monthly data yet
+                </div>
+              ) : (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={monthlyData}>
+                    <XAxis dataKey="month" stroke="hsl(var(--muted-foreground) / 0.3)" fontSize={10} tickLine={false} axisLine={false} />
+                    <YAxis stroke="hsl(var(--muted-foreground) / 0.3)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} width={35} />
+                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border) / 0.5)", borderRadius: "8px", fontSize: "11px" }} />
+                    <Bar dataKey="profit" fill="hsl(var(--profit))" radius={[3, 3, 0, 0]} name="Profit" />
+                    <Bar dataKey="loss" fill="hsl(var(--loss))" radius={[3, 3, 0, 0]} name="Loss" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

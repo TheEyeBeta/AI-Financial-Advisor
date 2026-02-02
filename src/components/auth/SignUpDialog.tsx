@@ -90,10 +90,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
 
     setIsLoading(true);
     try {
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SignUpDialog.tsx:handleEmailSignUp:entry',message:'SignUp attempt starting',data:{email,firstName,lastName,age:ageNum,experienceLevel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,C,D,E'})}).catch(()=>{});
-      // #endregion
-
       // Sign up with email/password
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
@@ -109,17 +105,9 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
         },
       });
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SignUpDialog.tsx:handleEmailSignUp:afterAuthSignUp',message:'Auth signUp result',data:{hasUser:!!authData?.user,userId:authData?.user?.id,hasError:!!authError,errorCode:authError?.code,errorMessage:authError?.message,errorDetails:authError?.details},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,E'})}).catch(()=>{});
-      // #endregion
-
       if (authError) throw authError;
 
       if (authData.user) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SignUpDialog.tsx:handleEmailSignUp:afterAuthSignUp',message:'User created, waiting for trigger to create profile',data:{authUserId:authData.user.id,email:authData.user.email},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
-        // #endregion
-
         // User profile is created automatically by database trigger (handle_new_user)
         // The trigger uses auth_id to reference auth.users(id)
         // No manual upsert needed - trigger handles it with the metadata we passed
@@ -141,19 +129,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
         setExperienceLevel("beginner");
       }
     } catch (error: unknown) {
-      // #region agent log
-      console.error('[DEBUG] SignUp error caught:', {
-        message: error?.message,
-        code: error?.code,
-        details: error?.details,
-        hint: error?.hint,
-        name: error?.name,
-        stack: error?.stack,
-        fullError: error
-      });
-      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'SignUpDialog.tsx:handleEmailSignUp:catch',message:'SignUp error caught',data:{errorMessage:error?.message,errorCode:error?.code,errorDetails:error?.details,errorHint:error?.hint,errorStack:error?.stack,errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A,B,E'})}).catch(()=>{});
-      // #endregion
-
       const errorMessage = getErrorMessage(error) || "Failed to create account";
       toast({
         title: "Error",

@@ -8,38 +8,61 @@ import { PerformanceCharts } from "@/components/trading/PerformanceCharts";
 const PaperTrading = () => {
   return (
     <AppLayout title="Paper Trading">
-      <Tabs defaultValue="positions" className="w-full">
-        <TabsList className="mb-4 sm:mb-6 grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
-          <TabsTrigger value="positions" className="text-xs sm:text-sm">
-            Open Positions
-          </TabsTrigger>
-          <TabsTrigger value="history" className="text-xs sm:text-sm">
-            Trade History
-          </TabsTrigger>
-          <TabsTrigger value="journal" className="text-xs sm:text-sm">
-            Trade Journal
-          </TabsTrigger>
-          <TabsTrigger value="performance" className="text-xs sm:text-sm">
-            Performance
-          </TabsTrigger>
-        </TabsList>
+      <div className="max-w-6xl mx-auto space-y-6">
+        {/* Header */}
+        <div className="animate-in fade-in duration-300">
+          <h1 className="text-2xl font-semibold text-foreground">Paper Trading</h1>
+          <p className="text-sm text-muted-foreground/70 mt-0.5">
+            Practice trading with virtual money, risk-free
+          </p>
+        </div>
 
-        <TabsContent value="positions" className="w-full">
-          <OpenPositions />
-        </TabsContent>
+        {/* Tabs */}
+        <Tabs defaultValue="positions" className="w-full animate-in fade-in slide-in-from-bottom-2 duration-300" style={{ animationDelay: '50ms' }}>
+          <TabsList className="mb-5 inline-flex h-9 bg-muted/40 p-1 rounded-lg">
+            <TabsTrigger 
+              value="positions" 
+              className="text-xs px-3 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
+            >
+              Positions
+            </TabsTrigger>
+            <TabsTrigger 
+              value="history" 
+              className="text-xs px-3 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
+            >
+              History
+            </TabsTrigger>
+            <TabsTrigger 
+              value="journal" 
+              className="text-xs px-3 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
+            >
+              Journal
+            </TabsTrigger>
+            <TabsTrigger 
+              value="performance" 
+              className="text-xs px-3 data-[state=active]:bg-background data-[state=active]:shadow-sm rounded-md transition-all"
+            >
+              Performance
+            </TabsTrigger>
+          </TabsList>
 
-        <TabsContent value="history" className="w-full">
-          <TradeHistory />
-        </TabsContent>
+          <TabsContent value="positions" className="w-full animate-in fade-in duration-200">
+            <OpenPositions />
+          </TabsContent>
 
-        <TabsContent value="journal" className="w-full">
-          <TradeJournal />
-        </TabsContent>
+          <TabsContent value="history" className="w-full animate-in fade-in duration-200">
+            <TradeHistory />
+          </TabsContent>
 
-        <TabsContent value="performance" className="w-full">
-          <PerformanceCharts />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="journal" className="w-full animate-in fade-in duration-200">
+            <TradeJournal />
+          </TabsContent>
+
+          <TabsContent value="performance" className="w-full animate-in fade-in duration-200">
+            <PerformanceCharts />
+          </TabsContent>
+        </Tabs>
+      </div>
     </AppLayout>
   );
 };

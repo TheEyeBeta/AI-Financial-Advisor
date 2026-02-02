@@ -116,17 +116,65 @@ const Advisor = () => {
 
   return (
     <AppLayout title="AI Financial Advisor">
-      <div className="mx-auto flex h-[calc(100vh-8rem)] max-w-4xl w-full flex-col">
-        {showTopics && displayMessages.length <= 1 && (
-          <SuggestedTopics onSelectTopic={handleTopicSelect} />
-        )}
-        <ChatInterface
-          messages={displayMessages}
-          onSendMessage={handleSendMessage}
-          onNewChat={handleNewChat}
-          isLoading={isLoading}
-          chatTitle={currentChat?.title}
-        />
+      <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-4xl w-full flex-col">
+        {/* Scrollable content area */}
+        <div className="flex-1 overflow-y-auto px-4 pb-4 scrollbar-subtle">
+          {/* Suggested Topics */}
+          {showTopics && displayMessages.length <= 1 && (
+            <SuggestedTopics 
+              onSelectTopic={handleTopicSelect} 
+              experienceLevel={userProfile?.experience_level}
+            />
+          )}
+          
+          {/* Chat Messages */}
+          <ChatInterface
+            messages={displayMessages}
+            onNewChat={handleNewChat}
+            isLoading={isLoading}
+            chatTitle={currentChat?.title}
+          />
+        </div>
+        
+        {/* Input pinned to bottom */}
+        <div className="px-4 pb-1 pt-0.5">
+          <div className="max-w-3xl mx-auto relative">
+            <input
+              type="text"
+              placeholder={userProfile?.first_name ? `Message...` : "Ask anything..."}
+              className="w-full h-9 pl-3 pr-10 rounded-lg border border-border/50 bg-muted/20 text-sm placeholder:text-muted-foreground/40 focus:bg-background focus:border-primary/40 focus:outline-none transition-all duration-200 disabled:opacity-50"
+              disabled={isLoading}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  const input = e.currentTarget;
+                  if (input.value.trim()) {
+                    handleSendMessage(input.value.trim());
+                    input.value = '';
+                  }
+                }
+              }}
+              id="chat-input"
+            />
+            <button 
+              type="button"
+              disabled={isLoading}
+              onClick={() => {
+                const input = document.getElementById('chat-input') as HTMLInputElement;
+                if (input?.value.trim()) {
+                  handleSendMessage(input.value.trim());
+                  input.value = '';
+                }
+              }}
+              className="absolute right-0.5 top-1/2 -translate-y-1/2 h-8 w-8 rounded-md bg-primary/80 hover:bg-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center text-primary-foreground"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+            </button>
+          </div>
+          <p className="text-xs text-muted-foreground/50 text-center mt-1">
+            AI-generated content for educational purposes only · Not professional financial advice
+          </p>
+        </div>
       </div>
     </AppLayout>
   );

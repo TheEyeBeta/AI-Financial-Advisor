@@ -1,5 +1,5 @@
-import { TrendingUp, TrendingDown, DollarSign } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { TrendingUp, TrendingDown } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { usePortfolioHistory } from "@/hooks/use-data";
 import { format, parseISO } from "date-fns";
@@ -16,13 +16,15 @@ export function PortfolioPerformance() {
 
   if (isLoading) {
     return (
-      <Card className="lg:col-span-2">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-lg font-semibold">Portfolio Performance</CardTitle>
-          <DollarSign className="h-5 w-5 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">Loading...</div>
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardContent className="pt-5 pb-4">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="h-8 w-32 bg-muted/50 rounded animate-pulse" />
+              <div className="h-4 w-24 bg-muted/30 rounded mt-2 animate-pulse" />
+            </div>
+          </div>
+          <div className="h-[200px] bg-muted/20 rounded animate-pulse" />
         </CardContent>
       </Card>
     );
@@ -30,13 +32,10 @@ export function PortfolioPerformance() {
 
   if (portfolioData.length === 0) {
     return (
-      <Card className="lg:col-span-2">
-        <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-lg font-semibold">Portfolio Performance</CardTitle>
-          <DollarSign className="h-5 w-5 text-muted-foreground" />
-        </CardHeader>
-        <CardContent>
-          <div className="text-sm text-muted-foreground">No portfolio data available. Start trading to see your performance!</div>
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardContent className="py-12 text-center">
+          <p className="text-sm text-muted-foreground">No portfolio data yet</p>
+          <p className="text-xs text-muted-foreground/60 mt-1">Start trading to see your performance</p>
         </CardContent>
       </Card>
     );
@@ -49,66 +48,68 @@ export function PortfolioPerformance() {
   const isPositive = totalReturn >= 0;
 
   return (
-    <Card className="lg:col-span-2">
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-lg font-semibold">Portfolio Performance</CardTitle>
-        <DollarSign className="h-5 w-5 text-muted-foreground" />
-      </CardHeader>
-      <CardContent>
-        <div className="mb-4 flex flex-wrap items-baseline gap-4">
+    <Card className="border-border/50 bg-card/50 backdrop-blur-sm overflow-hidden">
+      <CardContent className="pt-5 pb-4">
+        {/* Value Header */}
+        <div className="flex items-start justify-between mb-4">
           <div>
-            <span className="text-3xl font-bold">${currentValue.toLocaleString()}</span>
-            <span className="ml-2 text-sm text-muted-foreground">Total Value</span>
+            <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-1">Total Value</p>
+            <span className="text-3xl font-bold tracking-tight">${currentValue.toLocaleString()}</span>
           </div>
-          <div className={`flex items-center gap-1 ${isPositive ? "text-profit" : "text-loss"}`}>
+          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium ${
+            isPositive 
+              ? "bg-profit/10 text-profit" 
+              : "bg-loss/10 text-loss"
+          }`}>
             {isPositive ? (
-              <TrendingUp className="h-4 w-4" />
+              <TrendingUp className="h-3.5 w-3.5" />
             ) : (
-              <TrendingDown className="h-4 w-4" />
+              <TrendingDown className="h-3.5 w-3.5" />
             )}
-            <span className="font-medium">
-              {isPositive ? "+" : ""}${totalReturn.toLocaleString()} ({percentReturn}%)
-            </span>
-            <span className="text-xs text-muted-foreground">YTD</span>
+            <span>{isPositive ? "+" : ""}{percentReturn}%</span>
           </div>
         </div>
-        <div className="h-[280px] w-full">
+        
+        {/* Chart */}
+        <div className="h-[200px] w-full -mx-2">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={portfolioData}>
               <defs>
                 <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--chart-1))" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(var(--chart-1))" stopOpacity={0} />
+                  <stop offset="5%" stopColor={isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} stopOpacity={0.2} />
+                  <stop offset="95%" stopColor={isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} stopOpacity={0} />
                 </linearGradient>
               </defs>
               <XAxis
                 dataKey="date"
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
+                stroke="hsl(var(--muted-foreground) / 0.3)"
+                fontSize={10}
                 tickLine={false}
                 axisLine={false}
               />
               <YAxis
-                stroke="hsl(var(--muted-foreground))"
-                fontSize={12}
+                stroke="hsl(var(--muted-foreground) / 0.3)"
+                fontSize={10}
                 tickLine={false}
                 axisLine={false}
                 tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
+                width={45}
               />
               <Tooltip
                 contentStyle={{
                   backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
+                  border: "1px solid hsl(var(--border) / 0.5)",
                   borderRadius: "8px",
-                  boxShadow: "0 4px 6px -1px rgb(0 0 0 / 0.1)",
+                  boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)",
+                  fontSize: "12px",
                 }}
-                labelStyle={{ color: "hsl(var(--foreground))" }}
-                formatter={(value: number) => [`$${value.toLocaleString()}`, "Value"]}
+                labelStyle={{ color: "hsl(var(--muted-foreground))", fontSize: "10px" }}
+                formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
               />
               <Area
                 type="monotone"
                 dataKey="value"
-                stroke="hsl(var(--chart-1))"
+                stroke={isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"}
                 strokeWidth={2}
                 fill="url(#colorValue)"
               />

@@ -10,7 +10,9 @@ export default function AuthCallback() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let isMounted = true;
     let subscription: { unsubscribe: () => void } | null = null;
+    let timeoutId: NodeJS.Timeout | null = null;
     
     const handleAuthCallback = async () => {
       try {
@@ -25,50 +27,63 @@ export default function AuthCallback() {
         if (!hasAuthParams) {
           // Not an auth callback, redirect to home
           console.warn('Auth callback accessed without auth parameters');
-          navigate('/');
-          setLoading(false);
+          if (isMounted) {
+            navigate('/');
+            setLoading(false);
+          }
           return;
         }
 
         // Wait a moment for Supabase to process URL hash/query params
         // With detectSessionInUrl: true, Supabase processes these automatically
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        const SUPABASE_PROCESSING_DELAY = 1000;
+        await new Promise(resolve => setTimeout(resolve, SUPABASE_PROCESSING_DELAY));
+
+        if (!isMounted) return;
 
         // Check for session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
           console.error('Auth callback error:', sessionError);
-          const verified = searchParams.get('verified');
-          if (verified === 'true') {
-            toast({
-              title: "Email Verified!",
-              description: "Your account has been verified. Please sign in.",
-            });
-            navigate('/?verified=true');
-          } else {
-            navigate('/?error=auth_failed');
+          if (isMounted) {
+            const verified = searchParams.get('verified');
+            if (verified === 'true') {
+              toast({
+                title: "Email Verified!",
+                description: "Your account has been verified. Please sign in.",
+              });
+              navigate('/?verified=true');
+            } else {
+              navigate('/?error=auth_failed');
+            }
+            setLoading(false);
           }
-          setLoading(false);
           return;
         }
 
-        if (session) {
+        if (session && isMounted) {
           // User is authenticated, redirect to dashboard
           navigate('/');
           setLoading(false);
           return;
         }
 
+        if (!isMounted) return;
+
         // No session yet - listen for auth state changes
         const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+          if (!isMounted) return;
+          
           if (event === 'SIGNED_IN' && newSession) {
-            authSubscription.unsubscribe();
+            if (authSubscription) authSubscription.unsubscribe();
+            if (timeoutId) clearTimeout(timeoutId);
             navigate('/advisor');
             setLoading(false);
           } else if (event === 'TOKEN_REFRESHED' && newSession) {
             // Session refreshed, redirect to dashboard
-            authSubscription.unsubscribe();
+            if (authSubscription) authSubscription.unsubscribe();
+            if (timeoutId) clearTimeout(timeoutId);
             navigate('/advisor');
             setLoading(false);
           }
@@ -77,8 +92,11 @@ export default function AuthCallback() {
         subscription = authSubscription;
 
         // Timeout after 10 seconds
-        setTimeout(() => {
-          authSubscription.unsubscribe();
+        const AUTH_TIMEOUT_MS = 10000;
+        timeoutId = setTimeout(() => {
+          if (!isMounted) return;
+          
+          if (authSubscription) authSubscription.unsubscribe();
           const verified = searchParams.get('verified');
           if (verified === 'true') {
             toast({
@@ -95,23 +113,24 @@ export default function AuthCallback() {
             navigate('/?error=timeout');
           }
           setLoading(false);
-        }, 10000);
+        }, AUTH_TIMEOUT_MS);
 
       } catch (error) {
         console.error('Error handling auth callback:', error);
-        if (subscription) {
-          subscription.unsubscribe();
+        if (isMounted) {
+          navigate('/?error=auth_failed');
+          setLoading(false);
         }
-        navigate('/?error=auth_failed');
-        setLoading(false);
       }
     };
 
     handleAuthCallback();
 
-    // Cleanup
+    // Cleanup function - ensures all resources are properly cleaned up
     return () => {
+      isMounted = false;
       if (subscription) subscription.unsubscribe();
+      if (timeoutId) clearTimeout(timeoutId);
     };
   }, [navigate, searchParams]);
 

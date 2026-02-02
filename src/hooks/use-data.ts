@@ -13,6 +13,7 @@ import {
   newsApi,
   pythonApi,
   eyeApi,
+  tradeEngineApi,
 } from '@/services/api';
 import type {
   OpenPosition,
@@ -62,7 +63,10 @@ export function useDeletePosition() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: (id: string) => positionsApi.delete(id),
+    mutationFn: (id: string) => {
+      if (!userId) throw new Error('Not authenticated');
+      return positionsApi.delete(id, userId);
+    },
     onSuccess: () => {
       // Invalidate all related queries so all components refresh
       queryClient.invalidateQueries({ queryKey: ['open-positions', userId] });
@@ -203,39 +207,61 @@ export function useSendChatMessage() {
         content: msg.content
       }));
       
-      // Check if message contains quantitative keywords that might need The Eye data
-      const quantitativeKeywords = [
-        'portfolio', 'performance', 'profit', 'loss', 'pnl', 'win rate', 'trades', 
-        'positions', 'statistics', 'metrics', 'return', 'equity', 'value', 
-        'how much', 'how many', 'what is my', 'show me my', 'analyze my', 'the eye', 'eye'
-      ];
-      const needsEyeData = quantitativeKeywords.some(keyword => 
-        message.toLowerCase().includes(keyword)
-      );
+      // Always fetch LIVE data from The Eye Trade Engine (if available)
+      // This ensures the AI has access to market data for any query, including ticker symbols
+      let tradeEngineContext = null;
       
-      // Fetch The Eye snapshot if needed (only if user has connected The Eye)
-      let eyeSnapshot = null;
-      if (needsEyeData) {
-        try {
-          // Get the latest active snapshot from The Eye
-          eyeSnapshot = await eyeApi.getLatestSnapshot(userId);
-        } catch (error) {
-          console.error('Error fetching The Eye snapshot for AI:', error);
-          // Continue without The Eye data - AI will inform user
-        }
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:beforeFetch',message:'About to fetch Trade Engine context (always fetch)',data:{baseUrl:tradeEngineApi.baseUrl,messagePreview:message.slice(0,50)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
+      
+      try {
+        // Direct connection to Trade Engine - no snapshots needed
+        tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48);
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:afterFetch',message:'Trade Engine fetch SUCCESS',data:{hasContext:!!tradeEngineContext,tickers:tradeEngineContext?.tracked_tickers?.length,signals:tradeEngineContext?.recent_signals?.length,engineRunning:tradeEngineContext?.engine_status?.is_running},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B,D'})}).catch(()=>{});
+        // #endregion
+        console.log('[AI] Fetched live Trade Engine context:', {
+          tickers: tradeEngineContext.tracked_tickers.length,
+          signals: tradeEngineContext.recent_signals.length,
+          news: tradeEngineContext.recent_news.length,
+        });
+      } catch (error) {
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:fetchError',message:'Trade Engine fetch FAILED',data:{errorMsg:String(error),errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B,C,D'})}).catch(()=>{});
+        // #endregion
+        console.error('Error fetching Trade Engine context:', error);
+        // Trade Engine might be offline - AI will respond without market data
       }
       
-      // Get AI response with user's experience level, conversation history, and The Eye snapshot
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:beforeGetChatResponse',message:'About to call getChatResponse',data:{hasTradeEngineContext:!!tradeEngineContext,experienceLevel:userProfile?.experience_level},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
+      // #endregion
+      
+      // Get AI response with user's experience level, conversation history, and live Eye data
       const experienceLevel = userProfile?.experience_level ?? null;
-      const aiResponse = await pythonApi.getChatResponse(message, userId, experienceLevel, chatHistory, eyeSnapshot);
+      const aiResponse = await pythonApi.getChatResponse(
+        message, 
+        userId, 
+        experienceLevel, 
+        chatHistory, 
+        null,  // No snapshots - using live data only
+        tradeEngineContext  // Live Trade Engine data
+      );
       
       // Save AI response
       await chatApi.addMessage(userId, chatId, 'assistant', aiResponse);
       
       // Auto-generate title on first message
       if (isFirstMessage) {
-        const title = await pythonApi.generateChatTitle(message);
-        await chatsApi.updateTitle(chatId, title);
+        try {
+          const title = await pythonApi.generateChatTitle(message);
+          await chatsApi.updateTitle(chatId, title);
+        } catch (error) {
+          // Log error but don't fail the message creation if title generation fails
+          console.error('Failed to generate chat title:', error);
+          // Continue without updating title - chat will use default title
+        }
       }
       
       return { message, response: aiResponse };
@@ -394,8 +420,10 @@ export function useUpdateEyeSnapshot() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: ({ id, updates }: { id: string; updates: Partial<EyeSnapshot> }) =>
-      eyeApi.updateSnapshot(id, updates),
+    mutationFn: ({ id, updates }: { id: string; updates: Partial<EyeSnapshot> }) => {
+      if (!userId) throw new Error('Not authenticated');
+      return eyeApi.updateSnapshot(id, userId, updates);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
       queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
@@ -408,7 +436,10 @@ export function useDeleteEyeSnapshot() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: (id: string) => eyeApi.deleteSnapshot(id),
+    mutationFn: (id: string) => {
+      if (!userId) throw new Error('Not authenticated');
+      return eyeApi.deleteSnapshot(id, userId);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
       queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
@@ -429,5 +460,63 @@ export function useDisconnectEye() {
   });
 }
 
-// Export pythonApi for use in components
-export { pythonApi };
+// ============================================================
+// Trade Engine API Hooks - Direct connection to TheEyeBetaLocal
+// ============================================================
+
+// Fetch news from Trade Engine (live from backend, not Supabase)
+export function useTradeEngineNews(limit: number = 15) {
+  return useQuery({
+    queryKey: ['trade-engine-news', limit],
+    queryFn: () => tradeEngineApi.getNews(limit),
+    refetchInterval: 60 * 1000, // Refetch every minute
+    staleTime: 30 * 1000, // Consider data fresh for 30 seconds
+    retry: 2,
+  });
+}
+
+// Fetch technical indicators from Trade Engine
+export function useTradeEngineIndicators(ticker: string, date?: string) {
+  return useQuery({
+    queryKey: ['trade-engine-indicators', ticker, date],
+    queryFn: () => tradeEngineApi.getTechnicalIndicators(ticker, date),
+    enabled: !!ticker,
+    staleTime: 60 * 1000,
+    retry: 2,
+  });
+}
+
+// Fetch price data from Trade Engine for charting
+export function useTradeEnginePriceData(ticker: string, startDate?: string, endDate?: string, limit: number = 100) {
+  return useQuery({
+    queryKey: ['trade-engine-prices', ticker, startDate, endDate, limit],
+    queryFn: () => tradeEngineApi.getPriceData(ticker, startDate, endDate, limit),
+    enabled: !!ticker,
+    staleTime: 60 * 1000,
+    retry: 2,
+  });
+}
+
+// Fetch available tickers from Trade Engine
+export function useTradeEngineTickers(activeOnly: boolean = true) {
+  return useQuery({
+    queryKey: ['trade-engine-tickers', activeOnly],
+    queryFn: () => tradeEngineApi.getTickers(activeOnly),
+    staleTime: 5 * 60 * 1000, // Tickers change rarely
+    retry: 2,
+  });
+}
+
+// Health check for Trade Engine connection
+export function useTradeEngineHealth() {
+  return useQuery({
+    queryKey: ['trade-engine-health'],
+    queryFn: () => tradeEngineApi.healthCheck(),
+    refetchInterval: 30 * 1000, // Check every 30 seconds
+    staleTime: 10 * 1000,
+    retry: 1,
+  });
+}
+
+// Export pythonApi and tradeEngineApi for use in components
+export { pythonApi, tradeEngineApi };

@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { Plus, Calendar, DollarSign, FileText } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Plus, Calendar, DollarSign, FileText, BookOpen, X } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,13 +13,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useTradeJournal, useCreateJournalEntry, useOpenPositions, useCreatePosition } from "@/hooks/use-data";
+import { useTradeJournal, useCreateJournalEntry, useOpenPositions } from "@/hooks/use-data";
 import { positionsApi, tradesApi } from "@/services/api";
 import { useAuth } from "@/hooks/use-auth";
 import { format, parseISO } from "date-fns";
 import { useForm, Controller } from "react-hook-form";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
+import { cn } from "@/lib/utils";
 
 interface JournalFormData {
   symbol: string;
@@ -36,7 +37,6 @@ export function TradeJournal() {
   const { data: journalEntries = [], isLoading } = useTradeJournal();
   const { data: openPositions = [] } = useOpenPositions();
   const createEntry = useCreateJournalEntry();
-  const createPosition = useCreatePosition();
   const { userId } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<JournalFormData>({
@@ -63,22 +63,19 @@ export function TradeJournal() {
 
       const symbol = data.symbol.toUpperCase();
       let tradeId: string | null = null;
-      let positionId: string | null = null;
 
       // If BUY, create an open position
       if (data.type === 'BUY') {
-        const position = await positionsApi.create(userId, {
+        await positionsApi.create(userId, {
           symbol,
-          name: symbol, // Can be enhanced with stock name lookup
+          name: symbol,
           quantity: data.quantity,
           entry_price: data.price,
           current_price: data.price,
-          type: 'LONG', // Default to LONG, can add SHORT option later
+          type: 'LONG',
           entry_date: new Date(data.date).toISOString(),
         });
-        positionId = position.id;
 
-        // Also create a trade record for OPENED action
         const trade = await tradesApi.create(userId, {
           symbol,
           type: 'LONG',
@@ -92,18 +89,14 @@ export function TradeJournal() {
         });
         tradeId = trade.id;
       } 
-      // If SELL, try to close an existing position or create a closed trade
       else if (data.type === 'SELL') {
-        // Find matching open position for this symbol
         const matchingPosition = openPositions.find(
           pos => pos.symbol === symbol && pos.type === 'LONG'
         );
 
         if (matchingPosition) {
-          // Calculate P&L
           const pnl = (data.price - matchingPosition.entry_price) * Math.min(data.quantity, matchingPosition.quantity);
           
-          // Create closed trade record
           const trade = await tradesApi.create(userId, {
             symbol,
             type: 'LONG',
@@ -117,34 +110,29 @@ export function TradeJournal() {
           });
           tradeId = trade.id;
 
-          // Update or delete the open position
           if (data.quantity >= matchingPosition.quantity) {
-            // Close entire position
-            await positionsApi.delete(matchingPosition.id);
+            await positionsApi.delete(matchingPosition.id, userId);
           } else {
-            // Partial close - reduce quantity
-            await positionsApi.update(matchingPosition.id, {
+            await positionsApi.update(matchingPosition.id, userId, {
               quantity: matchingPosition.quantity - data.quantity,
             });
           }
         } else {
-          // No matching position, create a closed trade directly
           const trade = await tradesApi.create(userId, {
             symbol,
             type: 'LONG',
             action: 'CLOSED',
             quantity: data.quantity,
-            entry_price: data.price, // Use sell price as entry if no position found
+            entry_price: data.price,
             exit_price: data.price,
             entry_date: new Date(data.date).toISOString(),
             exit_date: new Date(data.date).toISOString(),
-            pnl: 0, // No P&L if we don't have entry price
+            pnl: 0,
           });
           tradeId = trade.id;
         }
       }
 
-      // Create journal entry linked to the trade/position
       await createEntry.mutateAsync({
         symbol,
         type: data.type,
@@ -176,148 +164,134 @@ export function TradeJournal() {
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <h2 className="text-xl font-semibold">Trade Journal</h2>
-          <p className="text-sm text-muted-foreground">
-            Document your trades and trading rationale
-          </p>
-        </div>
-        <Button onClick={() => setShowForm(!showForm)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Log Trade
+        <p className="text-xs text-muted-foreground/70">
+          {journalEntries.length} journal {journalEntries.length === 1 ? 'entry' : 'entries'}
+        </p>
+        <Button 
+          onClick={() => setShowForm(!showForm)} 
+          size="sm" 
+          className="h-8 text-xs gap-1.5"
+        >
+          {showForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+          {showForm ? 'Cancel' : 'Log Trade'}
         </Button>
       </div>
 
+      {/* Form */}
       {showForm && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">New Trade Entry</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="symbol">Symbol *</Label>
-                <Input
-                  id="symbol"
-                  placeholder="e.g., AAPL"
-                  {...register('symbol', { required: 'Symbol is required' })}
-                />
-                {errors.symbol && (
-                  <p className="text-xs text-destructive">{errors.symbol.message}</p>
-                )}
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-200">
+          <CardContent className="pt-5 pb-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="symbol" className="text-xs">Symbol</Label>
+                  <Input
+                    id="symbol"
+                    placeholder="AAPL"
+                    className="h-9 text-sm"
+                    {...register('symbol', { required: 'Required' })}
+                  />
+                  {errors.symbol && <p className="text-[10px] text-destructive">{errors.symbol.message}</p>}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Action</Label>
+                  <Controller
+                    name="type"
+                    control={control}
+                    rules={{ required: true }}
+                    render={({ field }) => (
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <SelectTrigger className="h-9 text-sm">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="BUY">Buy</SelectItem>
+                          <SelectItem value="SELL">Sell</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="date" className="text-xs">Date</Label>
+                  <Input
+                    id="date"
+                    type="date"
+                    className="h-9 text-sm"
+                    {...register('date', { required: true })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="quantity" className="text-xs">Quantity</Label>
+                  <Input
+                    id="quantity"
+                    type="number"
+                    placeholder="0"
+                    className="h-9 text-sm"
+                    {...register('quantity', { required: true, valueAsNumber: true, min: 1 })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="price" className="text-xs">Price</Label>
+                  <Input
+                    id="price"
+                    type="number"
+                    step="0.01"
+                    placeholder="0.00"
+                    className="h-9 text-sm"
+                    {...register('price', { required: true, valueAsNumber: true, min: 0.01 })}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="tags" className="text-xs">Tags</Label>
+                  <Input
+                    id="tags"
+                    placeholder="momentum, tech"
+                    className="h-9 text-sm"
+                    {...register('tags')}
+                  />
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="type">Action *</Label>
-                <Controller
-                  name="type"
-                  control={control}
-                  rules={{ required: 'Action is required' }}
-                  render={({ field }) => (
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select action" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="BUY">Buy</SelectItem>
-                        <SelectItem value="SELL">Sell</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {errors.type && (
-                  <p className="text-xs text-destructive">{errors.type.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="quantity">Quantity *</Label>
-                <Input
-                  id="quantity"
-                  type="number"
-                  placeholder="0"
-                  {...register('quantity', {
-                    required: 'Quantity is required',
-                    valueAsNumber: true,
-                    min: { value: 1, message: 'Quantity must be at least 1' }
-                  })}
-                />
-                {errors.quantity && (
-                  <p className="text-xs text-destructive">{errors.quantity.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="price">Price *</Label>
-                <Input
-                  id="price"
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  {...register('price', {
-                    required: 'Price is required',
-                    valueAsNumber: true,
-                    min: { value: 0.01, message: 'Price must be greater than 0' }
-                  })}
-                />
-                {errors.price && (
-                  <p className="text-xs text-destructive">{errors.price.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="date">Date *</Label>
-                <Input
-                  id="date"
-                  type="date"
-                  {...register('date', { required: 'Date is required' })}
-                />
-                {errors.date && (
-                  <p className="text-xs text-destructive">{errors.date.message}</p>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="tags">Tags (comma separated)</Label>
-                <Input
-                  id="tags"
-                  placeholder="e.g., momentum, tech"
-                  {...register('tags')}
-                />
-              </div>
-
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="strategy">Strategy / Reasoning</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="strategy" className="text-xs">Strategy / Reasoning</Label>
                 <Input
                   id="strategy"
                   placeholder="Why are you making this trade?"
+                  className="h-9 text-sm"
                   {...register('strategy')}
                 />
               </div>
 
-              <div className="space-y-2 md:col-span-2">
-                <Label htmlFor="notes">Notes</Label>
+              <div className="space-y-1.5">
+                <Label htmlFor="notes" className="text-xs">Notes</Label>
                 <Textarea
                   id="notes"
-                  placeholder="Additional notes, observations, risk management..."
-                  rows={3}
+                  placeholder="Additional observations..."
+                  rows={2}
+                  className="text-sm resize-none"
                   {...register('notes')}
                 />
               </div>
 
-              <div className="flex gap-2 md:col-span-2">
-                <Button type="submit" disabled={createEntry.isPending}>
+              <div className="flex gap-2 pt-1">
+                <Button type="submit" size="sm" className="h-8 text-xs" disabled={createEntry.isPending}>
                   {createEntry.isPending ? 'Saving...' : 'Save Entry'}
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setShowForm(false);
-                    reset();
-                  }}
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => { setShowForm(false); reset(); }}
                 >
                   Cancel
                 </Button>
@@ -327,40 +301,73 @@ export function TradeJournal() {
         </Card>
       )}
 
+      {/* Journal Entries */}
       {isLoading ? (
-        <div className="text-sm text-muted-foreground py-4">Loading journal entries...</div>
-      ) : journalEntries.length === 0 ? (
-        <div className="text-sm text-muted-foreground py-4">
-          No journal entries yet. Click "Log Trade" to add your first entry!
+        <div className="space-y-2">
+          {[1, 2].map((i) => (
+            <div key={i} className="h-24 bg-muted/30 rounded-xl animate-pulse" />
+          ))}
         </div>
+      ) : journalEntries.length === 0 ? (
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardContent className="py-12 text-center">
+            <BookOpen className="h-8 w-8 mx-auto mb-3 text-muted-foreground/30" />
+            <p className="text-sm text-muted-foreground">No journal entries yet</p>
+            <p className="text-xs text-muted-foreground/60 mt-1">Click "Log Trade" to document your first trade</p>
+          </CardContent>
+        </Card>
       ) : (
-        <div className="space-y-4">
-          {journalEntries.map((entry) => (
-            <Card key={entry.id}>
-              <CardContent className="pt-6">
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-3">
-                      <span className="text-xl font-bold">{entry.symbol}</span>
-                      <Badge variant={entry.type === "BUY" ? "default" : "destructive"}>
-                        {entry.type}
-                      </Badge>
+        <div className="space-y-2">
+          {journalEntries.map((entry, index) => (
+            <Card 
+              key={entry.id} 
+              className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-colors animate-in fade-in"
+              style={{ animationDelay: `${index * 30}ms` }}
+            >
+              <CardContent className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className={cn(
+                      "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
+                      entry.type === "BUY" ? "bg-profit/10" : "bg-loss/10"
+                    )}>
+                      <span className={cn(
+                        "text-xs font-bold",
+                        entry.type === "BUY" ? "text-profit" : "text-loss"
+                      )}>
+                        {entry.type === "BUY" ? "B" : "S"}
+                      </span>
                     </div>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Calendar className="h-3.5 w-3.5" />
-                        {format(parseISO(entry.date), "MMM d, yyyy")}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <DollarSign className="h-3.5 w-3.5" />
-                        {entry.quantity} @ ${entry.price.toFixed(2)}
-                      </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">{entry.symbol}</span>
+                        <Badge 
+                          variant="outline" 
+                          className={cn(
+                            "text-[10px] px-1.5 py-0 h-4",
+                            entry.type === "BUY" ? "text-profit border-profit/30" : "text-loss border-loss/30"
+                          )}
+                        >
+                          {entry.type}
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-muted-foreground/60 mt-0.5">
+                        <span className="flex items-center gap-1">
+                          <Calendar className="h-3 w-3" />
+                          {format(parseISO(entry.date), "MMM d, yyyy")}
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <DollarSign className="h-3 w-3" />
+                          {entry.quantity} @ ${entry.price.toFixed(2)}
+                        </span>
+                      </div>
                     </div>
                   </div>
+                  
                   {entry.tags && entry.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1">
-                      {entry.tags.map((tag, index) => (
-                        <Badge key={index} variant="secondary" className="text-xs">
+                    <div className="flex flex-wrap gap-1 justify-end">
+                      {entry.tags.map((tag, i) => (
+                        <Badge key={i} variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-muted/50">
                           {tag}
                         </Badge>
                       ))}
@@ -369,19 +376,16 @@ export function TradeJournal() {
                 </div>
 
                 {(entry.strategy || entry.notes) && (
-                  <div className="mt-4 space-y-2">
+                  <div className="mt-3 pt-3 border-t border-border/30 space-y-2">
                     {entry.strategy && (
                       <div className="flex items-start gap-2">
-                        <FileText className="mt-0.5 h-4 w-4 text-primary" />
-                        <div>
-                          <div className="text-sm font-medium">Strategy</div>
-                          <p className="text-sm text-muted-foreground">{entry.strategy}</p>
-                        </div>
+                        <FileText className="h-3.5 w-3.5 text-primary/70 mt-0.5 shrink-0" />
+                        <p className="text-xs text-muted-foreground">{entry.strategy}</p>
                       </div>
                     )}
                     {entry.notes && (
-                      <div className="rounded-lg bg-muted/50 p-3">
-                        <p className="text-sm">{entry.notes}</p>
+                      <div className="rounded-lg bg-muted/30 p-2.5">
+                        <p className="text-xs text-muted-foreground/80">{entry.notes}</p>
                       </div>
                     )}
                   </div>

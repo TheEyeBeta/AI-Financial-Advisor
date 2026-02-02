@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, ArrowLeft, Loader2, TrendingUp } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,9 +22,8 @@ interface OnboardingAnswers {
 }
 
 const Onboarding = () => {
-  const { userProfile, userId } = useAuth();
+  const { userProfile, userId, refreshProfile } = useAuth();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [answers, setAnswers] = useState<OnboardingAnswers>({
@@ -129,18 +127,16 @@ const Onboarding = () => {
 
       if (error) throw error;
 
-      // Invalidate user profile query to refresh it
-      queryClient.invalidateQueries({ queryKey: ['user-profile'] });
+      // Refresh the profile in AuthContext so ProtectedRoute sees the update
+      await refreshProfile();
 
       toast({
         title: "Welcome!",
         description: "Your profile has been set up. Let's get started!",
       });
 
-      // Small delay to ensure profile is refreshed, then redirect
-      setTimeout(() => {
-        navigate("/advisor");
-      }, 500);
+      // Navigate - ProtectedRoute will now see onboarding_complete: true
+      navigate("/advisor", { replace: true });
     } catch (error: unknown) {
       toast({
         title: "Error",
