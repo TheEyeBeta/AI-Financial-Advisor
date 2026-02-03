@@ -13,6 +13,7 @@ import type {
   TrendingStock,
   NewsArticle,
   EyeSnapshot,
+  StockSnapshot,
 } from '@/types/database';
 
 // Constants for input validation and API configuration
@@ -630,6 +631,108 @@ export const eyeApi = {
   },
 };
 
+// Stock Snapshots API - Read financial data from database
+export const stockSnapshotsApi = {
+  // Get all stock snapshots (latest data for all tickers)
+  async getAll(limit?: number): Promise<StockSnapshot[]> {
+    let query = supabase
+      .from('stock_snapshots')
+      .select('*')
+      .order('updated_at', { ascending: false });
+    
+    if (limit) {
+      query = query.limit(limit);
+    }
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Get stock snapshot by ticker symbol
+  async getByTicker(ticker: string): Promise<StockSnapshot | null> {
+    const { data, error } = await supabase
+      .from('stock_snapshots')
+      .select('*')
+      .eq('ticker', ticker.toUpperCase())
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Not found
+      throw error;
+    }
+    return data;
+  },
+
+  // Get stock snapshot by company name (case-insensitive partial match)
+  async getByCompanyName(companyName: string): Promise<StockSnapshot | null> {
+    const { data, error } = await supabase
+      .from('stock_snapshots')
+      .select('*')
+      .ilike('company_name', `%${companyName}%`)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') return null; // Not found
+      throw error;
+    }
+    return data;
+  },
+
+  // Get stock snapshots by multiple tickers
+  async getByTickers(tickers: string[]): Promise<StockSnapshot[]> {
+    const { data, error } = await supabase
+      .from('stock_snapshots')
+      .select('*')
+      .in('ticker', tickers.map(t => t.toUpperCase()))
+      .order('updated_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Get stock snapshots with signals
+  async getWithSignals(limit?: number): Promise<StockSnapshot[]> {
+    let query = supabase
+      .from('stock_snapshots')
+      .select('*')
+      .not('latest_signal', 'is', null)
+      .order('signal_timestamp', { ascending: false });
+    
+    if (limit) {
+      query = query.limit(limit);
+    }
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+
+  // Get recently updated stock snapshots
+  async getRecentlyUpdated(hours: number = 24, limit?: number): Promise<StockSnapshot[]> {
+    const cutoffTime = new Date();
+    cutoffTime.setHours(cutoffTime.getHours() - hours);
+    
+    let query = supabase
+      .from('stock_snapshots')
+      .select('*')
+      .gte('updated_at', cutoffTime.toISOString())
+      .order('updated_at', { ascending: false });
+    
+    if (limit) {
+      query = query.limit(limit);
+    }
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    return data || [];
+  },
+};
+
 // Experience level type
 type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 
@@ -808,10 +911,6 @@ Do NOT reference any user information, personal data, or identifiers. Only analy
     _eyeSnapshot?: EyeSnapshot | null,  // Deprecated - using live data instead
     tradeEngineContext?: TradeEngineAIContext | null
   ): Promise<string> {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:getChatResponse:entry',message:'getChatResponse called',data:{hasTradeEngineContext:!!tradeEngineContext,engineRunning:tradeEngineContext?.engine_status?.is_running,tickerCount:tradeEngineContext?.tracked_tickers?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
-    
     // Input validation
     if (!message || message.trim().length === 0) {
       throw new Error('Message cannot be empty');
@@ -828,47 +927,141 @@ Do NOT reference any user information, personal data, or identifiers. Only analy
     
     const hasTradeEngineData = !!tradeEngineContext;
     
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:getChatResponse:hasData',message:'Trade engine data check',data:{hasTradeEngineData,experienceLevel},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-    // #endregion
+    // Extract ticker from message FIRST (before fetching all data)
+    // This allows us to query for specific ticker if needed
+    const messageUpper = message.toUpperCase();
+    const skipWords = new Set(['WHAT', 'WHEN', 'WHERE', 'WHY', 'HOW', 'HOWS', 'HOW\'S', 'WHO', 'WHICH', 'IS', 'ARE', 'WAS', 'WERE', 'THE', 'A', 'AN', 'FOR', 'AND', 'OR', 'BUT', 'WITH', 'ABOUT', 'FROM', 'TO', 'OF', 'IN', 'ON', 'AT', 'BY', 'LATEST', 'PRICE', 'STOCK', 'SHARES', 'SHARE', 'COMPANY', 'TICKER', 'SYMBOL', 'ME', 'YOU', 'TELL', 'SHOW', 'GIVE', 'CAN', 'WILL', 'SHOULD', 'WOULD', 'COULD', 'GOOD', 'NOW', 'THEN']);
     
-    const systemPrompt = getSystemPrompt(experienceLevel ?? null, hasTradeEngineData);
+    let requestedTicker: string | null = null;
     
-    // Build The Eye data context from LIVE Trade Engine connection
-    let eyeDataContext = '';
+    // Priority 1: Check for ticker in parentheses (e.g., "Apple (AAPL)")
+    const parenMatch = messageUpper.match(/\(([A-Z]{1,5})\)/);
+    if (parenMatch && parenMatch[1]) {
+      const ticker = parenMatch[1];
+      if (ticker.length >= 2 && ticker.length <= 5 && !skipWords.has(ticker)) {
+        requestedTicker = ticker;
+      }
+    }
     
-    if (hasTradeEngineData && tradeEngineContext) {
-      // Improved ticker extraction - handles "NVDA", "nvda", "How about NVDA", etc.
-      const messageUpper = message.toUpperCase();
-      // Try multiple patterns: word boundaries, standalone words, or common phrases
-      const tickerPatterns = [
-        /\b([A-Z]{1,5})\b/,  // Word boundary (original)
-        /(?:about|for|on|with|regarding)\s+([A-Z]{1,5})\b/i,  // "about NVDA"
-        /^([A-Z]{1,5})\s*$/,  // Standalone ticker
-      ];
-      
-      let requestedTicker: string | null = null;
-      for (const pattern of tickerPatterns) {
-        const match = messageUpper.match(pattern);
-        if (match && match[1] && match[1].length >= 2 && match[1].length <= 5) {
-          requestedTicker = match[1];
+    // Priority 2: Check after common phrases (e.g., "what is AAPL", "price of NVDA")
+    if (!requestedTicker) {
+      const afterPhraseMatch = messageUpper.match(/(?:about|for|on|with|regarding|tell me about|what is|what's|price of|price for|show me|give me|tell me|latest price for|latest price of)\s+([A-Z]{1,5})\b/i);
+      if (afterPhraseMatch && afterPhraseMatch[1]) {
+        const ticker = afterPhraseMatch[1];
+        if (ticker.length >= 2 && ticker.length <= 5 && !skipWords.has(ticker)) {
+          requestedTicker = ticker;
+        }
+      }
+    }
+    
+    // Priority 3: Look for ticker patterns in all words (2-5 uppercase letters, not in skip list)
+    if (!requestedTicker) {
+      const words = messageUpper.split(/\s+/);
+      for (const word of words) {
+        const cleanWord = word.replace(/[^A-Z]/g, ''); // Remove non-letters
+        if (cleanWord.length >= 2 && cleanWord.length <= 5 && !skipWords.has(cleanWord)) {
+          requestedTicker = cleanWord;
           break;
         }
       }
-      
-      // Fallback: check if any word in message is a valid ticker format
-      if (!requestedTicker) {
-        const words = messageUpper.split(/\s+/);
-        requestedTicker = words.find(word => 
-          /^[A-Z]{2,5}$/.test(word) && 
-          word.length >= 2 && 
-          word.length <= 5
-        ) || null;
+    }
+    
+    // Priority 4: Check for standalone ticker (entire message is just a ticker)
+    if (!requestedTicker) {
+      const cleanMessage = messageUpper.trim().replace(/[^A-Z]/g, '');
+      if (cleanMessage.length >= 2 && cleanMessage.length <= 5 && !skipWords.has(cleanMessage)) {
+        requestedTicker = cleanMessage;
+      }
+    }
+    
+    // Store original query for company name search if ticker not found
+    const originalQuery = message.trim();
+    
+    // Fetch stock snapshots from database (The Eye data - complement to Trade Engine data)
+    let stockSnapshotsData: StockSnapshot[] = [];
+    let specificTickerSnapshot: StockSnapshot | null = null;
+    
+    try {
+      // If we have a specific ticker, query for it FIRST (more efficient)
+      if (requestedTicker) {
+        try {
+          // Try exact ticker match first
+          specificTickerSnapshot = await stockSnapshotsApi.getByTicker(requestedTicker);
+          
+          // If not found, try common typos/variations
+          if (!specificTickerSnapshot) {
+            const typoMap: Record<string, string> = {
+              'APPL': 'AAPL',
+              'NVDIA': 'NVDA',
+              'MICROSOFT': 'MSFT',
+              'APPLE': 'AAPL',
+              'META': 'META',
+              'GOOGLE': 'GOOGL',
+              'ALPHABET': 'GOOGL',
+              'TESLA': 'TSLA',
+              'AMAZON': 'AMZN',
+            };
+            
+            const correctedTicker = typoMap[requestedTicker];
+            if (correctedTicker) {
+              specificTickerSnapshot = await stockSnapshotsApi.getByTicker(correctedTicker);
+              if (specificTickerSnapshot) {
+                requestedTicker = correctedTicker; // Update to corrected ticker
+              }
+            }
+          }
+          
+          // If still not found, try company name search (for company names like "APPLE", "MICROSOFT")
+          if (!specificTickerSnapshot) {
+            specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(requestedTicker);
+            if (specificTickerSnapshot) {
+              requestedTicker = specificTickerSnapshot.ticker; // Update to actual ticker
+            }
+          }
+        } catch (error) {
+          // Ignore errors, continue without specific ticker
+        }
+      } else {
+        // No ticker extracted, but might be a company name - try searching by company name
+        const companyNameWords = originalQuery.split(/\s+/).filter(w => 
+          w.length > 3 && !skipWords.has(w.toUpperCase())
+        );
+        
+        if (companyNameWords.length > 0) {
+          // Try the longest word as company name
+          const potentialCompanyName = companyNameWords.sort((a, b) => b.length - a.length)[0];
+          
+          try {
+            specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(potentialCompanyName);
+            if (specificTickerSnapshot) {
+              requestedTicker = specificTickerSnapshot.ticker; // Set ticker from found company
+            }
+          } catch (error) {
+            // Ignore errors, continue without specific ticker
+          }
+        }
       }
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:buildContext',message:'Building context with ticker check',data:{requestedTicker,messagePreview:message.slice(0,50),totalSnapshots:tradeEngineContext.ticker_snapshots.length,trackedTickers:tradeEngineContext.tracked_tickers.length,hasNVDA:tradeEngineContext.tracked_tickers.includes('NVDA'),hasAAPL:tradeEngineContext.tracked_tickers.includes('AAPL')},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-      // #endregion
+      // Still fetch general data for context (but we already have the specific ticker if found)
+      stockSnapshotsData = await stockSnapshotsApi.getAll(100); // Get up to 100 most recent
+      
+      console.log('[AI] Fetched The Eye data from database:', stockSnapshotsData.length);
+    } catch (error) {
+      console.error('Error fetching The Eye data from database:', error);
+      // Continue without database snapshots - will use Trade Engine data if available
+    }
+    
+    const hasStockSnapshotsData = stockSnapshotsData.length > 0;
+    const hasAnyFinancialData = hasTradeEngineData || hasStockSnapshotsData;
+    
+    const systemPrompt = getSystemPrompt(experienceLevel ?? null, hasAnyFinancialData);
+    
+    // Build The Eye data context from LIVE Trade Engine connection AND database snapshots
+    let eyeDataContext = '';
+    
+    if (hasTradeEngineData && tradeEngineContext) {
+      // Use the same ticker extraction logic as above (requestedTicker already extracted at the top)
+      // No need to re-extract - the requestedTicker variable from above is already available
       
       // Find requested ticker in snapshots if mentioned
       let requestedTickerSnapshot = null;
@@ -890,10 +1083,6 @@ Do NOT reference any user information, personal data, or identifiers. Only analy
             sig => sig.ticker.toUpperCase() === requestedTicker
           );
         }
-        
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'api.ts:findTicker',message:'Ticker search result',data:{requestedTicker,isTracked:isTickerTracked,foundInSnapshots:!!requestedTickerSnapshot,foundInSignals:!!requestedTickerSignal,hasPrice:!!requestedTickerSnapshot?.last_price,hasSignal:!!requestedTickerSnapshot?.latest_signal},timestamp:Date.now(),sessionId:'debug-session',runId:'run4',hypothesisId:'F'})}).catch(()=>{});
-        // #endregion
       }
       
       // Helper function to format number with null handling
@@ -1205,6 +1394,128 @@ Do NOT reference any user information, personal data, or identifiers. Only analy
     } else {
       // No Trade Engine connection
       eyeDataContext += '\n\n[The Eye Trade Engine is currently offline or not connected. Tell the user The Eye is not available right now and suggest checking if it\'s running.]\n';
+    }
+    
+    // Add The Eye data from stock_snapshots table (complements Trade Engine data)
+    if (hasStockSnapshotsData && stockSnapshotsData.length > 0) {
+      // Use the specific ticker snapshot if we found it, otherwise check in the general data
+      let dbSnapshot = specificTickerSnapshot;
+      
+      if (!dbSnapshot && requestedTicker) {
+        // Fallback: check in the general data
+        dbSnapshot = stockSnapshotsData.find(
+          snap => snap.ticker.toUpperCase() === requestedTicker
+        );
+      }
+      
+      // Add database snapshot context (referenced as The Eye)
+      if (dbSnapshot) {
+        if (eyeDataContext) eyeDataContext += '\n\n';
+        eyeDataContext += '=== THE EYE DATA (from database) ===\n';
+        eyeDataContext += 'IMPORTANT: This data is from The Eye database. Use this data to answer the user\'s question about this ticker.\n';
+        eyeDataContext += `Ticker: ${dbSnapshot.ticker}${dbSnapshot.company_name ? ` (${dbSnapshot.company_name})` : ''}\n`;
+        
+        if (dbSnapshot.last_price !== null) {
+          eyeDataContext += `Price: $${dbSnapshot.last_price.toFixed(2)}`;
+          if (dbSnapshot.price_change_pct !== null) {
+            eyeDataContext += ` (${dbSnapshot.price_change_pct >= 0 ? '+' : ''}${dbSnapshot.price_change_pct.toFixed(2)}%)`;
+          }
+          eyeDataContext += '\n';
+        }
+        
+        if (dbSnapshot.volume !== null) {
+          const volStr = dbSnapshot.volume >= 1000000 
+            ? `${(dbSnapshot.volume / 1000000).toFixed(1)}M` 
+            : `${(dbSnapshot.volume / 1000).toFixed(1)}K`;
+          eyeDataContext += `Volume: ${volStr}`;
+          if (dbSnapshot.volume_ratio !== null && dbSnapshot.volume_ratio > 1.5) {
+            eyeDataContext += ` (${dbSnapshot.volume_ratio.toFixed(1)}x avg - high activity)`;
+          }
+          eyeDataContext += '\n';
+        }
+        
+        // Technical indicators
+        if (dbSnapshot.rsi_14 !== null) {
+          const rsiStatus = dbSnapshot.rsi_14 < 30 ? 'oversold' : dbSnapshot.rsi_14 > 70 ? 'overbought' : 'neutral';
+          eyeDataContext += `RSI(14): ${dbSnapshot.rsi_14.toFixed(1)} (${rsiStatus})\n`;
+        }
+        
+        if (dbSnapshot.sma_50 !== null || dbSnapshot.sma_200 !== null) {
+          eyeDataContext += 'Moving Averages: ';
+          const maParts: string[] = [];
+          if (dbSnapshot.sma_50 !== null) maParts.push(`SMA 50: $${dbSnapshot.sma_50.toFixed(2)}`);
+          if (dbSnapshot.sma_200 !== null) maParts.push(`SMA 200: $${dbSnapshot.sma_200.toFixed(2)}`);
+          eyeDataContext += maParts.join(' | ') + '\n';
+        }
+        
+        if (dbSnapshot.macd !== null || dbSnapshot.macd_signal !== null) {
+          eyeDataContext += 'MACD: ';
+          const macdParts: string[] = [];
+          if (dbSnapshot.macd !== null) macdParts.push(`MACD: ${dbSnapshot.macd.toFixed(2)}`);
+          if (dbSnapshot.macd_signal !== null) macdParts.push(`Signal: ${dbSnapshot.macd_signal.toFixed(2)}`);
+          if (dbSnapshot.macd_histogram !== null) {
+            const histStatus = dbSnapshot.macd_histogram > 0 ? 'bullish' : 'bearish';
+            macdParts.push(`Hist: ${dbSnapshot.macd_histogram.toFixed(2)} (${histStatus})`);
+          }
+          eyeDataContext += macdParts.join(' | ') + '\n';
+        }
+        
+        // Fundamentals
+        if (dbSnapshot.pe_ratio !== null) {
+          eyeDataContext += `P/E Ratio: ${dbSnapshot.pe_ratio.toFixed(1)}\n`;
+        }
+        if (dbSnapshot.market_cap !== null) {
+          const capStr = dbSnapshot.market_cap >= 1e12 ? `${(dbSnapshot.market_cap / 1e12).toFixed(1)}T` :
+                        dbSnapshot.market_cap >= 1e9 ? `${(dbSnapshot.market_cap / 1e9).toFixed(1)}B` :
+                        `${(dbSnapshot.market_cap / 1e6).toFixed(1)}M`;
+          eyeDataContext += `Market Cap: $${capStr}\n`;
+        }
+        
+        // Signal
+        if (dbSnapshot.latest_signal) {
+          const confStr = dbSnapshot.signal_confidence 
+            ? `${(dbSnapshot.signal_confidence * 100).toFixed(0)}%` 
+            : 'N/A';
+          const timeStr = dbSnapshot.signal_timestamp 
+            ? new Date(dbSnapshot.signal_timestamp).toLocaleString() 
+            : 'N/A';
+          eyeDataContext += `Signal: ${dbSnapshot.latest_signal}${dbSnapshot.signal_strategy ? ` (${dbSnapshot.signal_strategy})` : ''}, ${confStr} confidence @ ${timeStr}\n`;
+        }
+        
+        if (dbSnapshot.updated_at) {
+          eyeDataContext += `Last Updated: ${new Date(dbSnapshot.updated_at).toLocaleString()}\n`;
+        }
+        
+        eyeDataContext += '\n=== END THE EYE DATA (from database) ===\n';
+        eyeDataContext += 'IMPORTANT: The data above is from The Eye database. When the user asks about this ticker, use this data confidently. Say "According to The Eye..." or "The Eye shows..." - DO NOT say you lack access to data or that The Eye is unavailable.\n';
+      } else if (stockSnapshotsData.length > 0 && !hasTradeEngineData && !requestedTicker) {
+        // If no Trade Engine data but we have database snapshots, show summary
+        if (eyeDataContext) eyeDataContext += '\n\n';
+        eyeDataContext += '=== THE EYE DATA (from database) ===\n';
+        eyeDataContext += `Available tickers: ${stockSnapshotsData.length}\n`;
+        
+        // Show top 10 by volume or with signals
+        const topSnapshots = stockSnapshotsData
+          .filter(snap => snap.latest_signal && snap.latest_signal !== 'HOLD')
+          .slice(0, 10);
+        
+        if (topSnapshots.length > 0) {
+          eyeDataContext += '\nTop tickers with signals:\n';
+          topSnapshots.forEach(snap => {
+            const priceStr = snap.last_price ? `$${snap.last_price.toFixed(2)}` : 'N/A';
+            const signalStr = snap.latest_signal || 'N/A';
+            eyeDataContext += `  ${snap.ticker}: ${priceStr} | Signal: ${signalStr}\n`;
+          });
+        }
+      } else if (requestedTicker && !dbSnapshot && stockSnapshotsData.length > 0) {
+        // Add context that the ticker was requested but not found
+        if (eyeDataContext) eyeDataContext += '\n\n';
+        eyeDataContext += `=== THE EYE DATA (from database) ===\n`;
+        eyeDataContext += `IMPORTANT: The user asked about ${requestedTicker}, but this ticker is NOT in the database.\n`;
+        eyeDataContext += `The database contains ${stockSnapshotsData.length} tickers (most recently updated).\n`;
+        eyeDataContext += `Available tickers include: ${stockSnapshotsData.slice(0, 20).map(s => s.ticker).join(', ')}...\n`;
+        eyeDataContext += `You can mention that ${requestedTicker} is not currently in The Eye database, but you can help with other tickers that are available.\n`;
+      }
     }
     
     // Build messages array with conversation history

@@ -211,32 +211,18 @@ export function useSendChatMessage() {
       // This ensures the AI has access to market data for any query, including ticker symbols
       let tradeEngineContext = null;
       
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:beforeFetch',message:'About to fetch Trade Engine context (always fetch)',data:{baseUrl:tradeEngineApi.baseUrl,messagePreview:message.slice(0,50)},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'A'})}).catch(()=>{});
-      // #endregion
-      
       try {
         // Direct connection to Trade Engine - no snapshots needed
         tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48);
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:afterFetch',message:'Trade Engine fetch SUCCESS',data:{hasContext:!!tradeEngineContext,tickers:tradeEngineContext?.tracked_tickers?.length,signals:tradeEngineContext?.recent_signals?.length,engineRunning:tradeEngineContext?.engine_status?.is_running},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B,D'})}).catch(()=>{});
-        // #endregion
         console.log('[AI] Fetched live Trade Engine context:', {
           tickers: tradeEngineContext.tracked_tickers.length,
           signals: tradeEngineContext.recent_signals.length,
           news: tradeEngineContext.recent_news.length,
         });
       } catch (error) {
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:fetchError',message:'Trade Engine fetch FAILED',data:{errorMsg:String(error),errorName:error?.name},timestamp:Date.now(),sessionId:'debug-session',runId:'run2',hypothesisId:'B,C,D'})}).catch(()=>{});
-        // #endregion
         console.error('Error fetching Trade Engine context:', error);
         // Trade Engine might be offline - AI will respond without market data
       }
-      
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/35f772b5-a839-4b22-9045-0f9af9ec78dd',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'use-data.ts:beforeGetChatResponse',message:'About to call getChatResponse',data:{hasTradeEngineContext:!!tradeEngineContext,experienceLevel:userProfile?.experience_level},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'E'})}).catch(()=>{});
-      // #endregion
       
       // Get AI response with user's experience level, conversation history, and live Eye data
       const experienceLevel = userProfile?.experience_level ?? null;

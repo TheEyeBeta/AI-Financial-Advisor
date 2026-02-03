@@ -20,6 +20,7 @@ const Advisor = () => {
   const { data: currentChat, isLoading: chatLoading } = useChat(currentChatId);
   
   const [showTopics, setShowTopics] = useState(true);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
 
   // Handle chat from URL param
   useEffect(() => {
@@ -55,6 +56,10 @@ const Advisor = () => {
       return;
     }
 
+    // Show user message immediately (optimistic update)
+    setPendingMessage(content);
+    setShowTopics(false);
+
     try {
       let chatId = currentChatId;
       let isFirstMessage = false;
@@ -69,15 +74,18 @@ const Advisor = () => {
         isFirstMessage = true;
       }
 
-      setShowTopics(false);
-
       await sendMessageMutation.mutateAsync({ 
         chatId, 
         message: content,
         isFirstMessage,
       });
+      
+      // Clear pending message after mutation completes
+      setPendingMessage(null);
     } catch (error) {
       console.error('Error sending message:', error);
+      // Clear pending message on error so user can retry
+      setPendingMessage(null);
     }
   };
 
@@ -104,13 +112,42 @@ const Advisor = () => {
     content: msg.content,
   }));
 
+  // Add pending message if it exists and hasn't been saved yet
+  let displayMessages = chatMessages;
+  if (pendingMessage) {
+    // Check if the pending message is already in the chat (meaning it was saved)
+    const isMessageSaved = chatMessages.some(
+      msg => msg.role === 'user' && msg.content === pendingMessage
+    );
+    
+    if (!isMessageSaved) {
+      // Add pending message optimistically
+      displayMessages = [
+        ...chatMessages,
+        {
+          role: "user" as const,
+          content: pendingMessage,
+        }
+      ];
+    }
+  }
+  
+  // Clear pending message when it appears in the chat (useEffect to avoid stale closure)
+  useEffect(() => {
+    if (pendingMessage && chatMessages.some(
+      msg => msg.role === 'user' && msg.content === pendingMessage
+    )) {
+      setPendingMessage(null);
+    }
+  }, [pendingMessage, chatMessages]);
+
   // If no messages yet, show welcome message in UI
-  const displayMessages = chatMessages.length === 0 
-    ? [{
-        role: "assistant" as const,
-        content: getWelcomeMessage(userProfile?.first_name, userProfile?.experience_level),
-      }]
-    : chatMessages;
+  if (displayMessages.length === 0) {
+    displayMessages = [{
+      role: "assistant" as const,
+      content: getWelcomeMessage(userProfile?.first_name, userProfile?.experience_level),
+    }];
+  }
 
   const isLoading = chatsLoading || chatLoading || sendMessageMutation.isPending || createChatMutation.isPending;
 
