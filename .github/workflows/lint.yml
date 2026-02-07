@@ -1,0 +1,36 @@
+name: Lint & Type Check
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint (zero warnings)
+        run: npm run lint:ci
+
+      - name: Run TypeScript type check
+        run: npm run type-check
+
+      - name: Check for lint-disable comments
+        run: |
+          count=$(grep -R "eslint-disable" src/ | wc -l)
+          echo "Found $count eslint-disable comments"
+          if [ "$count" -gt 10 ]; then
+            echo "Too many eslint-disable comments. Review and justify each one."
+            exit 1
+          fi

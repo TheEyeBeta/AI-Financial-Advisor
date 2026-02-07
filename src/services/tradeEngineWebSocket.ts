@@ -103,7 +103,7 @@ class TradeEngineWebSocket {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 2000; // Base delay in ms
-  private handlers: Map<string, Set<MessageHandler<any>>> = new Map();
+  private handlers: Map<string, Set<MessageHandler<WSMessage>>> = new Map();
   private connectionStateHandlers: Set<(state: ConnectionState) => void> = new Set();
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private _connectionState: ConnectionState = 'disconnected';

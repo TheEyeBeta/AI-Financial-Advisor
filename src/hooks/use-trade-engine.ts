@@ -3,7 +3,7 @@
  * Provides real-time price updates, signals, and connection management
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   tradeEngineWS,
   ConnectionState,
@@ -66,6 +66,7 @@ export function useTradeEngineConnection() {
 export function useTradeEnginePrices(tickers: string[]) {
   const [prices, setPrices] = useState<Record<string, WSPriceUpdateMessage>>({});
   const tickersRef = useRef<string[]>([]);
+  const normalizedTickers = useMemo(() => tickers.map((ticker) => ticker.toUpperCase()), [tickers]);
 
   useEffect(() => {
     // Connect if not already connected
@@ -88,7 +89,7 @@ export function useTradeEnginePrices(tickers: string[]) {
 
   useEffect(() => {
     // Determine which tickers to subscribe/unsubscribe
-    const currentTickers = new Set(tickers.map(t => t.toUpperCase()));
+    const currentTickers = new Set(normalizedTickers);
     const previousTickers = new Set(tickersRef.current);
 
     const toSubscribe = [...currentTickers].filter(t => !previousTickers.has(t));
@@ -118,7 +119,7 @@ export function useTradeEnginePrices(tickers: string[]) {
         tradeEngineWS.unsubscribe(tickersRef.current);
       }
     };
-  }, [tickers.join(',')]);
+  }, [normalizedTickers]);
 
   return prices;
 }
@@ -129,6 +130,7 @@ export function useTradeEnginePrices(tickers: string[]) {
 export function useTradeEngineSignals(tickers: string[]) {
   const [signals, setSignals] = useState<Record<string, WSSignalMessage>>({});
   const [allSignals, setAllSignals] = useState<WSSignalMessage[]>([]);
+  const normalizedTickers = useMemo(() => tickers.map((ticker) => ticker.toUpperCase()), [tickers]);
 
   useEffect(() => {
     // Connect if not already connected
@@ -139,7 +141,7 @@ export function useTradeEngineSignals(tickers: string[]) {
     // Handle signal updates
     const unsubscribe = tradeEngineWS.on('signal', (data) => {
       // Only track signals for our tickers
-      if (tickers.length === 0 || tickers.some(t => t.toUpperCase() === data.ticker)) {
+      if (normalizedTickers.length === 0 || normalizedTickers.includes(data.ticker)) {
         setSignals((prev) => ({
           ...prev,
           [data.ticker]: data,
@@ -151,7 +153,7 @@ export function useTradeEngineSignals(tickers: string[]) {
     return () => {
       unsubscribe();
     };
-  }, [tickers.join(',')]);
+  }, [normalizedTickers]);
 
   return { signals, allSignals };
 }
@@ -161,6 +163,7 @@ export function useTradeEngineSignals(tickers: string[]) {
  */
 export function useTradeEngineIndicators(tickers: string[]) {
   const [indicators, setIndicators] = useState<Record<string, WSIndicatorMessage>>({});
+  const normalizedTickers = useMemo(() => tickers.map((ticker) => ticker.toUpperCase()), [tickers]);
 
   useEffect(() => {
     // Connect if not already connected
@@ -170,7 +173,7 @@ export function useTradeEngineIndicators(tickers: string[]) {
 
     // Handle indicator updates
     const unsubscribe = tradeEngineWS.on('indicator_update', (data) => {
-      if (tickers.length === 0 || tickers.some(t => t.toUpperCase() === data.ticker)) {
+      if (normalizedTickers.length === 0 || normalizedTickers.includes(data.ticker)) {
         setIndicators((prev) => ({
           ...prev,
           [data.ticker]: data,
@@ -181,7 +184,7 @@ export function useTradeEngineIndicators(tickers: string[]) {
     return () => {
       unsubscribe();
     };
-  }, [tickers.join(',')]);
+  }, [normalizedTickers]);
 
   return indicators;
 }
