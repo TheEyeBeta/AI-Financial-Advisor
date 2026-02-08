@@ -3,98 +3,18 @@
  * Provides real-time price updates, trading signals, and engine status
  */
 
-// WebSocket message types from the trade engine
-export interface WSConnectedMessage {
-  type: 'connected';
-  connection_id: string;
-  message: string;
-}
+import { MessageHandler, WSMessage, WSMessageType, parseWSMessage } from '@/types/websocket';
 
-export interface WSSubscribedMessage {
-  type: 'subscribed';
-  tickers: string[];
-  message: string;
-}
-
-export interface WSUnsubscribedMessage {
-  type: 'unsubscribed';
-  tickers: string[];
-  message: string;
-}
-
-export interface WSSubscriptionsMessage {
-  type: 'subscriptions';
-  tickers: string[];
-  count: number;
-}
-
-export interface WSPriceUpdateMessage {
-  type: 'price_update';
-  ticker: string;
-  price: number;
-  change: number;
-  change_percent: number;
-  volume: number;
-  timestamp: string;
-}
-
-export interface WSSignalMessage {
-  type: 'signal';
-  ticker: string;
-  signal_type: 'BUY' | 'SELL' | 'STRONG_BUY' | 'STRONG_SELL' | 'HOLD';
-  confidence: number;
-  strategy: string;
-  timestamp: string;
-}
-
-export interface WSIndicatorMessage {
-  type: 'indicator_update';
-  ticker: string;
-  sma_10: number | null;
-  sma_50: number | null;
-  sma_200: number | null;
-  rsi_14: number | null;
-  macd: number | null;
-  timestamp: string;
-}
-
-export interface WSEngineStatusMessage {
-  type: 'engine_status';
-  is_operational: boolean;
-  is_halted: boolean;
-  halt_reason: string | null;
-  workers: {
-    price: boolean;
-    news: boolean;
-    algorithm: boolean;
-  };
-  timestamp: string;
-}
-
-export interface WSErrorMessage {
-  type: 'error';
-  message: string;
-  supported_actions?: string[];
-}
-
-export interface WSPongMessage {
-  type: 'pong';
-  timestamp: number;
-}
-
-export type WSMessage =
-  | WSConnectedMessage
-  | WSSubscribedMessage
-  | WSUnsubscribedMessage
-  | WSSubscriptionsMessage
-  | WSPriceUpdateMessage
-  | WSSignalMessage
-  | WSIndicatorMessage
-  | WSEngineStatusMessage
-  | WSErrorMessage
-  | WSPongMessage;
-
-type MessageHandler<T = WSMessage> = (data: T) => void;
+export type {
+  MessageHandler,
+  WSConnectedMessage,
+  WSMessage,
+  WSMessageType,
+  WSPriceUpdateMessage,
+  WSSignalMessage,
+  WSIndicatorMessage,
+  WSEngineStatusMessage,
+} from '@/types/websocket';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -103,7 +23,7 @@ class TradeEngineWebSocket {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private reconnectDelay = 2000; // Base delay in ms
-  private handlers: Map<string, Set<MessageHandler<any>>> = new Map();
+  private handlers: Map<WSMessageType | '*', Set<MessageHandler<WSMessage>>> = new Map();
   private connectionStateHandlers: Set<(state: ConnectionState) => void> = new Set();
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private _connectionState: ConnectionState = 'disconnected';
@@ -153,11 +73,14 @@ class TradeEngineWebSocket {
 
       this.ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data) as WSMessage;
-          
-          // Handle connection message to store connection ID
+          const data = parseWSMessage(event.data);
+          if (!data) {
+            console.warn('[TradeEngine WS] Received unsupported message payload');
+            return;
+          }
+
           if (data.type === 'connected') {
-            this._connectionId = (data as WSConnectedMessage).connection_id;
+            this._connectionId = data.connection_id;
           }
 
           // Call all registered handlers for this message type
@@ -297,11 +220,11 @@ class TradeEngineWebSocket {
     if (!this.handlers.has(type)) {
       this.handlers.set(type, new Set());
     }
-    this.handlers.get(type)!.add(handler);
+    this.handlers.get(type)!.add(handler as MessageHandler<WSMessage>);
 
     // Return unsubscribe function
     return () => {
-      this.handlers.get(type)?.delete(handler);
+      this.handlers.get(type)?.delete(handler as MessageHandler<WSMessage>);
     };
   }
 
@@ -312,7 +235,7 @@ class TradeEngineWebSocket {
     type: T,
     handler: MessageHandler<T extends '*' ? WSMessage : Extract<WSMessage, { type: T }>>
   ): void {
-    this.handlers.get(type)?.delete(handler);
+    this.handlers.get(type)?.delete(handler as MessageHandler<WSMessage>);
   }
 
   /**

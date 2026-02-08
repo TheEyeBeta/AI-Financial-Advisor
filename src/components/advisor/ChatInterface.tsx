@@ -18,7 +18,7 @@ interface ChatInterfaceProps {
 // Format AI response with better readability
 function formatMessage(content: string): React.ReactNode {
   // First, normalize line breaks - join numbered/bullet items that are separated by double newlines
-  let normalized = content
+  const normalized = content
     // Join numbered list items separated by blank lines
     .replace(/(\d+\.\s[^\n]+)\n\n+(?=\d+\.\s)/g, '$1\n')
     // Join bullet list items separated by blank lines  

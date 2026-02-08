@@ -3,7 +3,7 @@
  * Provides real-time price updates, signals, and connection management
  */
 
-import { useEffect, useState, useCallback, useRef } from 'react';
+import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import {
   tradeEngineWS,
   ConnectionState,
@@ -12,6 +12,15 @@ import {
   WSIndicatorMessage,
   WSEngineStatusMessage,
 } from '@/services/tradeEngineWebSocket';
+
+function useNormalizedTickers(tickers: string[]) {
+  const tickerKey = tickers
+    .map((ticker) => ticker.toUpperCase())
+    .sort()
+    .join(',');
+
+  return useMemo(() => (tickerKey ? tickerKey.split(',') : []), [tickerKey]);
+}
 
 /**
  * Hook to manage the Trade Engine WebSocket connection
@@ -26,13 +35,11 @@ export function useTradeEngineConnection() {
   );
 
   useEffect(() => {
-    // Subscribe to connection state changes
     const unsubscribe = tradeEngineWS.onConnectionStateChange((state) => {
       setConnectionState(state);
       setConnectionId(tradeEngineWS.connectionId);
     });
 
-    // Connect if not already connected
     if (tradeEngineWS.connectionState === 'disconnected') {
       tradeEngineWS.connect();
     }
@@ -65,15 +72,14 @@ export function useTradeEngineConnection() {
  */
 export function useTradeEnginePrices(tickers: string[]) {
   const [prices, setPrices] = useState<Record<string, WSPriceUpdateMessage>>({});
-  const tickersRef = useRef<string[]>([]);
+  const subscribedTickersRef = useRef<string[]>([]);
+  const normalizedTickers = useNormalizedTickers(tickers);
 
   useEffect(() => {
-    // Connect if not already connected
     if (tradeEngineWS.connectionState === 'disconnected') {
       tradeEngineWS.connect();
     }
 
-    // Handle price updates
     const unsubscribe = tradeEngineWS.on('price_update', (data) => {
       setPrices((prev) => ({
         ...prev,
@@ -87,12 +93,11 @@ export function useTradeEnginePrices(tickers: string[]) {
   }, []);
 
   useEffect(() => {
-    // Determine which tickers to subscribe/unsubscribe
-    const currentTickers = new Set(tickers.map(t => t.toUpperCase()));
-    const previousTickers = new Set(tickersRef.current);
+    const currentTickers = new Set(normalizedTickers);
+    const previousTickers = new Set(subscribedTickersRef.current);
 
-    const toSubscribe = [...currentTickers].filter(t => !previousTickers.has(t));
-    const toUnsubscribe = [...previousTickers].filter(t => !currentTickers.has(t));
+    const toSubscribe = [...currentTickers].filter((ticker) => !previousTickers.has(ticker));
+    const toUnsubscribe = [...previousTickers].filter((ticker) => !currentTickers.has(ticker));
 
     if (toSubscribe.length > 0 && tradeEngineWS.isConnected) {
       tradeEngineWS.subscribe(toSubscribe);
@@ -102,9 +107,8 @@ export function useTradeEnginePrices(tickers: string[]) {
       tradeEngineWS.unsubscribe(toUnsubscribe);
     }
 
-    tickersRef.current = [...currentTickers];
+    subscribedTickersRef.current = [...currentTickers];
 
-    // Subscribe when connection is established
     const unsubscribeConnection = tradeEngineWS.on('connected', () => {
       if (currentTickers.size > 0) {
         tradeEngineWS.subscribe([...currentTickers]);
@@ -113,12 +117,11 @@ export function useTradeEnginePrices(tickers: string[]) {
 
     return () => {
       unsubscribeConnection();
-      // Unsubscribe from all tickers on unmount
-      if (tradeEngineWS.isConnected && tickersRef.current.length > 0) {
-        tradeEngineWS.unsubscribe(tickersRef.current);
+      if (tradeEngineWS.isConnected && subscribedTickersRef.current.length > 0) {
+        tradeEngineWS.unsubscribe(subscribedTickersRef.current);
       }
     };
-  }, [tickers.join(',')]);
+  }, [normalizedTickers]);
 
   return prices;
 }
@@ -129,29 +132,28 @@ export function useTradeEnginePrices(tickers: string[]) {
 export function useTradeEngineSignals(tickers: string[]) {
   const [signals, setSignals] = useState<Record<string, WSSignalMessage>>({});
   const [allSignals, setAllSignals] = useState<WSSignalMessage[]>([]);
+  const normalizedTickers = useNormalizedTickers(tickers);
 
   useEffect(() => {
-    // Connect if not already connected
     if (tradeEngineWS.connectionState === 'disconnected') {
       tradeEngineWS.connect();
     }
 
-    // Handle signal updates
+    const trackedTickers = new Set(normalizedTickers);
     const unsubscribe = tradeEngineWS.on('signal', (data) => {
-      // Only track signals for our tickers
-      if (tickers.length === 0 || tickers.some(t => t.toUpperCase() === data.ticker)) {
+      if (trackedTickers.size === 0 || trackedTickers.has(data.ticker)) {
         setSignals((prev) => ({
           ...prev,
           [data.ticker]: data,
         }));
-        setAllSignals((prev) => [data, ...prev].slice(0, 100)); // Keep last 100 signals
+        setAllSignals((prev) => [data, ...prev].slice(0, 100));
       }
     });
 
     return () => {
       unsubscribe();
     };
-  }, [tickers.join(',')]);
+  }, [normalizedTickers]);
 
   return { signals, allSignals };
 }
@@ -161,16 +163,16 @@ export function useTradeEngineSignals(tickers: string[]) {
  */
 export function useTradeEngineIndicators(tickers: string[]) {
   const [indicators, setIndicators] = useState<Record<string, WSIndicatorMessage>>({});
+  const normalizedTickers = useNormalizedTickers(tickers);
 
   useEffect(() => {
-    // Connect if not already connected
     if (tradeEngineWS.connectionState === 'disconnected') {
       tradeEngineWS.connect();
     }
 
-    // Handle indicator updates
+    const trackedTickers = new Set(normalizedTickers);
     const unsubscribe = tradeEngineWS.on('indicator_update', (data) => {
-      if (tickers.length === 0 || tickers.some(t => t.toUpperCase() === data.ticker)) {
+      if (trackedTickers.size === 0 || trackedTickers.has(data.ticker)) {
         setIndicators((prev) => ({
           ...prev,
           [data.ticker]: data,
@@ -181,7 +183,7 @@ export function useTradeEngineIndicators(tickers: string[]) {
     return () => {
       unsubscribe();
     };
-  }, [tickers.join(',')]);
+  }, [normalizedTickers]);
 
   return indicators;
 }
@@ -193,12 +195,10 @@ export function useTradeEngineStatus() {
   const [status, setStatus] = useState<WSEngineStatusMessage | null>(null);
 
   useEffect(() => {
-    // Connect if not already connected
     if (tradeEngineWS.connectionState === 'disconnected') {
       tradeEngineWS.connect();
     }
 
-    // Handle engine status updates
     const unsubscribe = tradeEngineWS.on('engine_status', (data) => {
       setStatus(data);
     });
