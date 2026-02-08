@@ -9,13 +9,16 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from ..services.audit import audit_log
+
 
 router = APIRouter(tags=["ai-proxy"])
 
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 OPENAI_MODEL = "gpt-4o-mini"
-MAX_REQUESTS_PER_MINUTE = 30
+RATE_LIMIT_WINDOW_SECONDS = 15 * 60
+MAX_REQUESTS_PER_WINDOW = 100
 MAX_CHAT_MESSAGE_CONTENT_LENGTH = 50000
 
 
@@ -46,10 +49,10 @@ _request_windows: Dict[str, Deque[float]] = defaultdict(deque)
 def _enforce_rate_limit(client_id: str) -> None:
     now = time.time()
     window = _request_windows[client_id]
-    while window and now - window[0] > 60:
+    while window and now - window[0] > RATE_LIMIT_WINDOW_SECONDS:
         window.popleft()
 
-    if len(window) >= MAX_REQUESTS_PER_MINUTE:
+    if len(window) >= MAX_REQUESTS_PER_WINDOW:
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Please retry shortly.")
 
     window.append(now)
@@ -95,6 +98,15 @@ async def chat_completion(request: ChatRequest, raw_request: Request) -> Dict[st
     else:
         raise HTTPException(status_code=422, detail="Either 'messages' or 'message' must be provided.")
 
+    await audit_log(
+        "chat_request",
+        {
+            "client_id": client_id,
+            "user_id": request.user_id,
+            "message_count": len(messages),
+        },
+    )
+
     data = await _call_openai(
         {
             "model": OPENAI_MODEL,
@@ -102,6 +114,16 @@ async def chat_completion(request: ChatRequest, raw_request: Request) -> Dict[st
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
         }
+    )
+
+    usage = data.get("usage")
+    await audit_log(
+        "chat_response",
+        {
+            "client_id": client_id,
+            "user_id": request.user_id,
+            "usage": usage,
+        },
     )
 
     content = data.get("choices", [{}])[0].get("message", {}).get("content")
