@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatInterface } from "@/components/advisor/ChatInterface";
 import { SuggestedTopics } from "@/components/advisor/SuggestedTopics";
+import { ResilientServiceWrapper } from "@/components/ResilientServiceWrapper";
 import { useChats, useChat, useCreateChat, useSendChatMessage } from "@/hooks/use-data";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -153,28 +154,29 @@ const Advisor = () => {
 
   return (
     <AppLayout title="AI Financial Advisor">
-      <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-4xl w-full flex-col">
-        {/* Scrollable content area */}
-        <div className="flex-1 overflow-y-auto px-4 pb-4 scrollbar-subtle">
-          {/* Suggested Topics */}
-          {showTopics && displayMessages.length <= 1 && (
-            <SuggestedTopics 
-              onSelectTopic={handleTopicSelect} 
-              experienceLevel={userProfile?.experience_level}
+      <ResilientServiceWrapper serviceName="ai_backend">
+        <div className="mx-auto flex h-[calc(100vh-4rem)] max-w-4xl w-full flex-col">
+          {/* Scrollable content area */}
+          <div className="flex-1 overflow-y-auto px-4 pb-4 scrollbar-subtle">
+            {/* Suggested Topics */}
+            {showTopics && displayMessages.length <= 1 && (
+              <SuggestedTopics 
+                onSelectTopic={handleTopicSelect} 
+                experienceLevel={userProfile?.experience_level}
+              />
+            )}
+            
+            {/* Chat Messages */}
+            <ChatInterface
+              messages={displayMessages}
+              onNewChat={handleNewChat}
+              isLoading={isLoading}
+              chatTitle={currentChat?.title}
             />
-          )}
+          </div>
           
-          {/* Chat Messages */}
-          <ChatInterface
-            messages={displayMessages}
-            onNewChat={handleNewChat}
-            isLoading={isLoading}
-            chatTitle={currentChat?.title}
-          />
-        </div>
-        
-        {/* Input pinned to bottom */}
-        <div className="px-4 pb-1 pt-0.5">
+          {/* Input pinned to bottom */}
+          <div className="px-4 pb-1 pt-0.5">
           <div className="max-w-3xl mx-auto relative">
             <input
               type="text"
@@ -211,8 +213,9 @@ const Advisor = () => {
           <p className="text-xs text-muted-foreground/50 text-center mt-1">
             AI-generated content for educational purposes only · Not professional financial advice
           </p>
+          </div>
         </div>
-      </div>
+      </ResilientServiceWrapper>
     </AppLayout>
   );
 };

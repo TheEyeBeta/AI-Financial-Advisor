@@ -1,6 +1,37 @@
-from fastapi import FastAPI
+from __future__ import annotations
 
-from .routes.search import router as search_router
+import os
+import time
+from datetime import datetime, timezone
+
+import httpx
+from fastapi import FastAPI, HTTPException
+
+from .routes.search import TAVILY_API_KEY_ENV, TAVILY_ENDPOINT, router as search_router
+
+
+START_TIME = time.time()
+
+
+async def check_search_api() -> bool:
+    """Check whether the configured external search dependency can be reached."""
+    tavily_api_key = os.getenv(TAVILY_API_KEY_ENV)
+    if not tavily_api_key:
+        return False
+
+    payload = {
+        "api_key": tavily_api_key,
+        "query": "service health probe",
+        "max_results": 1,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(TAVILY_ENDPOINT, json=payload)
+    except httpx.RequestError:
+        return False
+
+    return response.status_code == 200
 
 
 def create_app() -> FastAPI:
@@ -32,8 +63,37 @@ def create_app() -> FastAPI:
     # Mount routers
     app.include_router(search_router, prefix="")
 
+    @app.get("/health")
+    async def health_check() -> dict[str, str | float]:
+        """Comprehensive service-level health information."""
+        return {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "uptime_seconds": round(time.time() - START_TIME, 2),
+            "version": os.getenv("APP_VERSION", "unknown"),
+            "environment": os.getenv("ENVIRONMENT", "development"),
+        }
+
+    @app.get("/health/live")
+    async def liveness_check() -> dict[str, str]:
+        """Liveness probe for container/runtime supervision."""
+        return {"status": "alive"}
+
+    @app.get("/health/ready")
+    async def readiness_check() -> dict[str, str | dict[str, str]]:
+        """Readiness probe that validates critical external dependency access."""
+        is_connected = await check_search_api()
+        if not is_connected:
+            raise HTTPException(status_code=503, detail="Search API unavailable")
+
+        return {
+            "status": "ready",
+            "dependencies": {
+                "search_api": "connected",
+            },
+        }
+
     return app
 
 
 app = create_app()
-
