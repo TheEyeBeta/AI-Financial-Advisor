@@ -3,108 +3,39 @@
  * Provides real-time price updates, trading signals, and engine status
  */
 
-// WebSocket message types from the trade engine
-export interface WSConnectedMessage {
-  type: 'connected';
-  connection_id: string;
-  message: string;
-}
+import {
+  WSConnectedMessage,
+  WSMessage,
+  WSMessageHandler,
+  WSMessageType,
+  isWSMessage,
+} from '@/types/websocket';
 
-export interface WSSubscribedMessage {
-  type: 'subscribed';
-  tickers: string[];
-  message: string;
-}
-
-export interface WSUnsubscribedMessage {
-  type: 'unsubscribed';
-  tickers: string[];
-  message: string;
-}
-
-export interface WSSubscriptionsMessage {
-  type: 'subscriptions';
-  tickers: string[];
-  count: number;
-}
-
-export interface WSPriceUpdateMessage {
-  type: 'price_update';
-  ticker: string;
-  price: number;
-  change: number;
-  change_percent: number;
-  volume: number;
-  timestamp: string;
-}
-
-export interface WSSignalMessage {
-  type: 'signal';
-  ticker: string;
-  signal_type: 'BUY' | 'SELL' | 'STRONG_BUY' | 'STRONG_SELL' | 'HOLD';
-  confidence: number;
-  strategy: string;
-  timestamp: string;
-}
-
-export interface WSIndicatorMessage {
-  type: 'indicator_update';
-  ticker: string;
-  sma_10: number | null;
-  sma_50: number | null;
-  sma_200: number | null;
-  rsi_14: number | null;
-  macd: number | null;
-  timestamp: string;
-}
-
-export interface WSEngineStatusMessage {
-  type: 'engine_status';
-  is_operational: boolean;
-  is_halted: boolean;
-  halt_reason: string | null;
-  workers: {
-    price: boolean;
-    news: boolean;
-    algorithm: boolean;
-  };
-  timestamp: string;
-}
-
-export interface WSErrorMessage {
-  type: 'error';
-  message: string;
-  supported_actions?: string[];
-}
-
-export interface WSPongMessage {
-  type: 'pong';
-  timestamp: number;
-}
-
-export type WSMessage =
-  | WSConnectedMessage
-  | WSSubscribedMessage
-  | WSUnsubscribedMessage
-  | WSSubscriptionsMessage
-  | WSPriceUpdateMessage
-  | WSSignalMessage
-  | WSIndicatorMessage
-  | WSEngineStatusMessage
-  | WSErrorMessage
-  | WSPongMessage;
-
-type MessageHandler<T = WSMessage> = (data: T) => void;
+export type {
+  WSConnectedMessage,
+  WSSubscribedMessage,
+  WSUnsubscribedMessage,
+  WSSubscriptionsMessage,
+  WSPriceUpdateMessage,
+  WSSignalMessage,
+  WSIndicatorMessage,
+  WSEngineStatusMessage,
+  WSErrorMessage,
+  WSPongMessage,
+  WSMessage,
+} from '@/types/websocket';
 
 export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+type HandlerKey = WSMessageType | '*';
 
 class TradeEngineWebSocket {
   private ws: WebSocket | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectDelay = 2000; // Base delay in ms
-  private handlers: Map<string, Set<MessageHandler<WSMessage>>> = new Map();
-  private connectionStateHandlers: Set<(state: ConnectionState) => void> = new Set();
+  private readonly maxReconnectAttempts = 5;
+  private readonly reconnectDelay = 2000;
+  private readonly handlers: Map<HandlerKey, Set<WSMessageHandler<WSMessage>>> = new Map();
+  private readonly connectionStateHandlers: Set<(state: ConnectionState) => void> = new Set();
   private pingInterval: ReturnType<typeof setInterval> | null = null;
   private _connectionState: ConnectionState = 'disconnected';
   private _connectionId: string | null = null;
@@ -126,14 +57,57 @@ class TradeEngineWebSocket {
     return this.ws?.readyState === WebSocket.OPEN;
   }
 
-  private setConnectionState(state: ConnectionState) {
+  private setConnectionState(state: ConnectionState): void {
     this._connectionState = state;
-    this.connectionStateHandlers.forEach(handler => handler(state));
+    this.connectionStateHandlers.forEach((handler) => handler(state));
   }
 
-  /**
-   * Connect to the trade engine WebSocket
-   */
+  private handleMessage(rawData: unknown): void {
+    if (typeof rawData !== 'string') {
+      console.error('[TradeEngine WS] Received non-string message payload');
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(rawData);
+    } catch (error) {
+      console.error('[TradeEngine WS] Failed to parse message:', error);
+      return;
+    }
+
+    if (!isWSMessage(parsed)) {
+      console.error('[TradeEngine WS] Ignored unknown message payload:', parsed);
+      return;
+    }
+
+    if (parsed.type === 'connected') {
+      this._connectionId = (parsed as WSConnectedMessage).connection_id;
+    }
+
+    this.dispatchMessage(parsed);
+  }
+
+  private dispatchMessage<T extends WSMessage>(message: T): void {
+    const handlers = this.handlers.get(message.type);
+    handlers?.forEach((handler) => {
+      try {
+        handler(message);
+      } catch (error) {
+        console.error(`[TradeEngine WS] Handler error for ${message.type}:`, error);
+      }
+    });
+
+    const wildcardHandlers = this.handlers.get('*');
+    wildcardHandlers?.forEach((handler) => {
+      try {
+        handler(message);
+      } catch (error) {
+        console.error('[TradeEngine WS] Wildcard handler error:', error);
+      }
+    });
+  }
+
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
       return;
@@ -152,40 +126,7 @@ class TradeEngineWebSocket {
       };
 
       this.ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data) as WSMessage;
-          
-          // Handle connection message to store connection ID
-          if (data.type === 'connected') {
-            this._connectionId = (data as WSConnectedMessage).connection_id;
-          }
-
-          // Call all registered handlers for this message type
-          const handlers = this.handlers.get(data.type);
-          if (handlers) {
-            handlers.forEach(handler => {
-              try {
-                handler(data);
-              } catch (err) {
-                console.error(`[TradeEngine WS] Handler error for ${data.type}:`, err);
-              }
-            });
-          }
-
-          // Also call wildcard handlers
-          const wildcardHandlers = this.handlers.get('*');
-          if (wildcardHandlers) {
-            wildcardHandlers.forEach(handler => {
-              try {
-                handler(data);
-              } catch (err) {
-                console.error('[TradeEngine WS] Wildcard handler error:', err);
-              }
-            });
-          }
-        } catch (err) {
-          console.error('[TradeEngine WS] Failed to parse message:', err);
-        }
+        this.handleMessage(event.data);
       };
 
       this.ws.onclose = (event) => {
@@ -196,10 +137,12 @@ class TradeEngineWebSocket {
         if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
           this.setConnectionState('reconnecting');
           const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-          console.log(`[TradeEngine WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
-          
+          console.log(
+            `[TradeEngine WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`
+          );
+
           setTimeout(() => {
-            this.reconnectAttempts++;
+            this.reconnectAttempts += 1;
             this.connect();
           }, delay);
         } else {
@@ -210,15 +153,12 @@ class TradeEngineWebSocket {
       this.ws.onerror = (error) => {
         console.error('[TradeEngine WS] Error:', error);
       };
-    } catch (err) {
-      console.error('[TradeEngine WS] Failed to create WebSocket:', err);
+    } catch (error) {
+      console.error('[TradeEngine WS] Failed to create WebSocket:', error);
       this.setConnectionState('disconnected');
     }
   }
 
-  /**
-   * Disconnect from the trade engine WebSocket
-   */
   disconnect(): void {
     this.stopPingInterval();
     if (this.ws) {
@@ -226,101 +166,94 @@ class TradeEngineWebSocket {
       this.ws = null;
     }
     this._connectionId = null;
-    this.reconnectAttempts = this.maxReconnectAttempts; // Prevent reconnection
+    this.reconnectAttempts = this.maxReconnectAttempts;
     this.setConnectionState('disconnected');
   }
 
-  /**
-   * Subscribe to price updates for specific tickers
-   */
   subscribe(tickers: string[]): void {
     if (!this.isConnected) {
       console.warn('[TradeEngine WS] Cannot subscribe: not connected');
       return;
     }
 
-    this.ws?.send(JSON.stringify({
-      action: 'subscribe',
-      tickers: tickers.map(t => t.toUpperCase()),
-    }));
+    this.ws?.send(
+      JSON.stringify({
+        action: 'subscribe',
+        tickers: tickers.map((ticker) => ticker.toUpperCase()),
+      })
+    );
   }
 
-  /**
-   * Unsubscribe from price updates for specific tickers
-   */
   unsubscribe(tickers: string[]): void {
     if (!this.isConnected) {
       return;
     }
 
-    this.ws?.send(JSON.stringify({
-      action: 'unsubscribe',
-      tickers: tickers.map(t => t.toUpperCase()),
-    }));
+    this.ws?.send(
+      JSON.stringify({
+        action: 'unsubscribe',
+        tickers: tickers.map((ticker) => ticker.toUpperCase()),
+      })
+    );
   }
 
-  /**
-   * Get current subscriptions
-   */
   getSubscriptions(): void {
     if (!this.isConnected) {
       return;
     }
 
-    this.ws?.send(JSON.stringify({
-      action: 'get_subscriptions',
-    }));
+    this.ws?.send(
+      JSON.stringify({
+        action: 'get_subscriptions',
+      })
+    );
   }
 
-  /**
-   * Send a ping to keep the connection alive
-   */
   ping(): void {
     if (!this.isConnected) {
       return;
     }
 
-    this.ws?.send(JSON.stringify({
-      action: 'ping',
-      timestamp: Date.now(),
-    }));
+    this.ws?.send(
+      JSON.stringify({
+        action: 'ping',
+        timestamp: Date.now(),
+      })
+    );
   }
 
-  /**
-   * Register a handler for a specific message type
-   * Use '*' to receive all messages
-   */
-  on<T extends WSMessage['type'] | '*'>(
+  on<T extends HandlerKey>(
     type: T,
-    handler: MessageHandler<T extends '*' ? WSMessage : Extract<WSMessage, { type: T }>>
+    handler: WSMessageHandler<T extends '*' ? WSMessage : Extract<WSMessage, { type: T }>>
   ): () => void {
     if (!this.handlers.has(type)) {
       this.handlers.set(type, new Set());
     }
-    this.handlers.get(type)!.add(handler);
 
-    // Return unsubscribe function
+    const typedHandlers = this.handlers.get(type) as Set<
+      WSMessageHandler<T extends '*' ? WSMessage : Extract<WSMessage, { type: T }>>
+    >;
+
+    typedHandlers.add(handler);
+
     return () => {
-      this.handlers.get(type)?.delete(handler);
+      typedHandlers.delete(handler);
     };
   }
 
-  /**
-   * Remove a handler for a specific message type
-   */
-  off<T extends WSMessage['type'] | '*'>(
+  off<T extends HandlerKey>(
     type: T,
-    handler: MessageHandler<T extends '*' ? WSMessage : Extract<WSMessage, { type: T }>>
+    handler: WSMessageHandler<T extends '*' ? WSMessage : Extract<WSMessage, { type: T }>>
   ): void {
-    this.handlers.get(type)?.delete(handler);
+    const typedHandlers = this.handlers.get(type) as
+      | Set<WSMessageHandler<T extends '*' ? WSMessage : Extract<WSMessage, { type: T }>>>
+      | undefined;
+
+    typedHandlers?.delete(handler);
   }
 
-  /**
-   * Register a handler for connection state changes
-   */
   onConnectionStateChange(handler: (state: ConnectionState) => void): () => void {
     this.connectionStateHandlers.add(handler);
-    // Return unsubscribe function
     return () => {
       this.connectionStateHandlers.delete(handler);
     };
@@ -328,7 +261,6 @@ class TradeEngineWebSocket {
 
   private startPingInterval(): void {
     this.stopPingInterval();
-    // Send ping every 30 seconds to keep connection alive
     this.pingInterval = setInterval(() => {
       this.ping();
     }, 30000);
@@ -342,8 +274,5 @@ class TradeEngineWebSocket {
   }
 }
 
-// Export singleton instance
 export const tradeEngineWS = new TradeEngineWebSocket();
-
-// Also export class for testing
 export { TradeEngineWebSocket };
