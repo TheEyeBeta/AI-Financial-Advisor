@@ -16,11 +16,12 @@ OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 OPENAI_MODEL = "gpt-4o-mini"
 MAX_REQUESTS_PER_MINUTE = 30
+MAX_CHAT_MESSAGE_CONTENT_LENGTH = 50000
 
 
 class Message(BaseModel):
     role: Literal["system", "user", "assistant"]
-    content: str = Field(..., min_length=1, max_length=10000)
+    content: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_CONTENT_LENGTH)
 
 
 class ChatRequest(BaseModel):

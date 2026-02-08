@@ -868,7 +868,7 @@ export const pythonApi = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `Deepseek API error: ${response.statusText}`);
+        throw new Error(errorData.detail || `AI backend error: ${response.statusText}`);
       }
 
       const data = await response.json();
@@ -1575,7 +1575,7 @@ export const pythonApi = {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || 'Failed to generate title');
+        throw new Error(errorData.detail || 'Failed to generate title');
       }
 
       const data = await response.json();
