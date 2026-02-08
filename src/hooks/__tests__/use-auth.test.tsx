@@ -3,29 +3,31 @@ import { describe, expect, it, beforeEach, vi } from "vitest";
 import { AuthProvider } from "@/context/AuthContext";
 import { useAuth } from "@/hooks/use-auth";
 
-const mockSignInWithPassword = vi.fn();
-const mockSignUp = vi.fn();
-const mockSignOut = vi.fn();
-const mockResetPasswordForEmail = vi.fn();
-const mockGetSession = vi.fn();
-const mockOnAuthStateChange = vi.fn();
-const mockGetCurrentUserProfile = vi.fn();
+const mockFns = vi.hoisted(() => ({
+  mockSignInWithPassword: vi.fn(),
+  mockSignUp: vi.fn(),
+  mockSignOut: vi.fn(),
+  mockResetPasswordForEmail: vi.fn(),
+  mockGetSession: vi.fn(),
+  mockOnAuthStateChange: vi.fn(),
+  mockGetCurrentUserProfile: vi.fn(),
+}));
 
 vi.mock("@/lib/supabase", () => ({
   supabase: {
     auth: {
-      signInWithPassword: mockSignInWithPassword,
-      signUp: mockSignUp,
-      signOut: mockSignOut,
-      resetPasswordForEmail: mockResetPasswordForEmail,
-      getSession: mockGetSession,
-      onAuthStateChange: mockOnAuthStateChange,
+      signInWithPassword: mockFns.mockSignInWithPassword,
+      signUp: mockFns.mockSignUp,
+      signOut: mockFns.mockSignOut,
+      resetPasswordForEmail: mockFns.mockResetPasswordForEmail,
+      getSession: mockFns.mockGetSession,
+      onAuthStateChange: mockFns.mockOnAuthStateChange,
     },
   },
 }));
 
 vi.mock("@/lib/user-helpers", () => ({
-  getCurrentUserProfile: mockGetCurrentUserProfile,
+  getCurrentUserProfile: mockFns.mockGetCurrentUserProfile,
 }));
 
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -34,15 +36,15 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 
 describe("useAuth", () => {
   beforeEach(() => {
-    mockGetSession.mockResolvedValue({ data: { session: null } });
-    mockOnAuthStateChange.mockReturnValue({
+    mockFns.mockGetSession.mockResolvedValue({ data: { session: null } });
+    mockFns.mockOnAuthStateChange.mockReturnValue({
       data: { subscription: { unsubscribe: vi.fn() } },
     });
-    mockSignInWithPassword.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
-    mockSignUp.mockResolvedValue({ data: {}, error: null });
-    mockSignOut.mockResolvedValue({ error: null });
-    mockResetPasswordForEmail.mockResolvedValue({ error: null });
-    mockGetCurrentUserProfile.mockResolvedValue(null);
+    mockFns.mockSignInWithPassword.mockResolvedValue({ data: { user: { id: "user-1" } }, error: null });
+    mockFns.mockSignUp.mockResolvedValue({ data: {}, error: null });
+    mockFns.mockSignOut.mockResolvedValue({ error: null });
+    mockFns.mockResetPasswordForEmail.mockResolvedValue({ error: null });
+    mockFns.mockGetCurrentUserProfile.mockResolvedValue(null);
   });
 
   it("throws when used without AuthProvider", () => {
@@ -71,7 +73,7 @@ describe("useAuth", () => {
 
     await result.current.signIn("test@example.com", "password123");
 
-    expect(mockSignInWithPassword).toHaveBeenCalledWith({
+    expect(mockFns.mockSignInWithPassword).toHaveBeenCalledWith({
       email: "test@example.com",
       password: "password123",
     });

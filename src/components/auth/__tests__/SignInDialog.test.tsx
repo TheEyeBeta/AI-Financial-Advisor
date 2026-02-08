@@ -2,27 +2,29 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { SignInDialog } from "@/components/auth/SignInDialog";
 
-const mockSignIn = vi.fn();
-const mockNavigate = vi.fn();
-const mockToast = vi.fn();
+const mockFns = vi.hoisted(() => ({
+  mockSignIn: vi.fn(),
+  mockNavigate: vi.fn(),
+  mockToast: vi.fn(),
+}));
 
 vi.mock("@/hooks/use-auth", () => ({
   useAuth: () => ({
-    signIn: mockSignIn,
+    signIn: mockFns.mockSignIn,
   }),
 }));
 
 vi.mock("react-router-dom", () => ({
-  useNavigate: () => mockNavigate,
+  useNavigate: () => mockFns.mockNavigate,
 }));
 
 vi.mock("@/hooks/use-toast", () => ({
-  toast: mockToast,
+  toast: mockFns.mockToast,
 }));
 
 describe("SignInDialog", () => {
   beforeEach(() => {
-    mockSignIn.mockResolvedValue({ user: { id: "user-1" } });
+    mockFns.mockSignIn.mockResolvedValue({ user: { id: "user-1" } });
   });
 
   it("renders login form fields and submit button", () => {
@@ -46,10 +48,10 @@ describe("SignInDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
 
     await waitFor(() => {
-      expect(mockSignIn).toHaveBeenCalledWith("test@example.com", "password123");
+      expect(mockFns.mockSignIn).toHaveBeenCalledWith("test@example.com", "password123");
     });
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
-    expect(mockNavigate).toHaveBeenCalledWith("/advisor");
+    expect(mockFns.mockNavigate).toHaveBeenCalledWith("/advisor");
   });
 });
