@@ -1,6 +1,13 @@
-from fastapi import FastAPI
+import os
+import time
+from datetime import datetime
 
-from .routes.search import router as search_router
+from fastapi import FastAPI, HTTPException
+
+from .routes.search import check_search_provider, router as search_router
+
+
+START_TIME = time.time()
 
 
 def create_app() -> FastAPI:
@@ -29,6 +36,37 @@ def create_app() -> FastAPI:
         ),
     )
 
+    @app.get("/health")
+    async def health_check() -> dict[str, str | float]:
+        return {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "uptime_seconds": time.time() - START_TIME,
+            "version": os.getenv("APP_VERSION", "unknown"),
+            "environment": os.getenv("ENVIRONMENT", "development"),
+        }
+
+    @app.get("/health/live")
+    async def liveness_check() -> dict[str, str]:
+        return {"status": "alive"}
+
+    @app.get("/health/ready")
+    async def readiness_check() -> dict[str, object]:
+        dependency = await check_search_provider()
+        if dependency.get("status") != "connected":
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "status": "not_ready",
+                    "dependencies": {"search_api": dependency},
+                },
+            )
+
+        return {
+            "status": "ready",
+            "dependencies": {"search_api": dependency},
+        }
+
     # Mount routers
     app.include_router(search_router, prefix="")
 
@@ -36,4 +74,3 @@ def create_app() -> FastAPI:
 
 
 app = create_app()
-

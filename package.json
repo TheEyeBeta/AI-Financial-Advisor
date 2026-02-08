@@ -12,7 +12,8 @@
     "lint:fix": "eslint . --ext ts,tsx --fix",
     "lint:ci": "eslint . --ext ts,tsx --max-warnings 0",
     "type-check": "tsc --noEmit",
-    "audit:hooks": "node --experimental-strip-types scripts/audit-hooks.ts"
+    "audit:hooks": "node --experimental-strip-types scripts/audit-hooks.ts",
+    "validate:services": "node --experimental-strip-types scripts/validate-services.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

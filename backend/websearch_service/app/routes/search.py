@@ -14,6 +14,42 @@ TAVILY_API_KEY_ENV = "TAVILY_API_KEY"
 TAVILY_ENDPOINT = "https://api.tavily.com/search"
 
 
+async def check_search_provider() -> Dict[str, str]:
+    """Validate that external search dependency is configured and reachable."""
+    tavily_api_key = os.getenv(TAVILY_API_KEY_ENV)
+    if not tavily_api_key:
+        return {
+            "status": "down",
+            "detail": f"{TAVILY_API_KEY_ENV} is not configured",
+        }
+
+    payload = {
+        "api_key": tavily_api_key,
+        "query": "service health check",
+        "max_results": 1,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.post(TAVILY_ENDPOINT, json=payload)
+    except httpx.RequestError as exc:
+        return {
+            "status": "down",
+            "detail": f"provider connection failed: {exc}",
+        }
+
+    if resp.status_code != 200:
+        return {
+            "status": "down",
+            "detail": f"provider returned HTTP {resp.status_code}",
+        }
+
+    return {
+        "status": "connected",
+        "detail": "search provider reachable",
+    }
+
+
 @router.get("/api/search")
 async def search_web(
     query: str = Query(..., min_length=3, description="Natural language search query."),
@@ -91,4 +127,3 @@ async def search_web(
         "query": query,
         "results": results,
     }
-
