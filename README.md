@@ -4,7 +4,7 @@ An AI-powered financial education platform with paper trading capabilities.
 
 ## Features
 
-- 🤖 AI Financial Advisor chatbot (powered by OpenAI)
+- 🤖 AI Financial Advisor chatbot (via server-side AI proxy)
 - 📊 Paper trading simulator
 - 📈 Portfolio tracking and performance charts
 - 📚 Financial education topics
@@ -31,7 +31,8 @@ An AI-powered financial education platform with paper trading capabilities.
 
 - `VITE_SUPABASE_URL` - Your Supabase project URL
 - `VITE_SUPABASE_ANON_KEY` - Your Supabase anon key
-- `VITE_OPENAI_API_KEY` - Your OpenAI API key
+- `VITE_PYTHON_API_URL` - URL of backend AI proxy service
+- `OPENAI_API_KEY` - Set on backend service only (never in Vite env vars)
 
 ## Tech Stack
 
@@ -39,4 +40,4 @@ An AI-powered financial education platform with paper trading capabilities.
 - Vite
 - Tailwind CSS + shadcn/ui
 - Supabase (Auth + Database)
-- OpenAI API
+- OpenAI API (server-side only)

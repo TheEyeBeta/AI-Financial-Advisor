@@ -839,10 +839,10 @@ ${allRules}`;
 export const pythonApi = {
   // Analyze quantitative data using Deepseek (compliance-safe: only sends numerical data, no PII)
   async analyzeQuantitativeData(quantitativeData: Record<string, number | undefined>): Promise<string> {
-    const deepseekApiKey = import.meta.env.VITE_DEEPSEEK_API_KEY;
+    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
     
-    if (!deepseekApiKey) {
-      throw new Error('Deepseek API key not configured');
+    if (!pythonBackendUrl) {
+      throw new Error('AI backend URL not configured');
     }
 
     // Filter out undefined values
@@ -856,53 +856,30 @@ export const pythonApi = {
     }
 
     try {
-      const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      const response = await fetch(`${pythonBackendUrl}/api/ai/analyze-quantitative`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${deepseekApiKey}`,
         },
         body: JSON.stringify({
-          model: 'deepseek-chat',
-          messages: [
-            {
-              role: 'system',
-              content: `You are a quantitative financial data analyst. Analyze the provided trading metrics and provide insights, patterns, and recommendations based purely on the numbers. 
-
-Focus on:
-- Performance analysis (win rate, profit factor, average profit/loss)
-- Risk assessment (portfolio value, positions, P&L breakdown)
-- Statistical patterns and trends
-- Trading efficiency metrics
-- Actionable recommendations for improvement
-
-Do NOT reference any user information, personal data, or identifiers. Only analyze the numerical data provided.`
-            },
-            {
-              role: 'user',
-              content: `Analyze these trading metrics:\n${JSON.stringify(sanitizedData, null, 2)}`
-            }
-          ],
-          temperature: 0.3, // Lower for more analytical responses
-          max_tokens: DEEPSEEK_MAX_TOKENS,
+          quantitative_data: sanitizedData,
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `Deepseek API error: ${response.statusText}`);
+        throw new Error(errorData.detail || `AI backend error: ${response.statusText}`);
       }
 
       const data = await response.json();
-      return data.choices[0]?.message?.content || 'Unable to analyze data.';
+      return data.response || 'Unable to analyze data.';
     } catch (error) {
-      console.error('Error calling Deepseek API:', error);
+      console.error('Error calling AI analysis backend:', error);
       throw error;
     }
   },
 
-  // Call OpenAI directly for AI chat response
-  // Using gpt-4o-mini - best cost/performance model (cheapest while still being very capable)
+  // Call backend AI proxy for chat response (API keys remain server-side)
   async getChatResponse(
     message: string, 
     userId: string, 
@@ -922,7 +899,6 @@ Do NOT reference any user information, personal data, or identifiers. Only analy
       throw new Error(`Chat history too long. Maximum ${100} messages allowed.`);
     }
     
-    const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
     const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
     
     const hasTradeEngineData = !!tradeEngineContext;
@@ -1541,105 +1517,69 @@ Do NOT reference any user information, personal data, or identifiers. Only analy
       content: message
     });
     
-    // Option 1: Use OpenAI directly if API key is set
-    if (openaiApiKey) {
+    // Use backend AI proxy (keys kept server-side)
+    if (pythonBackendUrl) {
       try {
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const response = await fetch(`${pythonBackendUrl}/api/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${openaiApiKey}`,
           },
           body: JSON.stringify({
-            model: 'gpt-4o-mini',
-            messages: messages,
+            messages,
+            user_id: userId,
             temperature: 0.7,
             max_tokens: OPENAI_MAX_TOKENS,
           }),
         });
-        
+
         if (!response.ok) {
           const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error?.message || `OpenAI API error: ${response.statusText}`);
+          throw new Error(errorData.detail || `AI backend error: ${response.statusText}`);
         }
-        
+
         const data = await response.json();
-        // Explicit null check with fallback
-        const content = data.choices?.[0]?.message?.content;
+        const content = data.response;
         if (!content || typeof content !== 'string') {
           return 'I apologize, but I encountered an error processing your request.';
         }
         return content;
       } catch (error: unknown) {
-        console.error('Error calling OpenAI API:', error);
-        // Fallback to Python backend if configured
-        if (pythonBackendUrl) {
-          try {
-            return await this.getChatResponseFromPython(message, userId);
-          } catch (fallbackError) {
-            console.error('Python backend fallback also failed:', fallbackError);
-            return 'I apologize, but the AI service is currently unavailable. Please check your API configuration.';
-          }
-        }
-        return 'I apologize, but the AI service is currently unavailable. Please check your OpenAI API key configuration.';
-      }
-    }
-    
-    // Option 2: Use Python backend if configured (fallback)
-    if (pythonBackendUrl) {
-      try {
-        return await this.getChatResponseFromPython(message, userId);
-      } catch (error) {
-        console.error('Error calling Python backend:', error);
+        console.error('Error calling AI backend:', error);
         return 'I apologize, but the AI service is currently unavailable.';
       }
     }
-    
-    // Option 3: Fallback response if neither is configured
-    return 'I apologize, but the AI service is not configured. Please set VITE_OPENAI_API_KEY in your .env file or configure a Python backend.';
+
+    // Fallback response if backend is not configured
+    return 'I apologize, but the AI service is not configured. Please set VITE_PYTHON_API_URL to your backend AI proxy.';
   },
 
   // Generate a short title for a chat based on the first user message
   async generateChatTitle(firstMessage: string): Promise<string> {
-    const openaiApiKey = import.meta.env.VITE_OPENAI_API_KEY;
-    
-    if (!openaiApiKey) {
-      // Fallback: use first 30 chars of message
+    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
+
+    if (!pythonBackendUrl) {
       return firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
     }
 
     try {
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+      const response = await fetch(`${pythonBackendUrl}/api/chat/title`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${openaiApiKey}`,
         },
         body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          messages: [
-            {
-              role: 'system',
-              content: 'Generate a short, concise title (3-6 words max) for this chat conversation about finance. Only return the title, nothing else.'
-            },
-            {
-              role: 'user',
-              content: `First message: "${firstMessage}"`
-            }
-          ],
-          temperature: 0.5,
-          max_tokens: 20, // Small token limit for title generation
+          first_message: firstMessage,
         }),
       });
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || 'Failed to generate title');
+        throw new Error(errorData.detail || 'Failed to generate title');
       }
 
       const data = await response.json();
-      const title = data.choices?.[0]?.message?.content?.trim();
-      // Explicit null check with fallback
+      const title = data.title?.trim();
       if (!title || typeof title !== 'string') {
         return firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
       }

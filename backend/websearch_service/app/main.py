@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import FastAPI, HTTPException
 
+from .routes.ai_proxy import router as ai_proxy_router
 from .routes.search import check_search_provider, router as search_router
 
 
@@ -69,6 +70,7 @@ def create_app() -> FastAPI:
 
     # Mount routers
     app.include_router(search_router, prefix="")
+    app.include_router(ai_proxy_router, prefix="")
 
     return app
 
