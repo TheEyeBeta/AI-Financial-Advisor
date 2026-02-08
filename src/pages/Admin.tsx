@@ -78,6 +78,9 @@ export default function Admin() {
   const [tradingStats, setTradingStats] = useState<TradingStats>({ totalPositions: 0, totalTrades: 0, totalJournalEntries: 0 });
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
 
+  useEffect(() => {
+    loadAllData();
+  }, [loadAllData]);
 
   useEffect(() => {
     if (searchQuery) {
@@ -92,6 +95,17 @@ export default function Admin() {
       setFilteredUsers(users);
     }
   }, [searchQuery, users]);
+
+  const loadAllData = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchUsers(),
+      fetchChatStats(),
+      fetchTradingStats(),
+      fetchRecentActivity(),
+    ]);
+    setLoading(false);
+  }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);

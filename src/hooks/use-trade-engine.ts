@@ -3,7 +3,7 @@
  * Provides real-time price updates, signals, and connection management
  */
 
-import { useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   tradeEngineWS,
   ConnectionState,
@@ -70,8 +70,8 @@ export function useTradeEngineConnection() {
  */
 export function useTradeEnginePrices(tickers: string[]) {
   const [prices, setPrices] = useState<Record<string, WSPriceUpdateMessage>>({});
-  const subscribedTickersRef = useRef<string[]>([]);
-  const normalizedTickers = useNormalizedTickers(tickers);
+  const tickersRef = useRef<string[]>([]);
+  const normalizedTickers = useMemo(() => tickers.map((ticker) => ticker.toUpperCase()), [tickers]);
 
   useEffect(() => {
     if (tradeEngineWS.connectionState === 'disconnected') {
@@ -91,8 +91,9 @@ export function useTradeEnginePrices(tickers: string[]) {
   }, []);
 
   useEffect(() => {
+    // Determine which tickers to subscribe/unsubscribe
     const currentTickers = new Set(normalizedTickers);
-    const previousTickers = new Set(subscribedTickersRef.current);
+    const previousTickers = new Set(tickersRef.current);
 
     const toSubscribe = [...currentTickers].filter((ticker) => !previousTickers.has(ticker));
     const toUnsubscribe = [...previousTickers].filter((ticker) => !currentTickers.has(ticker));
@@ -130,7 +131,7 @@ export function useTradeEnginePrices(tickers: string[]) {
 export function useTradeEngineSignals(tickers: string[]) {
   const [signals, setSignals] = useState<Record<string, WSSignalMessage>>({});
   const [allSignals, setAllSignals] = useState<WSSignalMessage[]>([]);
-  const normalizedTickers = useNormalizedTickers(tickers);
+  const normalizedTickers = useMemo(() => tickers.map((ticker) => ticker.toUpperCase()), [tickers]);
 
   useEffect(() => {
     if (tradeEngineWS.connectionState === 'disconnected') {
@@ -139,7 +140,8 @@ export function useTradeEngineSignals(tickers: string[]) {
 
     const trackedTickers = new Set(normalizedTickers);
     const unsubscribe = tradeEngineWS.on('signal', (data) => {
-      if (trackedTickers.size === 0 || trackedTickers.has(data.ticker)) {
+      // Only track signals for our tickers
+      if (normalizedTickers.length === 0 || normalizedTickers.includes(data.ticker)) {
         setSignals((prev) => ({
           ...prev,
           [data.ticker]: data,
@@ -161,7 +163,7 @@ export function useTradeEngineSignals(tickers: string[]) {
  */
 export function useTradeEngineIndicators(tickers: string[]) {
   const [indicators, setIndicators] = useState<Record<string, WSIndicatorMessage>>({});
-  const normalizedTickers = useNormalizedTickers(tickers);
+  const normalizedTickers = useMemo(() => tickers.map((ticker) => ticker.toUpperCase()), [tickers]);
 
   useEffect(() => {
     if (tradeEngineWS.connectionState === 'disconnected') {
@@ -170,7 +172,7 @@ export function useTradeEngineIndicators(tickers: string[]) {
 
     const trackedTickers = new Set(normalizedTickers);
     const unsubscribe = tradeEngineWS.on('indicator_update', (data) => {
-      if (trackedTickers.size === 0 || trackedTickers.has(data.ticker)) {
+      if (normalizedTickers.length === 0 || normalizedTickers.includes(data.ticker)) {
         setIndicators((prev) => ({
           ...prev,
           [data.ticker]: data,
