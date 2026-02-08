@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Table,
   TableBody,
@@ -78,9 +78,6 @@ export default function Admin() {
   const [tradingStats, setTradingStats] = useState<TradingStats>({ totalPositions: 0, totalTrades: 0, totalJournalEntries: 0 });
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
 
-  useEffect(() => {
-    loadAllData();
-  }, []);
 
   useEffect(() => {
     if (searchQuery) {
@@ -96,17 +93,6 @@ export default function Admin() {
     }
   }, [searchQuery, users]);
 
-  const loadAllData = async () => {
-    setLoading(true);
-    await Promise.all([
-      fetchUsers(),
-      fetchChatStats(),
-      fetchTradingStats(),
-      fetchRecentActivity(),
-    ]);
-    setLoading(false);
-  };
-
   const handleRefresh = async () => {
     setRefreshing(true);
     await loadAllData();
@@ -114,7 +100,7 @@ export default function Admin() {
     toast({ title: "Refreshed", description: "All data has been refreshed" });
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("users")
@@ -127,9 +113,9 @@ export default function Admin() {
     } catch (error: unknown) {
       console.error("Error fetching users:", error);
     }
-  };
+  }, []);
 
-  const fetchChatStats = async () => {
+  const fetchChatStats = useCallback(async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
       
@@ -147,9 +133,9 @@ export default function Admin() {
     } catch (error) {
       console.error("Error fetching chat stats:", error);
     }
-  };
+  }, []);
 
-  const fetchTradingStats = async () => {
+  const fetchTradingStats = useCallback(async () => {
     try {
       const [positionsResult, tradesResult, journalResult] = await Promise.all([
         supabase.from("open_positions").select("id", { count: "exact", head: true }),
@@ -165,9 +151,9 @@ export default function Admin() {
     } catch (error) {
       console.error("Error fetching trading stats:", error);
     }
-  };
+  }, []);
 
-  const fetchRecentActivity = async () => {
+  const fetchRecentActivity = useCallback(async () => {
     try {
       // Get recent chat messages as activity
       const { data } = await supabase
@@ -189,7 +175,22 @@ export default function Admin() {
     } catch (error) {
       console.error("Error fetching activity:", error);
     }
-  };
+  }, []);
+
+  const loadAllData = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchUsers(),
+      fetchChatStats(),
+      fetchTradingStats(),
+      fetchRecentActivity(),
+    ]);
+    setLoading(false);
+  }, [fetchUsers, fetchChatStats, fetchTradingStats, fetchRecentActivity]);
+
+  useEffect(() => {
+    loadAllData();
+  }, [loadAllData]);
 
   const toggleAdminStatus = async (userId: string, currentType: 'User' | 'Admin') => {
     const newType = currentType === 'Admin' ? 'User' : 'Admin';
