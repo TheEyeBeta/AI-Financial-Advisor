@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Table,
   TableBody,
@@ -80,7 +80,7 @@ export default function Admin() {
 
   useEffect(() => {
     loadAllData();
-  }, []);
+  }, [loadAllData]);
 
   useEffect(() => {
     if (searchQuery) {
@@ -96,7 +96,7 @@ export default function Admin() {
     }
   }, [searchQuery, users]);
 
-  const loadAllData = async () => {
+  const loadAllData = useCallback(async () => {
     setLoading(true);
     await Promise.all([
       fetchUsers(),
@@ -105,7 +105,7 @@ export default function Admin() {
       fetchRecentActivity(),
     ]);
     setLoading(false);
-  };
+  }, []);
 
   const handleRefresh = async () => {
     setRefreshing(true);
