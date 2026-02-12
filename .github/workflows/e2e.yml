@@ -13,6 +13,8 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
+      - name: Install Playwright test runner
+        run: npm install --no-save @playwright/test
       - run: npx playwright install --with-deps
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
