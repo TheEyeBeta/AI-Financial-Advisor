@@ -4,21 +4,29 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "audit:hooks": "node --experimental-strip-types scripts/audit-hooks.ts",
     "build": "vite build",
     "build:dev": "vite build --mode development",
+    "dev": "vite",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives",
-    "preview": "vite preview",
-    "lint:fix": "eslint . --ext ts,tsx --fix",
     "lint:ci": "eslint . --ext ts,tsx --max-warnings 0",
-    "type-check": "tsc --noEmit",
-    "audit:hooks": "node --experimental-strip-types scripts/audit-hooks.ts",
-    "validate:services": "node --experimental-strip-types scripts/validate-services.ts",
+    "lint:fix": "eslint . --ext ts,tsx --fix",
+    "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:ui": "playwright test --ui",
     "test:ui": "vitest --ui",
+<<<<<<< codex/scrutinize-repo-for-security-gaps-q8om4h
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test"
+=======
+    "test:watch": "vitest",
+    "type-check": "tsc --noEmit",
+    "validate:services": "node --experimental-strip-types scripts/validate-services.ts"
+>>>>>>> main
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
