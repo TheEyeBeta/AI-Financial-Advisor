@@ -14,7 +14,11 @@ export function AppLayout({ children, title }: AppLayoutProps) {
       <SidebarInset>
         <header className="sticky top-0 z-10 flex h-14 items-center gap-2 sm:gap-4 border-b bg-background/95 px-3 sm:px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <SidebarTrigger className="h-8 w-8 shrink-0" />
-          {title && <h1 className="text-base sm:text-lg font-semibold truncate">{title}</h1>}
+          {title && (
+            <h1 data-testid="page-title" className="text-base sm:text-lg font-semibold truncate">
+              {title}
+            </h1>
+          )}
           <div className="ml-auto shrink-0">
             <UserAuth />
           </div>
