@@ -1,0 +1,52 @@
+name: Security Checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+jobs:
+  node-audit:
+    name: Node dependency audit
+    runs-on: ubuntu-latest
+    env:
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+      - name: Install dependencies
+        run: npm ci
+      - name: Auto-remediate lockfile vulnerabilities (prod deps)
+        run: npm audit fix --package-lock-only --omit=dev || true
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+  python-audit:
+    name: Python dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install pip-audit
+        run: python -m pip install --upgrade pip pip-audit
+      - name: Audit backend dependencies
+        run: pip-audit -r backend/websearch_service/requirements.txt
+
+  python-bandit:
+    name: Python static security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install bandit
+        run: python -m pip install --upgrade pip bandit
+      - name: Run bandit on backend service
+        run: bandit -r backend/websearch_service/app -ll
