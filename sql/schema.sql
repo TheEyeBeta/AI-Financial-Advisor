@@ -572,12 +572,12 @@ WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()))
 DROP POLICY IF EXISTS "Anyone can view market indices" ON public.market_indices;
 CREATE POLICY "Anyone can view market indices"
 ON public.market_indices FOR SELECT
-TO authenticated USING (true);
+TO authenticated, anon USING (true);
 
 DROP POLICY IF EXISTS "Anyone can view trending stocks" ON public.trending_stocks;
 CREATE POLICY "Anyone can view trending stocks"
 ON public.trending_stocks FOR SELECT
-TO authenticated USING (true);
+TO authenticated, anon USING (true);
 
 -- News articles are public read
 DROP POLICY IF EXISTS "Anyone can view news articles" ON public.news_articles;
