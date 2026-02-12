@@ -8,22 +8,14 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      NPM_REGISTRY_URL: ${{ vars.NPM_REGISTRY_URL }}
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Configure npm registry/auth
-        run: |
-          npm config set registry "${NPM_REGISTRY_URL:-https://registry.npmjs.org/}"
-          npm config delete proxy || true
-          npm config delete https-proxy || true
-          if [ -n "$NPM_TOKEN" ]; then
-            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
-          fi
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
 
       - run: npm ci
       - name: Install Playwright test runner
