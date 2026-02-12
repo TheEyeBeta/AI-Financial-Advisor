@@ -13,9 +13,7 @@ jobs:
         with:
           node-version: '20'
       - run: npm ci
-      - name: Install Playwright test runner
-        run: npm install --no-save @playwright/test
-      - run: npx playwright install --with-deps
+      - run: npx --yes playwright@1.56.1 install --with-deps chromium
       - run: npm run test:e2e
       - uses: actions/upload-artifact@v4
         if: always()
