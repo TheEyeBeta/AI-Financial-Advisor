@@ -33,6 +33,7 @@ An AI-powered financial education platform with paper trading capabilities.
 - `VITE_SUPABASE_ANON_KEY` - Your Supabase anon key
 - `VITE_PYTHON_API_URL` - URL of backend AI proxy service
 - `OPENAI_API_KEY` - Set on backend service only (never in Vite env vars)
+- `AI_PROXY_API_KEY` - Shared secret required by websearch/AI-proxy API routes (send via `x-api-key` or `Authorization: Bearer ...`)
 
 ## Tech Stack
 

@@ -307,8 +307,11 @@ ALTER TABLE public.trades ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trade_journal ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.learning_topics ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.achievements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.market_indices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.trending_stocks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.news_articles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.eye_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_snapshots ENABLE ROW LEVEL SECURITY;
 
 -- ============================================================
 -- Helper Functions
@@ -572,11 +575,17 @@ WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()))
 DROP POLICY IF EXISTS "Anyone can view market indices" ON public.market_indices;
 CREATE POLICY "Anyone can view market indices"
 ON public.market_indices FOR SELECT
-TO authenticated USING (true);
+TO authenticated, anon USING (true);
 
 DROP POLICY IF EXISTS "Anyone can view trending stocks" ON public.trending_stocks;
 CREATE POLICY "Anyone can view trending stocks"
 ON public.trending_stocks FOR SELECT
+TO authenticated, anon USING (true);
+
+-- Stock snapshots are readable by authenticated users only
+DROP POLICY IF EXISTS "Authenticated users can view stock snapshots" ON public.stock_snapshots;
+CREATE POLICY "Authenticated users can view stock snapshots"
+ON public.stock_snapshots FOR SELECT
 TO authenticated USING (true);
 
 -- News articles are public read

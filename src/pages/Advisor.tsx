@@ -178,7 +178,7 @@ const Advisor = () => {
           <div className="max-w-3xl mx-auto relative">
             <input
               type="text"
-              placeholder={userProfile?.first_name ? `Message...` : "Ask anything..."}
+              placeholder="Message..."
               className="w-full h-9 pl-3 pr-10 rounded-lg border border-border/50 bg-muted/20 text-sm placeholder:text-muted-foreground/40 focus:bg-background focus:border-primary/40 focus:outline-none transition-all duration-200 disabled:opacity-50"
               disabled={isLoading}
               onKeyDown={(e) => {

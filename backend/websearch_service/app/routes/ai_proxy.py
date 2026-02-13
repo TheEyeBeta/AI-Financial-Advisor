@@ -6,10 +6,11 @@ from collections import defaultdict, deque
 from typing import Any, Deque, Dict, List, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from ..services.audit import audit_log
+from ..services.security import require_api_key
 
 
 router = APIRouter(tags=["ai-proxy"])
@@ -72,21 +73,38 @@ def _build_headers() -> Dict[str, str]:
     }
 
 
-async def _call_openai(payload: Dict[str, Any]) -> Dict[str, Any]:
+async def _call_openai(payload: Dict[str, Any], client_id: str, user_id: str | None) -> Dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await client.post(OPENAI_ENDPOINT, headers=_build_headers(), json=payload)
-    except httpx.RequestError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+    except httpx.RequestError:
+        await audit_log(
+            "model_provider_transport_error",
+            {"client_id": client_id, "user_id": user_id, "provider": "openai"},
+        )
+        raise HTTPException(status_code=502, detail="Model provider is currently unreachable.")
 
     if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        await audit_log(
+            "model_provider_http_error",
+            {
+                "client_id": client_id,
+                "user_id": user_id,
+                "provider": "openai",
+                "status_code": response.status_code,
+            },
+        )
+        raise HTTPException(status_code=502, detail="Model provider returned an error.")
 
     return response.json()
 
 
 @router.post("/api/chat")
-async def chat_completion(request: ChatRequest, raw_request: Request) -> Dict[str, str]:
+async def chat_completion(
+    request: ChatRequest,
+    raw_request: Request,
+    _auth: None = Depends(require_api_key),
+) -> Dict[str, str]:
     client_id = raw_request.client.host if raw_request.client else "unknown"
     _enforce_rate_limit(client_id)
 
@@ -113,7 +131,9 @@ async def chat_completion(request: ChatRequest, raw_request: Request) -> Dict[st
             "messages": messages,
             "temperature": request.temperature,
             "max_tokens": request.max_tokens,
-        }
+        },
+        client_id=client_id,
+        user_id=request.user_id,
     )
 
     usage = data.get("usage")
@@ -134,7 +154,11 @@ async def chat_completion(request: ChatRequest, raw_request: Request) -> Dict[st
 
 
 @router.post("/api/chat/title")
-async def chat_title(request: ChatTitleRequest, raw_request: Request) -> Dict[str, str]:
+async def chat_title(
+    request: ChatTitleRequest,
+    raw_request: Request,
+    _auth: None = Depends(require_api_key),
+) -> Dict[str, str]:
     client_id = raw_request.client.host if raw_request.client else "unknown"
     _enforce_rate_limit(client_id)
 
@@ -151,7 +175,7 @@ async def chat_title(request: ChatTitleRequest, raw_request: Request) -> Dict[st
         "max_tokens": 20,
     }
 
-    data = await _call_openai(payload)
+    data = await _call_openai(payload, client_id=client_id, user_id=None)
     content = data.get("choices", [{}])[0].get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
         raise HTTPException(status_code=502, detail="Model provider returned an empty title response.")
@@ -160,7 +184,11 @@ async def chat_title(request: ChatTitleRequest, raw_request: Request) -> Dict[st
 
 
 @router.post("/api/ai/analyze-quantitative")
-async def analyze_quantitative_data(request: QuantitativeAnalysisRequest, raw_request: Request) -> Dict[str, str]:
+async def analyze_quantitative_data(
+    request: QuantitativeAnalysisRequest,
+    raw_request: Request,
+    _auth: None = Depends(require_api_key),
+) -> Dict[str, str]:
     client_id = raw_request.client.host if raw_request.client else "unknown"
     _enforce_rate_limit(client_id)
 
@@ -183,7 +211,7 @@ async def analyze_quantitative_data(request: QuantitativeAnalysisRequest, raw_re
         "max_tokens": 500,
     }
 
-    data = await _call_openai(payload)
+    data = await _call_openai(payload, client_id=client_id, user_id=None)
     content = data.get("choices", [{}])[0].get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
         raise HTTPException(status_code=502, detail="Model provider returned an empty analysis response.")

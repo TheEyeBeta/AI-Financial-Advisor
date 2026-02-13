@@ -4,8 +4,11 @@ import os
 from typing import Any, Dict, List
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+
+from ..services.audit import audit_log
+from ..services.security import require_api_key
 
 router = APIRouter(tags=["search"])
 
@@ -59,6 +62,7 @@ async def search_web(
         le=10,
         description="Maximum number of search results to return (1–10).",
     ),
+    _auth: None = Depends(require_api_key),
 ) -> Dict[str, Any]:
     """
     Perform a general web search via an external provider and return
@@ -98,16 +102,24 @@ async def search_web(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(TAVILY_ENDPOINT, json=payload)
-    except httpx.RequestError as exc:
+    except httpx.RequestError:
+        await audit_log(
+            "search_provider_transport_error",
+            {"provider": "tavily", "query_length": len(query)},
+        )
         raise HTTPException(
             status_code=502,
-            detail=f"Error contacting search provider: {exc}",
-        ) from exc
+            detail="Search provider is currently unreachable.",
+        )
 
     if resp.status_code != 200:
+        await audit_log(
+            "search_provider_http_error",
+            {"provider": "tavily", "status_code": resp.status_code, "query_length": len(query)},
+        )
         raise HTTPException(
-            status_code=resp.status_code,
-            detail=f"Search provider error: {resp.text}",
+            status_code=502,
+            detail="Search provider returned an error.",
         )
 
     data = resp.json()
