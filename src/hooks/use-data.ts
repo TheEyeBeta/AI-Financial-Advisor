@@ -302,6 +302,22 @@ export function useLearningTopics() {
   });
 }
 
+export function useInitializeLearningTopics() {
+  const { userId, userProfile } = useAuth();
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: (experienceLevel?: 'beginner' | 'intermediate' | 'advanced') =>
+      learningApi.initializeTopics(
+        userId!,
+        experienceLevel || (userProfile?.experience_level as 'beginner' | 'intermediate' | 'advanced') || 'beginner'
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['learning-topics', userId] });
+    },
+  });
+}
+
 export function useUpdateLearningProgress() {
   const { userId } = useAuth();
   const queryClient = useQueryClient();

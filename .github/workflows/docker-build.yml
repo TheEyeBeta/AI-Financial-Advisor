@@ -1,0 +1,48 @@
+name: Docker Build and Test
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'Dockerfile*'
+      - 'docker-compose.yml'
+      - '.github/workflows/docker-build.yml'
+
+jobs:
+  test-docker-build:
+    name: Test Docker Builds
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend/websearch_service
+          file: ./backend/websearch_service/Dockerfile
+          push: false
+          tags: backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          push: false
+          tags: frontend:test
+          build-args: |
+            VITE_SUPABASE_URL=https://test.supabase.co
+            VITE_SUPABASE_ANON_KEY=test-key
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test docker-compose
+        run: |
+          docker-compose config

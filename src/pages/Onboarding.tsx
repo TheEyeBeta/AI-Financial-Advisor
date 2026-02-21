@@ -9,6 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
+import { learningApi } from "@/services/api";
 
 type MaritalStatus = "single" | "married" | "divorced" | "widowed" | "partnered";
 type InvestmentGoal = "retirement" | "wealth_building" | "income" | "education" | "major_purchase" | "other";
@@ -126,6 +127,15 @@ const Onboarding = () => {
         .eq("id", userProfile.id);
 
       if (error) throw error;
+
+      // Initialize learning topics based on experience level
+      try {
+        const experienceLevel = userProfile.experience_level || 'beginner';
+        await learningApi.initializeTopics(userProfile.id, experienceLevel);
+      } catch (topicError) {
+        // Don't fail onboarding if topic initialization fails
+        console.warn('Failed to initialize learning topics:', topicError);
+      }
 
       // Refresh the profile in AuthContext so ProtectedRoute sees the update
       await refreshProfile();

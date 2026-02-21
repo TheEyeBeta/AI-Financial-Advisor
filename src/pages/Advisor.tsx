@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useLocation } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatInterface } from "@/components/advisor/ChatInterface";
 import { SuggestedTopics } from "@/components/advisor/SuggestedTopics";
@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/use-auth";
 
 const Advisor = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const chatFromUrl = searchParams.get('chat');
   
   const { userId, isAuthenticated, userProfile } = useAuth();
@@ -21,6 +22,26 @@ const Advisor = () => {
   
   const [showTopics, setShowTopics] = useState(true);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  
+  // Handle initial message from navigation state (e.g., from learning topics)
+  useEffect(() => {
+    const handleInitialMessage = async () => {
+      // Check if there's an initial message in location state
+      const state = location.state as { initialMessage?: string } | null;
+      if (state?.initialMessage && isAuthenticated && userId) {
+        const message = state.initialMessage;
+        // Send the message
+        await handleSendMessage(message);
+        // Clear the state to avoid re-triggering on re-render
+        window.history.replaceState({ ...window.history.state, state: null }, '');
+      }
+    };
+    
+    if (isAuthenticated && userId) {
+      handleInitialMessage();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, isAuthenticated, userId]);
 
   // Handle chat from URL param
   useEffect(() => {

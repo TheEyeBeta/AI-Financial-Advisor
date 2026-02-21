@@ -1,12 +1,19 @@
 import { BookOpen, Award, CheckCircle } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { useLearningTopics, useAchievements } from "@/hooks/use-data";
+import { Button } from "@/components/ui/button";
+import { useLearningTopics, useAchievements, useInitializeLearningTopics } from "@/hooks/use-data";
+import { useAuth } from "@/hooks/use-auth";
 import { cn } from "@/lib/utils";
+import { toast } from "@/hooks/use-toast";
+import { useNavigate } from "react-router-dom";
 
 export function LearningProgress() {
   const { data: topics = [], isLoading: topicsLoading } = useLearningTopics();
   const { data: achievements = [], isLoading: achievementsLoading } = useAchievements();
+  const { userProfile } = useAuth();
+  const initializeTopics = useInitializeLearningTopics();
+  const navigate = useNavigate();
 
   const totalProgress = topics.length > 0
     ? Math.round(
@@ -47,18 +54,53 @@ export function LearningProgress() {
           <div className="py-6 text-center">
             <BookOpen className="h-8 w-8 mx-auto mb-3 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">No learning topics yet</p>
-            <p className="text-xs text-muted-foreground/60 mt-1">Start learning to track progress</p>
+            <p className="text-xs text-muted-foreground/60 mt-1 mb-3">
+              Get started with personalized learning topics
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={async () => {
+                try {
+                  const experienceLevel = (userProfile?.experience_level as 'beginner' | 'intermediate' | 'advanced') || 'beginner';
+                  await initializeTopics.mutateAsync(experienceLevel);
+                  toast({
+                    title: "Topics initialized!",
+                    description: "Your learning journey has begun.",
+                  });
+                } catch (error) {
+                  toast({
+                    title: "Error",
+                    description: "Failed to initialize topics. Please try again.",
+                    variant: "destructive",
+                  });
+                }
+              }}
+              disabled={initializeTopics.isPending}
+            >
+              {initializeTopics.isPending ? "Loading..." : "Initialize Topics"}
+            </Button>
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {topics.map((topic) => (
-              <div 
-                key={topic.id} 
+              <button
+                key={topic.id}
+                onClick={() => {
+                  // Navigate to advisor with the topic as a question
+                  navigate('/advisor', { 
+                    state: { 
+                      initialMessage: `Tell me about: ${topic.topic_name}` 
+                    } 
+                  });
+                }}
                 className={cn(
-                  "relative rounded-xl p-3 transition-colors",
+                  "relative rounded-xl p-3 transition-all text-left",
+                  "hover:scale-[1.02] hover:shadow-md cursor-pointer",
+                  "focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2",
                   topic.completed 
-                    ? "bg-profit/10" 
-                    : "bg-muted/30 hover:bg-muted/40"
+                    ? "bg-profit/10 hover:bg-profit/15" 
+                    : "bg-muted/30 hover:bg-muted/50"
                 )}
               >
                 <div className="flex items-center gap-1.5 mb-2">
@@ -75,7 +117,7 @@ export function LearningProgress() {
                     {topic.progress}%
                   </span>
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}

@@ -16,9 +16,25 @@ class HealthCheckService {
   private readonly checkIntervalMs = 30000;
 
   private readonly endpoints = {
-    websearch: import.meta.env.VITE_WEBSEARCH_API_URL
-      ? `${import.meta.env.VITE_WEBSEARCH_API_URL}/health/live`
-      : 'http://localhost:8001/health/live',
+    // Websearch and AI backend are the same service, use same URL
+    // Force port 8000 if env var points to 8001 (common misconfiguration)
+    websearch: (() => {
+      const websearchUrl = import.meta.env.VITE_WEBSEARCH_API_URL;
+      const pythonUrl = import.meta.env.VITE_PYTHON_API_URL;
+      
+      // If websearch URL points to 8001, ignore it and use python URL or default
+      if (websearchUrl && websearchUrl.includes(':8001')) {
+        return pythonUrl 
+          ? `${pythonUrl}/health/live`
+          : 'http://localhost:8000/health/live';
+      }
+      
+      return websearchUrl
+        ? `${websearchUrl}/health/live`
+        : pythonUrl
+        ? `${pythonUrl}/health/live`
+        : 'http://localhost:8000/health/live';
+    })(),
     ai_backend: import.meta.env.VITE_PYTHON_API_URL
       ? `${import.meta.env.VITE_PYTHON_API_URL}/health`
       : 'http://localhost:8000/health',
@@ -56,9 +72,18 @@ class HealthCheckService {
         latency: Date.now() - startedAt,
       };
     } catch (error) {
+      // Silently handle connection errors - backend might not be running
+      // This is expected in development when backend isn't started
+      const errorMessage = error instanceof Error ? error.message : `Unknown error while checking ${name}`;
+      
+      // Only log if it's not a connection refused (expected when backend is down)
+      if (!errorMessage.includes('ERR_CONNECTION_REFUSED') && !errorMessage.includes('Failed to fetch')) {
+        console.warn(`Health check failed for ${name}:`, errorMessage);
+      }
+      
       return {
         available: false,
-        error: error instanceof Error ? error.message : `Unknown error while checking ${name}`,
+        error: errorMessage,
       };
     }
   }

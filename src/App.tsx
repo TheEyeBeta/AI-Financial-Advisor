@@ -38,7 +38,12 @@ const App = () => {
       <Toaster />
       <Sonner />
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
           <Routes>
             {/* Landing page - shows when not authenticated */}
             <Route path="/" element={<Landing />} />

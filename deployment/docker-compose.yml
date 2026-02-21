@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Python FastAPI Backend Service
+  backend:
+    build:
+      context: ./backend/websearch_service
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+        ENVIRONMENT: ${ENVIRONMENT:-production}
+    container_name: ai-financial-advisor-backend
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - APP_VERSION=${APP_VERSION:-0.1.0}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - AI_AUDIT_LOG_PATH=/app/logs/audit.jsonl
+    volumes:
+      - ./backend/websearch_service/logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health/live', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Frontend (for local development - production uses Vercel)
+  frontend:
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.frontend
+    container_name: ai-financial-advisor-frontend
+    ports:
+      - "${FRONTEND_PORT:-4173}:4173"
+    environment:
+      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+      - VITE_PYTHON_API_URL=${VITE_PYTHON_API_URL:-http://backend:8000}
+      - VITE_WEBSEARCH_API_URL=${VITE_WEBSEARCH_API_URL:-http://backend:8000}
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge

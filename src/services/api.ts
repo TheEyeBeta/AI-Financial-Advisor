@@ -442,6 +442,108 @@ export const learningApi = {
     if (error) throw error;
     return data;
   },
+
+  async initializeTopics(userId: string, experienceLevel: 'beginner' | 'intermediate' | 'advanced' = 'beginner'): Promise<LearningTopic[]> {
+    // Beginner topics (from curriculum)
+    const beginnerTopics = [
+      'What Does Finance Actually Do?',
+      'Time is Money: The Power of Compounding',
+      'The Big 4 Asset Classes',
+      'Risk vs. Return: The Golden Rule',
+      'Diversification: Don\'t Put All Eggs in One Basket',
+      'Stocks 101: Owning a Piece of a Company',
+      'Bonds 101: Lending Your Money',
+      'Funds, ETFs & Managed Products',
+      'Reading a Company\'s Report Card',
+      'Inflation & Real Returns',
+      'Fees & Costs: The Silent Killer',
+      'Your First Portfolio: Asset Allocation Basics',
+    ];
+
+    // Intermediate topics (sample)
+    const intermediateTopics = [
+      'Statistics for Investors',
+      'Expected Return & Risk Modeling',
+      'Sharpe Ratio & Risk-Adjusted Returns',
+      'How Financial Markets Work',
+      'Macroeconomics & Your Portfolio',
+      'Stock Valuation: Multiples & Ratios',
+      'Strategic Asset Allocation',
+      'Rebalancing & Portfolio Maintenance',
+    ];
+
+    // Advanced topics (sample)
+    const advancedTopics = [
+      'Advanced Financial Statement Analysis',
+      'Building a 3-Statement Model',
+      'Comprehensive DCF Valuation',
+      'Advanced Portfolio Theory',
+      'Risk Budgeting & Risk Parity',
+      'Derivatives Pricing & Hedging',
+    ];
+
+    // Select topics based on experience level
+    const topics = experienceLevel === 'advanced' 
+      ? advancedTopics 
+      : experienceLevel === 'intermediate' 
+      ? intermediateTopics 
+      : beginnerTopics;
+
+    // Get existing topics to avoid duplicates
+    const { data: existingTopics, error: fetchError } = await supabase
+      .from('learning_topics')
+      .select('topic_name')
+      .eq('user_id', userId);
+
+    if (fetchError) {
+      console.warn('Error fetching existing topics:', fetchError);
+    }
+
+    const existingTopicNames = new Set(existingTopics?.map(t => t.topic_name) || []);
+
+    // Only insert topics that don't already exist
+    const topicsToInsert = topics
+      .filter(topicName => !existingTopicNames.has(topicName))
+      .map(topicName => ({
+        user_id: userId,
+        topic_name: topicName,
+        progress: 0,
+        completed: false,
+      }));
+
+    // If no new topics to insert, return existing ones
+    if (topicsToInsert.length === 0) {
+      const { data: allTopics, error: selectError } = await supabase
+        .from('learning_topics')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+      
+      if (selectError) throw selectError;
+      return allTopics || [];
+    }
+
+    // Insert only new topics (no upsert needed since we filtered duplicates)
+    const { data, error } = await supabase
+      .from('learning_topics')
+      .insert(topicsToInsert)
+      .select();
+    
+    if (error) {
+      console.error('Error inserting learning topics:', error);
+      throw error;
+    }
+
+    // Return all topics (existing + newly inserted)
+    const { data: allTopics, error: selectError } = await supabase
+      .from('learning_topics')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    
+    if (selectError) throw selectError;
+    return allTopics || [];
+  },
 };
 
 // Achievements API
@@ -1672,16 +1774,30 @@ export interface TradeEnginePriceData {
 export const tradeEngineApi = {
   baseUrl: import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000',
 
-  // Fetch news from Trade Engine
+  // Fetch news from Trade Engine (or stub endpoint)
   async getNews(limit: number = 15, cursor?: string): Promise<{ items: TradeEngineNewsItem[]; next_cursor: string | null }> {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (cursor) params.append('cursor', cursor);
     
-    const response = await fetch(`${this.baseUrl}/api/news?${params}`);
-    if (!response.ok) {
-      throw new Error(`Trade Engine API error: ${response.statusText}`);
+    try {
+      const response = await fetch(`${this.baseUrl}/api/news?${params}`);
+      if (!response.ok) {
+        // If endpoint doesn't exist or returns error, return empty results
+        // News should come from Supabase instead
+        console.warn('News endpoint not available, using Supabase news_articles table instead');
+        return { items: [], next_cursor: null };
+      }
+      const data = await response.json();
+      // If backend returns empty items with a message, it's a stub
+      if (data.items && data.items.length === 0 && data.message) {
+        console.info('Backend news endpoint is a stub, using Supabase instead');
+      }
+      return data;
+    } catch (error) {
+      // Network error - return empty results gracefully
+      console.warn('Failed to fetch news from backend, using Supabase instead:', error);
+      return { items: [], next_cursor: null };
     }
-    return response.json();
   },
 
   // Fetch technical indicators for a ticker

@@ -33,15 +33,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let isMounted = true;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // Handle missing Supabase config gracefully
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    
+    if (!supabaseUrl || !supabaseKey || supabaseUrl === 'your_supabase_project_url') {
+      // If Supabase is not configured, just set loading to false
+      // The app should still render the landing page
+      setLoading(false);
+      return;
+    }
+
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (!isMounted) return;
+      if (error) {
+        console.warn('Supabase session error:', error);
+        setLoading(false);
+        return;
+      }
       setAuthUser(session?.user ?? null);
+      setLoading(false);
+    }).catch((error) => {
+      console.warn('Failed to get Supabase session:', error);
+      if (!isMounted) return;
       setLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!isMounted) return;
       setAuthUser(session?.user ?? null);
       setLoading(false);
       // Reset profile cache when auth user changes
@@ -50,7 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     return () => {
       isMounted = false;
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
   }, []);
 
