@@ -27,7 +27,8 @@ describe('getErrorMessage', () => {
   });
 
   it('handles circular references gracefully', () => {
-    const circular: any = { prop: 'value' };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const circular: Record<string, any> = { prop: 'value' };
     circular.self = circular;
     const result = getErrorMessage(circular);
     expect(result).toBe('Unknown error');

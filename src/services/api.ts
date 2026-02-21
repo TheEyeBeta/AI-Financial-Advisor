@@ -1790,7 +1790,7 @@ export const tradeEngineApi = {
       const data = await response.json();
       // If backend returns empty items with a message, it's a stub
       if (data.items && data.items.length === 0 && data.message) {
-        console.info('Backend news endpoint is a stub, using Supabase instead');
+        console.log('Backend news endpoint is a stub, using Supabase instead');
       }
       return data;
     } catch (error) {
