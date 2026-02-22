@@ -52,9 +52,9 @@ USER appuser
 # Expose port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:8000/health/live', timeout=5)" || exit 1
+# Health check - Railway handles healthchecks externally, so we disable the internal one
+# to avoid port conflicts (Railway assigns dynamic ports via $PORT)
+HEALTHCHECK NONE
 
 # Run the application
 # Use PORT environment variable if available (for Railway/Render)
