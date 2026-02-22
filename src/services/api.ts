@@ -938,26 +938,172 @@ export const eyeApi = {
   },
 };
 
-// Stock Snapshots API - Read financial data from database
+// === STOCK SNAPSHOT CACHE ===
+// In-memory cache to reduce database queries
+// Stores tickers 1-60 and refreshes every 5 minutes
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+
+const stockCache = {
+  // Cache for individual tickers: { 'AAPL': { data: StockSnapshot, timestamp: 123456 } }
+  tickers: new Map<string, CacheEntry<StockSnapshot>>(),
+  // Cache for company name lookups (lowercase key)
+  companyNames: new Map<string, CacheEntry<StockSnapshot | null>>(),
+  // Cache for the main stock list (first 60 tickers)
+  mainList: null as CacheEntry<StockSnapshot[]> | null,
+  // Whether initial load has been done
+  initialized: false,
+  // Cache TTL in milliseconds (5 minutes)
+  TTL_MS: 5 * 60 * 1000,
+  // Number of stocks to pre-cache
+  PRELOAD_COUNT: 60,
+  
+  isExpired(timestamp: number): boolean {
+    return Date.now() - timestamp > this.TTL_MS;
+  },
+  
+  getTicker(ticker: string): StockSnapshot | null {
+    const entry = this.tickers.get(ticker.toUpperCase());
+    if (entry && !this.isExpired(entry.timestamp)) {
+      console.log('[Cache] Hit for ticker:', ticker);
+      return entry.data;
+    }
+    return null;
+  },
+  
+  setTicker(ticker: string, data: StockSnapshot): void {
+    this.tickers.set(ticker.toUpperCase(), { data, timestamp: Date.now() });
+  },
+  
+  getCompanyName(name: string): StockSnapshot | null | undefined {
+    const entry = this.companyNames.get(name.toLowerCase());
+    if (entry && !this.isExpired(entry.timestamp)) {
+      console.log('[Cache] Hit for company name:', name);
+      return entry.data;
+    }
+    return undefined; // undefined means not in cache, null means cached as "not found"
+  },
+  
+  setCompanyName(name: string, data: StockSnapshot | null): void {
+    this.companyNames.set(name.toLowerCase(), { data, timestamp: Date.now() });
+  },
+  
+  getMainList(): StockSnapshot[] | null {
+    if (this.mainList && !this.isExpired(this.mainList.timestamp)) {
+      console.log('[Cache] Hit for main stock list');
+      return this.mainList.data;
+    }
+    return null;
+  },
+  
+  setMainList(data: StockSnapshot[]): void {
+    this.mainList = { data, timestamp: Date.now() };
+    // Also populate individual ticker cache from the list
+    data.forEach(snap => {
+      this.tickers.set(snap.ticker.toUpperCase(), { data: snap, timestamp: Date.now() });
+      if (snap.company_name) {
+        // Cache by company name too (lowercase for case-insensitive lookup)
+        this.companyNames.set(snap.company_name.toLowerCase(), { data: snap, timestamp: Date.now() });
+      }
+    });
+    console.log('[Cache] Stored', data.length, 'stocks in cache');
+  },
+  
+  clear(): void {
+    this.tickers.clear();
+    this.companyNames.clear();
+    this.mainList = null;
+    this.initialized = false;
+    console.log('[Cache] Cleared');
+  },
+  
+  getStats(): { tickers: number; companyNames: number; hasMainList: boolean; initialized: boolean } {
+    return {
+      tickers: this.tickers.size,
+      companyNames: this.companyNames.size,
+      hasMainList: this.mainList !== null,
+      initialized: this.initialized,
+    };
+  },
+};
+
+// Stock Snapshots API - Read financial data from database (with caching)
 export const stockSnapshotsApi = {
-  // Get all stock snapshots (latest data for all tickers)
+  // Initialize cache by pre-loading first 60 stocks
+  async initializeCache(): Promise<void> {
+    if (stockCache.initialized && stockCache.mainList && !stockCache.isExpired(stockCache.mainList.timestamp)) {
+      console.log('[Cache] Already initialized and valid');
+      return;
+    }
+    
+    console.log('[Cache] Initializing - loading first', stockCache.PRELOAD_COUNT, 'stocks...');
+    
+    const { data, error } = await supabase
+      .from('stock_snapshots')
+      .select('*')
+      .order('updated_at', { ascending: false })
+      .limit(stockCache.PRELOAD_COUNT);
+    
+    if (error) {
+      console.error('[Cache] Failed to initialize:', error);
+      throw error;
+    }
+    
+    stockCache.setMainList(data || []);
+    stockCache.initialized = true;
+    console.log('[Cache] Initialization complete -', data?.length || 0, 'stocks cached');
+  },
+  
+  // Get cache statistics
+  getCacheStats() {
+    return stockCache.getStats();
+  },
+  
+  // Clear the cache (useful for forcing refresh)
+  clearCache(): void {
+    stockCache.clear();
+  },
+
+  // Get all stock snapshots (with caching)
   async getAll(limit?: number): Promise<StockSnapshot[]> {
+    // Check cache first
+    const cached = stockCache.getMainList();
+    if (cached) {
+      return limit ? cached.slice(0, limit) : cached;
+    }
+    
+    // Cache miss - fetch from database
+    console.log('[Cache] Miss for main list - fetching from database');
     let query = supabase
       .from('stock_snapshots')
       .select('*')
       .order('updated_at', { ascending: false });
     
-    if (limit) {
-      query = query.limit(limit);
-    }
+    // Fetch at least PRELOAD_COUNT to populate cache, or more if requested
+    const fetchLimit = Math.max(limit || 0, stockCache.PRELOAD_COUNT);
+    query = query.limit(fetchLimit);
     
     const { data, error } = await query;
     if (error) throw error;
-    return data || [];
+    
+    const result = data || [];
+    stockCache.setMainList(result);
+    
+    return limit ? result.slice(0, limit) : result;
   },
 
-  // Get stock snapshot by ticker symbol
+  // Get stock snapshot by ticker symbol (with caching)
   async getByTicker(ticker: string): Promise<StockSnapshot | null> {
+    // Check cache first
+    const cached = stockCache.getTicker(ticker);
+    if (cached) {
+      return cached;
+    }
+    
+    // Cache miss - fetch from database
+    console.log('[Cache] Miss for ticker:', ticker, '- fetching from database');
     const { data, error } = await supabase
       .from('stock_snapshots')
       .select('*')
@@ -970,11 +1116,23 @@ export const stockSnapshotsApi = {
       if (error.code === 'PGRST116') return null; // Not found
       throw error;
     }
+    
+    if (data) {
+      stockCache.setTicker(ticker, data);
+    }
     return data;
   },
 
-  // Get stock snapshot by company name (case-insensitive partial match)
+  // Get stock snapshot by company name (with caching)
   async getByCompanyName(companyName: string): Promise<StockSnapshot | null> {
+    // Check cache first
+    const cached = stockCache.getCompanyName(companyName);
+    if (cached !== undefined) {
+      return cached; // Could be null (meaning "not found" is cached)
+    }
+    
+    // Cache miss - fetch from database
+    console.log('[Cache] Miss for company name:', companyName, '- fetching from database');
     const { data, error } = await supabase
       .from('stock_snapshots')
       .select('*')
@@ -984,26 +1142,66 @@ export const stockSnapshotsApi = {
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return null; // Not found
+      if (error.code === 'PGRST116') {
+        // Cache the "not found" result too
+        stockCache.setCompanyName(companyName, null);
+        return null;
+      }
       throw error;
+    }
+    
+    if (data) {
+      stockCache.setCompanyName(companyName, data);
+      stockCache.setTicker(data.ticker, data); // Also cache by ticker
     }
     return data;
   },
 
-  // Get stock snapshots by multiple tickers
+  // Get stock snapshots by multiple tickers (with caching)
   async getByTickers(tickers: string[]): Promise<StockSnapshot[]> {
+    const results: StockSnapshot[] = [];
+    const tickersToFetch: string[] = [];
+    
+    // Check cache for each ticker
+    for (const ticker of tickers) {
+      const cached = stockCache.getTicker(ticker);
+      if (cached) {
+        results.push(cached);
+      } else {
+        tickersToFetch.push(ticker.toUpperCase());
+      }
+    }
+    
+    // If all found in cache, return
+    if (tickersToFetch.length === 0) {
+      console.log('[Cache] All', tickers.length, 'tickers found in cache');
+      return results;
+    }
+    
+    // Fetch missing tickers from database
+    console.log('[Cache] Fetching', tickersToFetch.length, 'missing tickers from database');
     const { data, error } = await supabase
       .from('stock_snapshots')
       .select('*')
-      .in('ticker', tickers.map(t => t.toUpperCase()))
+      .in('ticker', tickersToFetch)
       .order('updated_at', { ascending: false });
     
     if (error) throw error;
-    return data || [];
+    
+    // Cache and add to results
+    if (data) {
+      data.forEach(snap => {
+        stockCache.setTicker(snap.ticker, snap);
+        results.push(snap);
+      });
+    }
+    
+    return results;
   },
 
-  // Get stock snapshots with signals
+  // Get stock snapshots with signals (with caching for individual results)
   async getWithSignals(limit?: number): Promise<StockSnapshot[]> {
+    // This query is dynamic (filtered by signal), so we fetch fresh but cache results
     let query = supabase
       .from('stock_snapshots')
       .select('*')
@@ -1016,6 +1214,14 @@ export const stockSnapshotsApi = {
     
     const { data, error } = await query;
     if (error) throw error;
+    
+    // Cache individual results
+    if (data) {
+      data.forEach(snap => {
+        stockCache.setTicker(snap.ticker, snap);
+      });
+    }
+    
     return data || [];
   },
 
@@ -1286,7 +1492,11 @@ export const pythonApi = {
     // 2. Query is stock-related and we don't have Trade Engine data
     if (isStockRelatedQuery) {
       try {
-        // If we have a specific ticker, query for it (most efficient - single record)
+        // Initialize cache on first stock-related query (loads 60 stocks)
+        // This is a no-op if cache is already initialized and valid
+        await stockSnapshotsApi.initializeCache();
+        
+        // If we have a specific ticker, query for it (will hit cache if available)
         if (requestedTicker) {
           try {
             // Try exact ticker match first
