@@ -58,5 +58,6 @@ EXPOSE 8000
 # Health check - Railway handles healthchecks externally
 HEALTHCHECK NONE
 
-# Run the application via start script
-CMD ["./start.sh"]
+# Use ENTRYPOINT with shell to ensure environment variable expansion
+ENTRYPOINT ["/bin/sh", "-c"]
+CMD ["exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2} --log-level ${LOG_LEVEL:-info}"]
