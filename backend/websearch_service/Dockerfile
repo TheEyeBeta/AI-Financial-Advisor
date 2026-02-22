@@ -46,18 +46,14 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Make start script executable
-RUN chmod +x start.sh
-
 # Switch to non-root user
 USER appuser
 
-# Expose port
+# Expose port (default, Railway overrides with $PORT)
 EXPOSE 8000
 
 # Health check - Railway handles healthchecks externally
 HEALTHCHECK NONE
 
-# Use ENTRYPOINT with shell to ensure environment variable expansion
-ENTRYPOINT ["/bin/sh", "-c"]
-CMD ["exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2} --log-level ${LOG_LEVEL:-info}"]
+# Run uvicorn - shell form for proper $PORT expansion
+CMD /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port \${PORT:-8000} --workers \${WORKERS:-2} --log-level \${LOG_LEVEL:-info}"
