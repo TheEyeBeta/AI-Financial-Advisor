@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="15" fill="#1e40af"/>
+  
+  <!-- Eye shape (outer) - representing "The Eye" -->
+  <ellipse cx="16" cy="16" rx="10" ry="6" fill="none" stroke="#60a5fa" stroke-width="1.5"/>
+  
+  <!-- Pupil with chart line inside -->
+  <circle cx="16" cy="16" r="4" fill="#3b82f6"/>
+  
+  <!-- Trending up line (chart going up) - the "insight" -->
+  <path d="M10 20 L14 16 L18 18 L22 12" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Small arrow head on the trend line -->
+  <path d="M20 12 L22 12 L22 14" stroke="#22c55e" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  
+  <!-- Subtle highlight on eye -->
+  <circle cx="14" cy="14.5" r="1" fill="#93c5fd" opacity="0.6"/>
+</svg>
