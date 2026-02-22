@@ -25,6 +25,211 @@ const DEEPSEEK_MAX_TOKENS = 500;
 const SUPABASE_PROCESSING_DELAY_MS = 1000;
 const AUTH_TIMEOUT_MS = 10000;
 
+// Web Search Intent Detection
+interface SearchIntent {
+  shouldSearch: boolean;
+  searchQuery: string | null;
+  intentType: 'price' | 'news' | 'general' | 'none';
+}
+
+interface WebSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+interface WebSearchResponse {
+  query: string;
+  results: WebSearchResult[];
+}
+
+/**
+ * Detect if the user's message requires a web search.
+ * Returns search intent with query if web search is needed.
+ */
+function detectSearchIntent(message: string, hasTickerData: boolean): SearchIntent {
+  const msgLower = message.toLowerCase();
+  const msgUpper = message.toUpperCase();
+  
+  // Price-related patterns - user asking for current/live/latest price
+  const pricePatterns = [
+    /(?:what(?:'s| is)|whats|how much is|current|latest|live|real.?time)\s+(?:the\s+)?(?:price|value|cost|trading at|worth)/i,
+    /(?:price|value|cost|trading at|worth)\s+(?:of|for)\s+/i,
+    /how\s+much\s+(?:is|does|are)\s+/i,
+    /what\s+(?:is|are)\s+.+\s+(?:trading|priced|valued)\s+at/i,
+    /(?:current|today(?:'s)?|now|right now|at the moment)\s+(?:stock\s+)?price/i,
+  ];
+  
+  // News-related patterns
+  const newsPatterns = [
+    /(?:latest|recent|breaking|today(?:'s)?|current)\s+(?:news|headlines|updates|developments)/i,
+    /what(?:'s| is)\s+(?:happening|going on)\s+(?:with|to|at)/i,
+    /(?:news|headlines|updates)\s+(?:about|on|for|regarding)/i,
+    /(?:any|what)\s+news\s+(?:on|about|for)/i,
+    /why\s+(?:is|did|has|are)\s+.+\s+(?:going|dropping|rising|falling|crashing|surging|up|down)/i,
+  ];
+  
+  // General info patterns that need current data
+  const generalPatterns = [
+    /(?:what|who|when|where|how)\s+(?:is|are|was|were|did)\s+.+\s+(?:today|now|currently|recently|this week|this month)/i,
+    /(?:latest|recent|current|up.?to.?date)\s+(?:info|information|data|stats|statistics)/i,
+    /(?:search|look up|find|google)\s+(?:for\s+)?/i,
+    /(?:can you|could you|please)\s+(?:search|look up|find|check)/i,
+  ];
+  
+  // Check for price intent
+  for (const pattern of pricePatterns) {
+    if (pattern.test(message)) {
+      // Extract what they're asking about
+      const tickerMatch = msgUpper.match(/\b([A-Z]{1,5})\b/);
+      const companyMatch = message.match(/(?:price|value|cost|worth|trading)\s+(?:of|for)\s+([A-Za-z\s]+?)(?:\?|$|\.)/i);
+      
+      // If we don't have data for this ticker, search for it
+      if (!hasTickerData) {
+        const searchSubject = tickerMatch?.[1] || companyMatch?.[1]?.trim() || '';
+        if (searchSubject) {
+          return {
+            shouldSearch: true,
+            searchQuery: `${searchSubject} stock price today`,
+            intentType: 'price',
+          };
+        }
+      }
+      
+      // Even if we have ticker data, if they explicitly ask for "live" or "real-time", search
+      if (/(?:live|real.?time|right now|current)/i.test(message)) {
+        const searchSubject = tickerMatch?.[1] || companyMatch?.[1]?.trim() || '';
+        if (searchSubject) {
+          return {
+            shouldSearch: true,
+            searchQuery: `${searchSubject} stock price today live`,
+            intentType: 'price',
+          };
+        }
+      }
+    }
+  }
+  
+  // Check for news intent
+  for (const pattern of newsPatterns) {
+    if (pattern.test(message)) {
+      // Extract the subject of the news query
+      const tickerMatch = msgUpper.match(/\b([A-Z]{2,5})\b/);
+      const subjectMatch = message.match(/(?:news|headlines|happening|going on)\s+(?:about|on|for|with|to|at)\s+([A-Za-z\s]+?)(?:\?|$|\.)/i);
+      const whyMatch = message.match(/why\s+(?:is|did|has|are)\s+([A-Za-z\s]+?)\s+(?:going|dropping|rising|falling|crashing|surging)/i);
+      
+      const searchSubject = tickerMatch?.[1] || subjectMatch?.[1]?.trim() || whyMatch?.[1]?.trim() || '';
+      if (searchSubject) {
+        return {
+          shouldSearch: true,
+          searchQuery: `${searchSubject} stock news today`,
+          intentType: 'news',
+        };
+      }
+      
+      // Generic news search
+      return {
+        shouldSearch: true,
+        searchQuery: message.replace(/(?:what(?:'s| is)|tell me|show me|find)/gi, '').trim(),
+        intentType: 'news',
+      };
+    }
+  }
+  
+  // Check for general search intent
+  for (const pattern of generalPatterns) {
+    if (pattern.test(message)) {
+      // Extract the search query
+      const searchMatch = message.match(/(?:search|look up|find|google|check)\s+(?:for\s+)?(.+?)(?:\?|$|\.)/i);
+      if (searchMatch?.[1]) {
+        return {
+          shouldSearch: true,
+          searchQuery: searchMatch[1].trim(),
+          intentType: 'general',
+        };
+      }
+    }
+  }
+  
+  // No search needed
+  return {
+    shouldSearch: false,
+    searchQuery: null,
+    intentType: 'none',
+  };
+}
+
+/**
+ * Perform a web search using the backend API.
+ * Returns search results or null if search fails.
+ */
+async function performWebSearch(query: string, maxResults: number = 5): Promise<WebSearchResponse | null> {
+  const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
+  
+  if (!pythonBackendUrl) {
+    console.log('[WebSearch] Backend URL not configured');
+    return null;
+  }
+  
+  try {
+    const params = new URLSearchParams({
+      query,
+      max_results: maxResults.toString(),
+    });
+    
+    const response = await fetch(`${pythonBackendUrl}/api/search?${params}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    
+    if (!response.ok) {
+      console.log('[WebSearch] Search endpoint returned error:', response.status);
+      return null;
+    }
+    
+    const data: WebSearchResponse = await response.json();
+    console.log('[WebSearch] Found', data.results?.length || 0, 'results for:', query);
+    return data;
+  } catch (error) {
+    console.log('[WebSearch] Search failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Format web search results for inclusion in AI context.
+ */
+function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType: 'price' | 'news' | 'general'): string {
+  if (!searchResponse.results || searchResponse.results.length === 0) {
+    return '';
+  }
+  
+  let context = '\n\n=== WEB SEARCH RESULTS ===\n';
+  context += `Search Query: "${searchResponse.query}"\n`;
+  context += `Results Found: ${searchResponse.results.length}\n\n`;
+  
+  if (intentType === 'price') {
+    context += 'PRICE INFORMATION FROM WEB:\n';
+  } else if (intentType === 'news') {
+    context += 'NEWS FROM WEB:\n';
+  } else {
+    context += 'SEARCH RESULTS:\n';
+  }
+  
+  searchResponse.results.forEach((result, index) => {
+    context += `\n[${index + 1}] ${result.title}\n`;
+    context += `    ${result.snippet}\n`;
+    context += `    Source: ${result.url}\n`;
+  });
+  
+  context += '\n=== END WEB SEARCH RESULTS ===\n';
+  context += 'IMPORTANT: Use the web search results above to answer the user\'s question. Cite sources when appropriate.\n';
+  
+  return context;
+}
+
 // Portfolio API
 export const portfolioApi = {
   async getHistory(userId: string): Promise<PortfolioHistory[]> {
@@ -894,21 +1099,27 @@ TOPIC RULES:
 7. If asked about unrelated topics, politely decline and redirect to finance.
 8. This is educational content. Users should consult licensed advisors for specific decisions.
 9. Never give specific buy/sell recommendations for individual securities.
+
+WEB SEARCH:
+10. You can browse the internet for current information when needed.
+11. When web search results are provided, use them to give accurate, up-to-date answers.
+12. Cite sources from web search when providing information from the internet.
+13. If asked for current prices or news and web results are provided, use those results.
 `;
 
   // Add The Eye rules based on whether data is available
   const eyeRules = hasEyeData ? `
 THE EYE TRADE ENGINE (CONNECTED):
-10. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
-11. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
-12. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
-13. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
-14. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
+14. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
+15. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
+16. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
+17. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
+18. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
 ` : `
 THE EYE TRADE ENGINE (NOT CONNECTED):
-10. The Eye trade engine is currently not connected or offline.
-11. For questions about live prices, signals, or market data - tell the user The Eye isn't connected.
-12. Suggest checking if The Eye trade engine is running, or checking the Trading section of the app.
+14. The Eye trade engine is currently not connected or offline.
+15. For questions about live prices, signals, or market data - you can use web search to find current information.
+16. Suggest checking if The Eye trade engine is running, or use web search results if available.
 `;
 
   const allRules = baseRules + eyeRules;
@@ -1600,11 +1811,34 @@ export const pythonApi = {
       }
     }
     
+    // === WEB SEARCH INTEGRATION ===
+    // Detect if the user's message requires a web search for current information
+    let webSearchContext = '';
+    const hasTickerData = !!specificTickerSnapshot || (requestedTicker && tradeEngineContext?.ticker_snapshots?.some(
+      snap => snap.ticker.toUpperCase() === requestedTicker
+    ));
+    
+    const searchIntent = detectSearchIntent(message, hasTickerData);
+    
+    if (searchIntent.shouldSearch && searchIntent.searchQuery) {
+      console.log('[AI] Web search triggered:', searchIntent.intentType, '-', searchIntent.searchQuery);
+      
+      const searchResults = await performWebSearch(searchIntent.searchQuery, 5);
+      
+      if (searchResults && searchResults.results.length > 0) {
+        webSearchContext = formatSearchResultsForAI(searchResults, searchIntent.intentType);
+        console.log('[AI] Web search results added to context');
+      } else {
+        // If search failed but was requested, note it in context
+        webSearchContext = `\n\n=== WEB SEARCH ===\nNote: A web search was attempted for "${searchIntent.searchQuery}" but no results were found. Answer based on available data.\n`;
+      }
+    }
+    
     // Build messages array with conversation history
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       {
         role: 'system',
-        content: systemPrompt + eyeDataContext
+        content: systemPrompt + eyeDataContext + webSearchContext
       }
     ];
     
