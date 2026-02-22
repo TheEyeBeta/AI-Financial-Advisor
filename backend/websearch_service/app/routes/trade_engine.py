@@ -9,7 +9,7 @@ doesn't error out. The frontend will fall back to Supabase data when this return
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Query
 from pydantic import BaseModel
@@ -79,21 +79,61 @@ class EngineSummary(BaseModel):
 
 
 class EngineStatus(BaseModel):
-    """Status of the Trade Engine."""
-    connected: bool
-    last_update: Optional[str] = None
-    data_freshness: str = "unknown"
-    engine_version: Optional[str] = None
+    """Status of the Trade Engine - matches TradeEngineEngineStatus interface."""
+    is_running: bool = False
+    engine_started_at: Optional[str] = None
+    last_price_tick: Optional[str] = None
+    last_news_poll: Optional[str] = None
+    total_ticks_processed: int = 0
+    total_news_fetched: int = 0
+    active_workers: Dict[str, bool] = {}
+
+
+class EngineSummaryFull(BaseModel):
+    """Full summary matching frontend TradeEngineAIContext.summary interface."""
+    # Coverage metrics
+    total_tracked_tickers: int = 0
+    tickers_with_data: int = 0
+    tickers_with_indicators: Optional[int] = None
+    tickers_with_fundamentals: Optional[int] = None
+    
+    # Signal counts
+    buy_signals_count: int = 0
+    sell_signals_count: int = 0
+    hold_signals_count: int = 0
+    tickers_with_buy: List[str] = []
+    tickers_with_sell: List[str] = []
+    
+    # Market health indicators
+    average_rsi: Optional[float] = None
+    average_pe_ratio: Optional[float] = None
+    bullish_tickers: Optional[int] = None
+    bearish_tickers: Optional[int] = None
+    oversold_tickers: Optional[int] = None
+    overbought_tickers: Optional[int] = None
+    high_volume_tickers: Optional[List[str]] = None
+    signals_last_24h: int = 0
+    news_count: int = 0
+
+
+class NewsItemFull(BaseModel):
+    """News item matching frontend interface."""
+    headline: str
+    source: Optional[str] = None
+    category: Optional[str] = None
+    published_at: str
+    related_tickers: Optional[str] = None
 
 
 class AIContextResponse(BaseModel):
-    """Full AI context response matching frontend expectations."""
-    status: EngineStatus
-    summary: EngineSummary
+    """Full AI context response matching frontend TradeEngineAIContext interface."""
+    generated_at: str
+    engine_status: EngineStatus
     tracked_tickers: List[str] = []
     ticker_snapshots: List[TickerSnapshot] = []
     recent_signals: List[TradingSignal] = []
-    recent_news: List[NewsItem] = []
+    recent_news: List[NewsItemFull] = []
+    summary: EngineSummaryFull
 
 
 @router.get("/api/v1/ai/context")
@@ -115,22 +155,31 @@ async def get_ai_context(
     # Return stub response - Trade Engine not deployed
     # Frontend will use Supabase fallback for actual data
     return AIContextResponse(
-        status=EngineStatus(
-            connected=False,
-            last_update=None,
-            data_freshness="unavailable",
-            engine_version="stub-1.0.0",
-        ),
-        summary=EngineSummary(
-            total_tracked_tickers=0,
-            tickers_with_data=0,
-            signals_last_24h=0,
-            news_count=0,
+        generated_at=datetime.now(timezone.utc).isoformat(),
+        engine_status=EngineStatus(
+            is_running=False,
+            engine_started_at=None,
+            last_price_tick=None,
+            last_news_poll=None,
+            total_ticks_processed=0,
+            total_news_fetched=0,
+            active_workers={},
         ),
         tracked_tickers=[],
         ticker_snapshots=[],
         recent_signals=[],
         recent_news=[],
+        summary=EngineSummaryFull(
+            total_tracked_tickers=0,
+            tickers_with_data=0,
+            buy_signals_count=0,
+            sell_signals_count=0,
+            hold_signals_count=0,
+            tickers_with_buy=[],
+            tickers_with_sell=[],
+            signals_last_24h=0,
+            news_count=0,
+        ),
     )
 
 
