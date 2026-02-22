@@ -26,10 +26,12 @@ const SUPABASE_PROCESSING_DELAY_MS = 1000;
 const AUTH_TIMEOUT_MS = 10000;
 
 // Web Search Intent Detection
+// NOTE: Web search is ONLY for news and general knowledge
+// Quantitative data (prices, indicators, signals) comes from The Eye database
 interface SearchIntent {
   shouldSearch: boolean;
   searchQuery: string | null;
-  intentType: 'price' | 'news' | 'general' | 'none';
+  intentType: 'news' | 'general' | 'none';
 }
 
 interface WebSearchResult {
@@ -45,78 +47,46 @@ interface WebSearchResponse {
 
 /**
  * Detect if the user's message requires a web search.
- * Returns search intent with query if web search is needed.
+ * 
+ * IMPORTANT: Web search is ONLY used for:
+ * - News (why is stock dropping, latest headlines, what's happening)
+ * - General knowledge (what is a P/E ratio, how does Fed affect markets)
+ * - Current events (Fed decisions, earnings announcements)
+ * 
+ * NOT used for:
+ * - Stock prices (from The Eye database)
+ * - Technical indicators (from The Eye database)
+ * - Trading signals (from Trade Engine)
  */
-function detectSearchIntent(message: string, hasTickerData: boolean): SearchIntent {
-  const msgLower = message.toLowerCase();
+function detectSearchIntent(message: string): SearchIntent {
   const msgUpper = message.toUpperCase();
   
-  // Price-related patterns - user asking for current/live/latest price
-  const pricePatterns = [
-    /(?:what(?:'s| is)|whats|how much is|current|latest|live|real.?time)\s+(?:the\s+)?(?:price|value|cost|trading at|worth)/i,
-    /(?:price|value|cost|trading at|worth)\s+(?:of|for)\s+/i,
-    /how\s+much\s+(?:is|does|are)\s+/i,
-    /what\s+(?:is|are)\s+.+\s+(?:trading|priced|valued)\s+at/i,
-    /(?:current|today(?:'s)?|now|right now|at the moment)\s+(?:stock\s+)?price/i,
-  ];
-  
-  // News-related patterns
+  // News-related patterns - things that require current events/news
   const newsPatterns = [
     /(?:latest|recent|breaking|today(?:'s)?|current)\s+(?:news|headlines|updates|developments)/i,
     /what(?:'s| is)\s+(?:happening|going on)\s+(?:with|to|at)/i,
     /(?:news|headlines|updates)\s+(?:about|on|for|regarding)/i,
     /(?:any|what)\s+news\s+(?:on|about|for)/i,
-    /why\s+(?:is|did|has|are)\s+.+\s+(?:going|dropping|rising|falling|crashing|surging|up|down)/i,
+    /why\s+(?:is|did|has|are)\s+.+\s+(?:going|dropping|rising|falling|crashing|surging|up|down|tanking|mooning|rallying)/i,
+    /what\s+(?:caused|happened|is happening)/i,
   ];
   
-  // General info patterns that need current data
+  // General knowledge patterns - educational/informational queries
   const generalPatterns = [
-    /(?:what|who|when|where|how)\s+(?:is|are|was|were|did)\s+.+\s+(?:today|now|currently|recently|this week|this month)/i,
-    /(?:latest|recent|current|up.?to.?date)\s+(?:info|information|data|stats|statistics)/i,
     /(?:search|look up|find|google)\s+(?:for\s+)?/i,
-    /(?:can you|could you|please)\s+(?:search|look up|find|check)/i,
+    /(?:can you|could you|please)\s+(?:search|look up|find|browse)/i,
+    /(?:what|who|when|where)\s+(?:is|are|was|were)\s+(?:the\s+)?(?:fed|federal reserve|sec|congress|government)/i,
+    /(?:latest|recent)\s+(?:fed|federal reserve|interest rate|inflation|gdp|economic)/i,
+    /(?:earnings|quarterly results|annual report)\s+(?:for|of|announcement)/i,
   ];
   
-  // Check for price intent
-  for (const pattern of pricePatterns) {
-    if (pattern.test(message)) {
-      // Extract what they're asking about
-      const tickerMatch = msgUpper.match(/\b([A-Z]{1,5})\b/);
-      const companyMatch = message.match(/(?:price|value|cost|worth|trading)\s+(?:of|for)\s+([A-Za-z\s]+?)(?:\?|$|\.)/i);
-      
-      // If we don't have data for this ticker, search for it
-      if (!hasTickerData) {
-        const searchSubject = tickerMatch?.[1] || companyMatch?.[1]?.trim() || '';
-        if (searchSubject) {
-          return {
-            shouldSearch: true,
-            searchQuery: `${searchSubject} stock price today`,
-            intentType: 'price',
-          };
-        }
-      }
-      
-      // Even if we have ticker data, if they explicitly ask for "live" or "real-time", search
-      if (/(?:live|real.?time|right now|current)/i.test(message)) {
-        const searchSubject = tickerMatch?.[1] || companyMatch?.[1]?.trim() || '';
-        if (searchSubject) {
-          return {
-            shouldSearch: true,
-            searchQuery: `${searchSubject} stock price today live`,
-            intentType: 'price',
-          };
-        }
-      }
-    }
-  }
-  
-  // Check for news intent
+  // Check for news intent (why is X dropping, what's happening with Y)
   for (const pattern of newsPatterns) {
     if (pattern.test(message)) {
       // Extract the subject of the news query
       const tickerMatch = msgUpper.match(/\b([A-Z]{2,5})\b/);
       const subjectMatch = message.match(/(?:news|headlines|happening|going on)\s+(?:about|on|for|with|to|at)\s+([A-Za-z\s]+?)(?:\?|$|\.)/i);
-      const whyMatch = message.match(/why\s+(?:is|did|has|are)\s+([A-Za-z\s]+?)\s+(?:going|dropping|rising|falling|crashing|surging)/i);
+      const whyMatch = message.match(/why\s+(?:is|did|has|are)\s+([A-Za-z\s]+?)\s+(?:going|dropping|rising|falling|crashing|surging|up|down|tanking|mooning|rallying)/i);
       
       const searchSubject = tickerMatch?.[1] || subjectMatch?.[1]?.trim() || whyMatch?.[1]?.trim() || '';
       if (searchSubject) {
@@ -136,11 +106,11 @@ function detectSearchIntent(message: string, hasTickerData: boolean): SearchInte
     }
   }
   
-  // Check for general search intent
+  // Check for general search intent (explicit search requests, Fed info, etc.)
   for (const pattern of generalPatterns) {
     if (pattern.test(message)) {
       // Extract the search query
-      const searchMatch = message.match(/(?:search|look up|find|google|check)\s+(?:for\s+)?(.+?)(?:\?|$|\.)/i);
+      const searchMatch = message.match(/(?:search|look up|find|google|browse)\s+(?:for\s+)?(.+?)(?:\?|$|\.)/i);
       if (searchMatch?.[1]) {
         return {
           shouldSearch: true,
@@ -201,7 +171,7 @@ async function performWebSearch(query: string, maxResults: number = 5): Promise<
 /**
  * Format web search results for inclusion in AI context.
  */
-function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType: 'price' | 'news' | 'general'): string {
+function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType: 'news' | 'general'): string {
   if (!searchResponse.results || searchResponse.results.length === 0) {
     return '';
   }
@@ -210,9 +180,7 @@ function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType:
   context += `Search Query: "${searchResponse.query}"\n`;
   context += `Results Found: ${searchResponse.results.length}\n\n`;
   
-  if (intentType === 'price') {
-    context += 'PRICE INFORMATION FROM WEB:\n';
-  } else if (intentType === 'news') {
+  if (intentType === 'news') {
     context += 'NEWS FROM WEB:\n';
   } else {
     context += 'SEARCH RESULTS:\n';
@@ -1306,26 +1274,27 @@ TOPIC RULES:
 8. This is educational content. Users should consult licensed advisors for specific decisions.
 9. Never give specific buy/sell recommendations for individual securities.
 
-WEB SEARCH:
-10. You can browse the internet for current information when needed.
-11. When web search results are provided, use them to give accurate, up-to-date answers.
+WEB SEARCH (for NEWS and GENERAL KNOWLEDGE only):
+10. You can browse the internet for NEWS and GENERAL KNOWLEDGE when needed.
+11. When web search results are provided, use them to answer questions about news, events, or general info.
 12. Cite sources from web search when providing information from the internet.
-13. If asked for current prices or news and web results are provided, use those results.
+13. IMPORTANT: Stock prices, indicators, and signals come from THE EYE DATABASE - NOT from web search.
+14. Use web search for: "Why is X dropping?", "Latest Fed news", "What happened to Y?"
 `;
 
   // Add The Eye rules based on whether data is available
   const eyeRules = hasEyeData ? `
 THE EYE TRADE ENGINE (CONNECTED):
-14. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
-15. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
-16. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
-17. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
-18. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
+15. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
+16. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
+17. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
+18. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
+19. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
 ` : `
 THE EYE TRADE ENGINE (NOT CONNECTED):
-14. The Eye trade engine is currently not connected or offline.
-15. For questions about live prices, signals, or market data - you can use web search to find current information.
-16. Suggest checking if The Eye trade engine is running, or use web search results if available.
+15. The Eye trade engine is currently not connected or offline.
+16. For questions about live prices, signals, or market data - tell the user The Eye isn't connected.
+17. You can still use web search for NEWS about stocks (why is X dropping), but not for prices/indicators.
 `;
 
   const allRules = baseRules + eyeRules;
@@ -2051,13 +2020,11 @@ export const pythonApi = {
     }
     
     // === WEB SEARCH INTEGRATION ===
-    // Detect if the user's message requires a web search for current information
+    // Detect if the user's message requires a web search for NEWS or GENERAL KNOWLEDGE
+    // NOTE: Quantitative data (prices, indicators, signals) comes from The Eye database, NOT web search
     let webSearchContext = '';
-    const hasTickerData = !!specificTickerSnapshot || (requestedTicker && tradeEngineContext?.ticker_snapshots?.some(
-      snap => snap.ticker.toUpperCase() === requestedTicker
-    ));
     
-    const searchIntent = detectSearchIntent(message, hasTickerData);
+    const searchIntent = detectSearchIntent(message);
     
     if (searchIntent.shouldSearch && searchIntent.searchQuery) {
       console.log('[AI] Web search triggered:', searchIntent.intentType, '-', searchIntent.searchQuery);
