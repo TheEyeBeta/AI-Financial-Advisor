@@ -83,6 +83,14 @@ def create_app() -> FastAPI:
                 allowed_hosts=trusted_hosts,
             )
 
+    @app.get("/")
+    async def root() -> dict[str, str]:
+        return {
+            "status": "ok",
+            "service": "AI Financial Advisor - Backend API",
+            "docs": "/docs" if os.getenv("ENVIRONMENT") != "production" else "disabled in production",
+        }
+
     @app.get("/health")
     async def health_check() -> dict[str, str | float]:
         return {
