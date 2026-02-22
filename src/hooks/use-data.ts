@@ -209,19 +209,17 @@ export function useSendChatMessage() {
       
       // Always fetch LIVE data from The Eye Trade Engine (if available)
       // This ensures the AI has access to market data for any query, including ticker symbols
-      let tradeEngineContext = null;
+      // Falls back to Supabase data if Trade Engine is not available
+      const tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48);
       
-      try {
-        // Direct connection to Trade Engine - no snapshots needed
-        tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48);
+      if (tradeEngineContext) {
         console.log('[AI] Fetched live Trade Engine context:', {
           tickers: tradeEngineContext.tracked_tickers.length,
           signals: tradeEngineContext.recent_signals.length,
           news: tradeEngineContext.recent_news.length,
         });
-      } catch (error) {
-        console.error('Error fetching Trade Engine context:', error);
-        // Trade Engine might be offline - AI will respond without market data
+      } else {
+        console.log('[AI] Trade Engine not available, will use Supabase data fallback');
       }
       
       // Get AI response with user's experience level, conversation history, and live Eye data

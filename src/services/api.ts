@@ -1850,34 +1850,50 @@ export const tradeEngineApi = {
   // ============================================================
 
   // Get full AI context (engine status, snapshots, signals, news)
-  async getAIContext(includeNews: boolean = true, newsLimit: number = 10, signalsHours: number = 24): Promise<TradeEngineAIContext> {
-    const params = new URLSearchParams({
-      include_news: includeNews.toString(),
-      news_limit: newsLimit.toString(),
-      signals_hours: signalsHours.toString(),
-    });
-    
-    const response = await fetch(`${this.baseUrl}/api/v1/ai/context?${params}`);
-    if (!response.ok) {
-      throw new Error(`Trade Engine API error: ${response.statusText}`);
+  // Returns null if Trade Engine is not available (graceful fallback)
+  async getAIContext(includeNews: boolean = true, newsLimit: number = 10, signalsHours: number = 24): Promise<TradeEngineAIContext | null> {
+    try {
+      const params = new URLSearchParams({
+        include_news: includeNews.toString(),
+        news_limit: newsLimit.toString(),
+        signals_hours: signalsHours.toString(),
+      });
+      
+      const response = await fetch(`${this.baseUrl}/api/v1/ai/context?${params}`);
+      if (!response.ok) {
+        // Trade Engine not available - return null for graceful fallback
+        console.log('[TradeEngine] AI context endpoint not available, using Supabase fallback');
+        return null;
+      }
+      return response.json();
+    } catch (error) {
+      // Network error or Trade Engine offline - return null for graceful fallback
+      console.log('[TradeEngine] AI context fetch failed, using Supabase fallback:', error);
+      return null;
     }
-    return response.json();
   },
 
   // Get recent trading signals
+  // Returns empty array if Trade Engine is not available (graceful fallback)
   async getSignals(ticker?: string, signalType?: string, hours: number = 24, limit: number = 50): Promise<TradeEngineSignal[]> {
-    const params = new URLSearchParams({
-      hours: hours.toString(),
-      limit: limit.toString(),
-    });
-    if (ticker) params.append('ticker', ticker);
-    if (signalType) params.append('signal_type', signalType);
-    
-    const response = await fetch(`${this.baseUrl}/api/v1/ai/signals?${params}`);
-    if (!response.ok) {
-      throw new Error(`Trade Engine API error: ${response.statusText}`);
+    try {
+      const params = new URLSearchParams({
+        hours: hours.toString(),
+        limit: limit.toString(),
+      });
+      if (ticker) params.append('ticker', ticker);
+      if (signalType) params.append('signal_type', signalType);
+      
+      const response = await fetch(`${this.baseUrl}/api/v1/ai/signals?${params}`);
+      if (!response.ok) {
+        console.log('[TradeEngine] Signals endpoint not available');
+        return [];
+      }
+      return response.json();
+    } catch (error) {
+      console.log('[TradeEngine] Signals fetch failed:', error);
+      return [];
     }
-    return response.json();
   },
 
   // Get portfolio summary
