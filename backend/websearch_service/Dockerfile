@@ -56,7 +56,6 @@ EXPOSE 8000
 # to avoid port conflicts (Railway assigns dynamic ports via $PORT)
 HEALTHCHECK NONE
 
-# Run the application
-# Use PORT environment variable if available (for Railway/Render)
-# Default to 2 workers for cost optimization on $5/month Railway plan
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2} --log-level ${LOG_LEVEL:-info}"]
+# Run the application using shell form so $PORT expands correctly
+# Railway injects PORT at runtime
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2} --log-level ${LOG_LEVEL:-info}
