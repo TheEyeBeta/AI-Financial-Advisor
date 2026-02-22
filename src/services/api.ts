@@ -1470,8 +1470,12 @@ export const pythonApi = {
       eyeDataContext += '\n=== END LIVE TRADE ENGINE DATA ===\n';
       eyeDataContext += '\nIMPORTANT: The data above is REAL and LIVE from The Eye. When the user asks about stocks, signals, or market data, use this data confidently. Say "According to The Eye..." or "The Eye shows..." - DO NOT say you lack access to data.\n';
     } else {
-      // No Trade Engine connection
-      eyeDataContext += '\n\n[The Eye Trade Engine is currently offline or not connected. Tell the user The Eye is not available right now and suggest checking if it\'s running.]\n';
+      // No Trade Engine connection - but we may still have Supabase data
+      if (hasStockSnapshotsData) {
+        eyeDataContext += '\n\n[Note: The Eye Trade Engine live connection is not available, but historical data from the database is available below. Use this data to help the user.]\n';
+      } else {
+        eyeDataContext += '\n\n[The Eye Trade Engine is currently offline and no cached data is available. You can still help with general financial questions, but real-time market data is not available.]\n';
+      }
     }
     
     // Add The Eye data from stock_snapshots table (complements Trade Engine data)
