@@ -14,9 +14,15 @@ from .routes.news import router as news_router
 from .routes.trade_engine import router as trade_engine_router
 
 # Load environment variables from .env file if it exists
-env_path = Path(__file__).parent.parent / ".env"
-if env_path.exists():
-    load_dotenv(env_path)
+# Check multiple locations: service directory, then project root
+env_paths = [
+    Path(__file__).parent.parent / ".env",  # backend/websearch_service/.env
+    Path(__file__).parent.parent.parent.parent / ".env",  # project root .env
+]
+for env_path in env_paths:
+    if env_path.exists():
+        load_dotenv(env_path)
+        break
 
 
 START_TIME = time.time()
