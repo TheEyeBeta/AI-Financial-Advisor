@@ -1266,81 +1266,110 @@ export const pythonApi = {
     // Store original query for company name search if ticker not found
     const originalQuery = message.trim();
     
-    // Fetch stock snapshots from database (The Eye data - complement to Trade Engine data)
+    // Detect if this message is asking about stocks/market data
+    // Only query database when relevant to avoid unnecessary API calls
+    const stockRelatedPatterns = [
+      /(?:price|stock|share|ticker|symbol|market|trade|trading|invest|portfolio)/i,
+      /(?:buy|sell|hold|signal|analysis|chart|technical|fundamental)/i,
+      /(?:earnings|dividend|pe ratio|market cap|volume|rsi|macd|sma|ema)/i,
+      /\b[A-Z]{2,5}\b/, // Potential ticker symbols
+    ];
+    
+    const isStockRelatedQuery = stockRelatedPatterns.some(pattern => pattern.test(message)) || !!requestedTicker;
+    
+    // Fetch stock snapshots from database ONLY when needed
     let stockSnapshotsData: StockSnapshot[] = [];
     let specificTickerSnapshot: StockSnapshot | null = null;
     
-    try {
-      // If we have a specific ticker, query for it FIRST (more efficient)
-      if (requestedTicker) {
-        try {
-          // Try exact ticker match first
-          specificTickerSnapshot = await stockSnapshotsApi.getByTicker(requestedTicker);
-          
-          // If not found, try common typos/variations
-          if (!specificTickerSnapshot) {
-            const typoMap: Record<string, string> = {
-              'APPL': 'AAPL',
-              'NVDIA': 'NVDA',
-              'MICROSOFT': 'MSFT',
-              'APPLE': 'AAPL',
-              'META': 'META',
-              'GOOGLE': 'GOOGL',
-              'ALPHABET': 'GOOGL',
-              'TESLA': 'TSLA',
-              'AMAZON': 'AMZN',
-            };
+    // Only query database if:
+    // 1. User is asking about a specific ticker, OR
+    // 2. Query is stock-related and we don't have Trade Engine data
+    if (isStockRelatedQuery) {
+      try {
+        // If we have a specific ticker, query for it (most efficient - single record)
+        if (requestedTicker) {
+          try {
+            // Try exact ticker match first
+            specificTickerSnapshot = await stockSnapshotsApi.getByTicker(requestedTicker);
             
-            const correctedTicker = typoMap[requestedTicker];
-            if (correctedTicker) {
-              specificTickerSnapshot = await stockSnapshotsApi.getByTicker(correctedTicker);
-              if (specificTickerSnapshot) {
-                requestedTicker = correctedTicker; // Update to corrected ticker
+            // If not found, try common typos/variations
+            if (!specificTickerSnapshot) {
+              const typoMap: Record<string, string> = {
+                'APPL': 'AAPL',
+                'NVDIA': 'NVDA',
+                'MICROSOFT': 'MSFT',
+                'APPLE': 'AAPL',
+                'META': 'META',
+                'GOOGLE': 'GOOGL',
+                'ALPHABET': 'GOOGL',
+                'TESLA': 'TSLA',
+                'AMAZON': 'AMZN',
+              };
+              
+              const correctedTicker = typoMap[requestedTicker];
+              if (correctedTicker) {
+                specificTickerSnapshot = await stockSnapshotsApi.getByTicker(correctedTicker);
+                if (specificTickerSnapshot) {
+                  requestedTicker = correctedTicker; // Update to corrected ticker
+                }
               }
             }
-          }
-          
-          // If still not found, try company name search (for company names like "APPLE", "MICROSOFT")
-          if (!specificTickerSnapshot) {
-            specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(requestedTicker);
-            if (specificTickerSnapshot) {
-              requestedTicker = specificTickerSnapshot.ticker; // Update to actual ticker
+            
+            // If still not found, try company name search (for company names like "APPLE", "MICROSOFT")
+            if (!specificTickerSnapshot) {
+              specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(requestedTicker);
+              if (specificTickerSnapshot) {
+                requestedTicker = specificTickerSnapshot.ticker; // Update to actual ticker
+              }
             }
-          }
-        } catch (error) {
-          // Ignore errors, continue without specific ticker
-        }
-      } else {
-        // No ticker extracted, but might be a company name - try searching by company name
-        const companyNameWords = originalQuery.split(/\s+/).filter(w => 
-          w.length > 3 && !skipWords.has(w.toUpperCase())
-        );
-        
-        if (companyNameWords.length > 0) {
-          // Try the longest word as company name
-          const potentialCompanyName = companyNameWords.sort((a, b) => b.length - a.length)[0];
-          
-          try {
-            specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(potentialCompanyName);
-            if (specificTickerSnapshot) {
-              requestedTicker = specificTickerSnapshot.ticker; // Set ticker from found company
-            }
+            
+            console.log('[AI] Queried database for ticker:', requestedTicker, specificTickerSnapshot ? '(found)' : '(not found)');
           } catch (error) {
             // Ignore errors, continue without specific ticker
+            console.log('[AI] Database query failed for ticker:', requestedTicker);
+          }
+        } else {
+          // No ticker extracted, but might be a company name - try searching by company name
+          const companyNameWords = originalQuery.split(/\s+/).filter(w => 
+            w.length > 3 && !skipWords.has(w.toUpperCase())
+          );
+          
+          if (companyNameWords.length > 0) {
+            // Try the longest word as company name
+            const potentialCompanyName = companyNameWords.sort((a, b) => b.length - a.length)[0];
+            
+            try {
+              specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(potentialCompanyName);
+              if (specificTickerSnapshot) {
+                requestedTicker = specificTickerSnapshot.ticker; // Set ticker from found company
+                console.log('[AI] Found ticker by company name:', potentialCompanyName, '->', requestedTicker);
+              }
+            } catch (error) {
+              // Ignore errors, continue without specific ticker
+            }
           }
         }
+        
+        // Only fetch general stock list if:
+        // - No specific ticker was found AND
+        // - No Trade Engine data is available AND
+        // - Query seems to be asking about general market/multiple stocks
+        const needsGeneralStockList = !specificTickerSnapshot && !hasTradeEngineData && 
+          /(?:market|stocks|portfolio|top|best|worst|signals|overview)/i.test(message);
+        
+        if (needsGeneralStockList) {
+          stockSnapshotsData = await stockSnapshotsApi.getAll(50); // Reduced from 100 to 50
+          console.log('[AI] Fetched general stock list:', stockSnapshotsData.length, 'tickers');
+        }
+      } catch (error) {
+        console.error('Error fetching The Eye data from database:', error);
+        // Continue without database snapshots - will use Trade Engine data if available
       }
-      
-      // Still fetch general data for context (but we already have the specific ticker if found)
-      stockSnapshotsData = await stockSnapshotsApi.getAll(100); // Get up to 100 most recent
-      
-      console.log('[AI] Fetched The Eye data from database:', stockSnapshotsData.length);
-    } catch (error) {
-      console.error('Error fetching The Eye data from database:', error);
-      // Continue without database snapshots - will use Trade Engine data if available
+    } else {
+      console.log('[AI] Skipping database query - not a stock-related question');
     }
     
-    const hasStockSnapshotsData = stockSnapshotsData.length > 0;
+    const hasStockSnapshotsData = stockSnapshotsData.length > 0 || !!specificTickerSnapshot;
     const hasAnyFinancialData = hasTradeEngineData || hasStockSnapshotsData;
     
     const systemPrompt = getSystemPrompt(experienceLevel ?? null, hasAnyFinancialData);
