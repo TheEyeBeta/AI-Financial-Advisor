@@ -46,16 +46,17 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 COPY --chown=appuser:appuser . .
 
+# Make start script executable
+RUN chmod +x start.sh
+
 # Switch to non-root user
 USER appuser
 
 # Expose port
 EXPOSE 8000
 
-# Health check - Railway handles healthchecks externally, so we disable the internal one
-# to avoid port conflicts (Railway assigns dynamic ports via $PORT)
+# Health check - Railway handles healthchecks externally
 HEALTHCHECK NONE
 
-# Run the application using shell form so $PORT expands correctly
-# Railway injects PORT at runtime
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-2} --log-level ${LOG_LEVEL:-info}
+# Run the application via start script
+CMD ["./start.sh"]
