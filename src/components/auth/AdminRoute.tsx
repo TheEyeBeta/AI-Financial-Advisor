@@ -7,7 +7,7 @@ interface AdminRouteProps {
 }
 
 export function AdminRoute({ children }: AdminRouteProps) {
-  const { user, loading, profileLoading, isAuthenticated, userProfile } = useAuth();
+  const { loading, profileLoading, isAuthenticated, userProfile } = useAuth();
   const location = useLocation();
 
   // Wait for both auth and profile to load

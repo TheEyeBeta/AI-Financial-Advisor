@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useChats, useDeleteChat, useUpdateChatTitle } from "@/hooks/use-data";
 import { format, parseISO, isToday, isYesterday, isThisWeek } from "date-fns";
-import { MessageSquare, Trash2, ArrowRight, Pencil, Check, X, Plus, ChevronRight, Clock } from "lucide-react";
+import { MessageSquare, Trash2, Pencil, Check, X, Plus, ChevronRight, Clock } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,

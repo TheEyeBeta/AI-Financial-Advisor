@@ -42,7 +42,7 @@ export function SupabaseConnectionTest() {
       }
 
       // Test 2: Check auth system
-      const { data: authData, error: authError } = await supabase.auth.getSession();
+      const { error: authError } = await supabase.auth.getSession();
       
       if (authError) {
         setConnectionStatus({
@@ -54,7 +54,7 @@ export function SupabaseConnectionTest() {
       }
 
       // Test 3: Try to query a table
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('portfolio_history')
         .select('count')
         .limit(1);

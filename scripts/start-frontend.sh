@@ -21,6 +21,6 @@ fi
 
 # Start dev server
 echo "🚀 Starting frontend dev server..."
-echo "🌐 Frontend will be available at http://localhost:5173"
+echo "🌐 Frontend will be available at http://localhost:8080"
 echo ""
 npm run dev

@@ -7,7 +7,7 @@ import {
   useTradeEngineStatus,
   useTradeEngineSignals,
 } from "@/hooks/use-trade-engine";
-import { tradeEngineWS } from "@/services/tradeEngineWebSocket";
+
 import { cn } from "@/lib/utils";
 
 interface TradeEngineStatusProps {

@@ -1,4 +1,4 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { SignInDialog } from '../SignInDialog';
@@ -178,8 +178,12 @@ describe('SignInDialog', () => {
       expect(screen.getByText(/signing in/i)).toBeInTheDocument();
     });
 
-    // Resolve the sign in
-    resolveSignIn!();
+    // Resolve inside act() so React processes the state update without warnings
+    await act(async () => {
+      resolveSignIn!();
+      // Give React time to flush the state update
+      await new Promise(r => setTimeout(r, 0));
+    });
   });
 
   it('has forgot password link', () => {

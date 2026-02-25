@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { User, Save, Loader2, Mail, Calendar, TrendingUp, Shield, AlertTriangle, RefreshCw } from "lucide-react";
+import { User, Save, Loader2, Mail, Calendar, Shield, AlertTriangle, RefreshCw } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -29,7 +29,7 @@ const Profile = () => {
   const [age, setAge] = useState(userProfile?.age?.toString() || "");
   const [experienceLevel, setExperienceLevel] = useState(userProfile?.experience_level || "beginner");
   const [riskLevel, setRiskLevel] = useState(userProfile?.risk_level || "mid");
-  const [riskOverride, setRiskOverride] = useState(false);
+  const [_riskOverride, _setRiskOverride] = useState(false);
   const [showRiskOverride, setShowRiskOverride] = useState(false);
 
   // Sync form state when userProfile changes

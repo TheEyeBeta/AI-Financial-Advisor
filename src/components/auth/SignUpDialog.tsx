@@ -31,8 +31,8 @@ interface SignUpDialogProps {
 type SignUpStep = "credentials" | "experience";
 
 export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
-  const { signUp } = useAuth();
-  const navigate = useNavigate();
+  const { signUp: _signUp } = useAuth();
+  const _navigate = useNavigate();
   const [step, setStep] = useState<SignUpStep>("credentials");
   const [isLoading, setIsLoading] = useState(false);
 

@@ -17,9 +17,7 @@ import {
 } from '@/services/api';
 import type {
   OpenPosition,
-  Trade,
   TradeJournalEntry,
-  LearningTopic,
   EyeSnapshot,
 } from '@/types/database';
 

@@ -24,7 +24,14 @@ export default tseslint.config(
       "react-hooks/rules-of-hooks": "error",
       "prefer-const": "error",
       "react-refresh/only-export-components": "off",
-      "@typescript-eslint/no-unused-vars": "off",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
       "no-console": ["warn", { allow: ["log", "warn", "error"] }],
     },
   },

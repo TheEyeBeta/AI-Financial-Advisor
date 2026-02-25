@@ -14,7 +14,7 @@ An AI-powered financial education platform with paper trading capabilities.
 
 ### Prerequisites
 - Node.js 20+
-- Python 3.8+
+- Python 3.12+
 - Supabase account (for database and auth)
 
 ### Frontend Setup
@@ -87,14 +87,20 @@ npm run dev
 npm run start:backend
 ```
 
-See [BACKEND_STARTUP.md](./BACKEND_STARTUP.md) for detailed backend setup and troubleshooting.
+See [deployment/DEPLOYMENT.md](./deployment/DEPLOYMENT.md) for detailed deployment and troubleshooting.
 
 ## Environment Variables
 
+**Frontend (Vercel):**
 - `VITE_SUPABASE_URL` - Your Supabase project URL
 - `VITE_SUPABASE_ANON_KEY` - Your Supabase anon key
 - `VITE_PYTHON_API_URL` - URL of backend AI proxy service
-- `OPENAI_API_KEY` - Set on backend service only (never in Vite env vars)
+
+**Backend (Railway) — never expose in frontend env vars:**
+- `OPENAI_API_KEY` - Required for AI chat
+- `TAVILY_API_KEY` - Required for web search
+- `PERPLEXITY_API_KEY` - Optional fallback when OpenAI hits rate limits
+- `CORS_ORIGINS` - Your Vercel frontend URL (e.g. `https://your-app.vercel.app`)
 
 ## Deploying to Vercel
 

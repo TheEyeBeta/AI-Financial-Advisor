@@ -68,7 +68,7 @@ export function LearningProgress() {
                     title: "Topics initialized!",
                     description: "Your learning journey has begun.",
                   });
-                } catch (error) {
+                } catch (_error) {
                   toast({
                     title: "Error",
                     description: "Failed to initialize topics. Please try again.",

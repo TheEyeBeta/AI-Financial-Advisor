@@ -90,7 +90,7 @@ export async function installSupabaseMocks(page: Page) {
 
   await page.route('**/rest/v1/users*', async (route) => {
     if (isAuthenticated) {
-      const url = route.request().url();
+      const _url = route.request().url();
       const method = route.request().method();
       
       // Supabase REST API behavior:
@@ -126,7 +126,7 @@ export async function installSupabaseMocks(page: Page) {
 
   await page.route('**/rest/v1/**', async (route) => {
     const method = route.request().method();
-    const url = route.request().url();
+    const _url = route.request().url();
 
     // Handle chats and messages - return empty arrays for new users
     if (method === 'GET') {

@@ -1,4 +1,4 @@
-import { supabase, getCurrentUserId } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import type {
   PortfolioHistory,
   OpenPosition,
@@ -21,9 +21,6 @@ const MAX_MESSAGE_LENGTH = 10000;
 const MAX_TITLE_LENGTH = 200;
 const MAX_CHAT_HISTORY_MESSAGES = 20;
 const OPENAI_MAX_TOKENS = 300; // Reduced to encourage concise responses
-const DEEPSEEK_MAX_TOKENS = 500;
-const SUPABASE_PROCESSING_DELAY_MS = 1000;
-const AUTH_TIMEOUT_MS = 10000;
 
 // Web Search Intent Detection
 // NOTE: Web search is ONLY for news and general knowledge
@@ -697,7 +694,7 @@ export const learningApi = {
     }
 
     // Insert only new topics (no upsert needed since we filtered duplicates)
-    const { data, error } = await supabase
+    const { error } = await supabase
       .from('learning_topics')
       .insert(topicsToInsert)
       .select();
@@ -1218,7 +1215,8 @@ export const stockSnapshotsApi = {
 type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 
 // Helper: Sanitize Eye data to remove all PII (only keep pure numerical metrics)
-function sanitizeEyeData(eyeSnapshot: EyeSnapshot): Record<string, number | undefined> {
+// Kept for future use when deep analysis is re-enabled
+function _sanitizeEyeData(eyeSnapshot: EyeSnapshot): Record<string, number | undefined> {
   return {
     portfolio_value: eyeSnapshot.portfolio_value ?? undefined,
     total_positions: eyeSnapshot.total_positions ?? undefined,
@@ -1235,7 +1233,8 @@ function sanitizeEyeData(eyeSnapshot: EyeSnapshot): Record<string, number | unde
 }
 
 // Helper: Determine if question needs Deepseek quantitative analysis
-function needsDeepAnalysis(message: string, eyeSnapshot: EyeSnapshot | null): boolean {
+// Kept for future use when deep analysis is re-enabled
+function _needsDeepAnalysis(message: string, eyeSnapshot: EyeSnapshot | null): boolean {
   if (!eyeSnapshot) return false;
   
   const complexAnalysisKeywords = [
@@ -1503,7 +1502,7 @@ export const pythonApi = {
             }
             
             console.log('[AI] Queried database for ticker:', requestedTicker, specificTickerSnapshot ? '(found)' : '(not found)');
-          } catch (error) {
+          } catch (_error) {
             // Ignore errors, continue without specific ticker
             console.log('[AI] Database query failed for ticker:', requestedTicker);
           }
@@ -1523,7 +1522,7 @@ export const pythonApi = {
                 requestedTicker = specificTickerSnapshot.ticker; // Set ticker from found company
                 console.log('[AI] Found ticker by company name:', potentialCompanyName, '->', requestedTicker);
               }
-            } catch (error) {
+            } catch (_error) {
               // Ignore errors, continue without specific ticker
             }
           }

@@ -14,12 +14,11 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # Use the same Node version as production (Vercel & engines in package.json)
           node-version: '20'
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Run ESLint (zero warnings)
         run: npm run lint:ci
@@ -27,11 +26,12 @@ jobs:
       - name: Run TypeScript type check
         run: npm run type-check
 
-      - name: Check for lint-disable comments
+      - name: Check for excessive lint-disable comments
         run: |
-          count=$(grep -R "eslint-disable" src/ | wc -l)
+          count=$(grep -R "eslint-disable" src/ --include="*.ts" --include="*.tsx" | wc -l)
           echo "Found $count eslint-disable comments"
           if [ "$count" -gt 10 ]; then
-            echo "Too many eslint-disable comments. Review and justify each one."
+            echo "::error::Too many eslint-disable comments ($count). Review and justify each one."
+            grep -Rn "eslint-disable" src/ --include="*.ts" --include="*.tsx"
             exit 1
           fi
