@@ -34,3 +34,5 @@ Refer to `package.json` scripts and `Makefile`. Key commands:
 - After signup, a 4-step onboarding wizard runs (age, marital status, investment goal, risk level). Onboarding must complete before the dashboard is accessible.
 - The backend loads `.env` from `backend/websearch_service/.env` automatically via `python-dotenv`. When starting via `npm run start:backend`, the script also sources the `.env` file.
 - Frontend dev server binds to `::` (all interfaces) on port 8080. Backend binds to `0.0.0.0` on port 8000.
+- The "Trade Engine" (WebSocket at `ws://localhost:8000/ws/live`) is an optional external service not included in this repo. The frontend logs `[TradeEngine WS] Disconnected (code: 1006)` errors in the console when it's unavailable — this is expected and does not block core features.
+- Paper trading form submissions can fail silently (no error toast) due to intermittent Supabase write issues. This is a pre-existing app-level bug, not a setup issue. When trades succeed, a green toast appears and positions/history/journal update correctly.
