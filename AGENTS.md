@@ -30,3 +30,6 @@ Refer to `package.json` scripts and `Makefile`. Key commands:
 - Frontend `.env` requires `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_PYTHON_API_URL`. Copy from `config/env.example`. Without real Supabase credentials, the app renders but authentication and data features won't work.
 - Backend `.env` requires `OPENAI_API_KEY` and `TAVILY_API_KEY` for AI/search features. Copy from `backend/websearch_service/.env.example`. The server starts without these but AI endpoints return errors.
 - ESLint uses flat config (`eslint.config.js`) with ESLint v9; the `npm run lint` script still works despite using legacy `--ext` flags.
+- Supabase has email verification enabled. To test authenticated flows (AI chat UI, portfolio, trading), you need a verified account. Without a `SUPABASE_SERVICE_ROLE_KEY`, you cannot programmatically confirm users. Backend AI/search features can be tested independently via `http://localhost:8000/docs` (Swagger UI).
+- The backend loads `.env` from `backend/websearch_service/.env` automatically via `python-dotenv`. When starting via `npm run start:backend`, the script also sources the `.env` file.
+- Frontend dev server binds to `::` (all interfaces) on port 8080. Backend binds to `0.0.0.0` on port 8000.
