@@ -4,8 +4,8 @@ on:
   pull_request:
     paths:
       - 'backend/**'
-      - 'Dockerfile*'
-      - 'docker-compose.yml'
+      - 'deployment/Dockerfile*'
+      - 'deployment/docker-compose.yml'
       - '.github/workflows/docker-build.yml'
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile.frontend
+          file: ./deployment/Dockerfile.frontend
           push: false
           tags: frontend:test
           build-args: |
@@ -45,4 +45,4 @@ jobs:
 
       - name: Test docker-compose
         run: |
-          docker-compose config
+          docker compose -f deployment/docker-compose.yml config

@@ -129,21 +129,14 @@ jobs:
           cache: 'npm'
 
       - name: Audit npm dependencies
-        run: npm audit --omit=dev --audit-level=high || true
-        # --omit=dev: only check production deps
-        # || true: don't fail CI on moderate issues, but log them
+        # --omit=optional: vercel and @railway/cli are optional CLI tools,
+        # not runtime deps — their transitive vulns are not exploitable.
+        run: npm audit --omit=dev --omit=optional --audit-level=high || true
 
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-results.sarif'
+          format: 'table'
           severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: 'trivy-results.sarif'
