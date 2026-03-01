@@ -46,12 +46,15 @@ export function useOpenPositions() {
 export function useCreatePosition() {
   const { userId } = useAuth();
   const queryClient = useQueryClient();
-  
+
   return useMutation({
     mutationFn: (position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'>) =>
       positionsApi.create(userId!, position),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['open-positions', userId] });
+      // Sync Dashboard: a new position changes portfolio value and statistics counts
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
+      queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
     },
   });
 }
@@ -71,6 +74,8 @@ export function useDeletePosition() {
       queryClient.invalidateQueries({ queryKey: ['trades', userId] });
       queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
+      // Sync Dashboard: closing a position alters win-rate/profit-factor shown in TradeStatistics
+      queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
     },
   });
 }
@@ -131,6 +136,8 @@ export function useCreateJournalEntry() {
       queryClient.invalidateQueries({ queryKey: ['trades', userId] });
       queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
+      // Sync Dashboard: every BUY/SELL logged via TradeJournal changes win-rate and profit-factor
+      queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
     },
   });
 }
