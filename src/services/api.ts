@@ -1252,12 +1252,9 @@ export const stockSnapshotsApi = {
       .eq('ticker', ticker.toUpperCase())
       .order('updated_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
     
-    if (error) {
-      if (error.code === 'PGRST116') return null; // Not found
-      throw error;
-    }
+    if (error) throw error;
     
     if (data) {
       stockCache.setTicker(ticker, data);
@@ -1281,21 +1278,20 @@ export const stockSnapshotsApi = {
       .ilike('company_name', `%${companyName}%`)
       .order('updated_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        // Cache the "not found" result too
-        stockCache.setCompanyName(companyName, null);
-        return null;
-      }
       throw error;
     }
-    
-    if (data) {
-      stockCache.setCompanyName(companyName, data);
-      stockCache.setTicker(data.ticker, data); // Also cache by ticker
+
+    // Cache the "not found" result too
+    if (!data) {
+      stockCache.setCompanyName(companyName, null);
+      return null;
     }
+    
+    stockCache.setCompanyName(companyName, data);
+    stockCache.setTicker(data.ticker, data); // Also cache by ticker
     return data;
   },
 

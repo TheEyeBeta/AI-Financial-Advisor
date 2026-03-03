@@ -47,6 +47,36 @@ async def test_chat_endpoint_success(client: TestClient):
 
 
 @pytest.mark.asyncio
+async def test_chat_endpoint_success_with_top_level_output_text(client: TestClient):
+    """Test chat completion when Responses API returns top-level output_text."""
+    rate_limiter._state.clear()
+
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", '
+        '"final_answer": "Top-level text response", "confidence": 0.9}'
+    )
+    mock_response_data = {
+        "output_text": fa_text,
+        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    }
+
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.text = ""
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        response = client.post("/api/chat", json={"message": "Hello", "user_id": "test-user"})
+        assert response.status_code == 200
+        assert response.json()["response"] == "Top-level text response"
+
+
+@pytest.mark.asyncio
 async def test_chat_endpoint_appends_test_disclaimer_for_actionable_advice(client: TestClient):
     """Actionable recommendations should include the test-mode disclaimer."""
     rate_limiter._state.clear()
@@ -247,6 +277,34 @@ async def test_chat_title_endpoint(client: TestClient):
         data = response.json()
         assert "title" in data
         assert data["title"] == "Financial Planning Discussion"
+
+
+@pytest.mark.asyncio
+async def test_chat_title_endpoint_with_content_array(client: TestClient):
+    """Title generation should support content arrays returned by providers."""
+    rate_limiter._state.clear()
+
+    mock_response_data = {
+        "choices": [{"message": {"content": [{"type": "output_text", "text": "Portfolio Risk Review"}]}}],
+        "usage": {},
+    }
+
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.text = ""
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        response = client.post(
+            "/api/chat/title",
+            json={"first_message": "Can you review my portfolio risk?"},
+        )
+        assert response.status_code == 200
+        assert response.json()["title"] == "Portfolio Risk Review"
 
 
 def test_chat_title_endpoint_empty_message(client: TestClient):

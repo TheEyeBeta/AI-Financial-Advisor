@@ -136,16 +136,70 @@ def _build_perplexity_headers() -> Dict[str, str]:
 
 # ── Response parsing helpers ───────────────────────────────────────────────────
 
+def _coerce_text(value: Any) -> str:
+    """Best-effort conversion of provider content payloads into plain text."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(_coerce_text(item) for item in value)
+    if isinstance(value, dict):
+        # Handle common content shapes from Responses/Chat APIs and provider fallbacks.
+        for key in ("text", "content", "value", "refusal"):
+            if key in value:
+                text = _coerce_text(value.get(key))
+                if text:
+                    return text
+    return ""
+
+
+def _extract_chat_completions_text(data: Dict[str, Any]) -> str:
+    """Extract text from Chat Completions-style payloads."""
+    choices = data.get("choices", [])
+    if not isinstance(choices, list) or not choices:
+        return ""
+
+    first_choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = first_choice.get("message", {}) if isinstance(first_choice, dict) else {}
+
+    text = _coerce_text(message.get("content"))
+    if text.strip():
+        return text
+
+    # Provider compatibility fallbacks
+    text = _coerce_text(message.get("refusal"))
+    if text.strip():
+        return text
+
+    text = _coerce_text(first_choice.get("text"))
+    if text.strip():
+        return text
+
+    return ""
+
+
 def _extract_text_unified(data: Dict[str, Any]) -> str:
     """Extract response text from either Responses API or Chat Completions API format."""
+    # Responses API convenience field
+    top_level_text = _coerce_text(data.get("output_text"))
+    if top_level_text.strip():
+        return top_level_text
+
     # Responses API format: data.output[].content[].text
-    for item in data.get("output", []):
-        if item.get("type") == "message":
-            for content_item in item.get("content", []):
-                if content_item.get("type") == "output_text":
-                    return content_item.get("text", "")
+    output_items = data.get("output", [])
+    if isinstance(output_items, list):
+        for item in output_items:
+            if not isinstance(item, dict):
+                continue
+            item_type = item.get("type")
+            if item_type in ("message", "output_text", "text"):
+                text = _coerce_text(item.get("content"))
+                if not text.strip():
+                    text = _coerce_text(item.get("text"))
+                if text.strip():
+                    return text
+
     # Chat Completions / Perplexity fallback format
-    return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+    return _extract_chat_completions_text(data)
 
 
 def _extract_json_from_response(text: str) -> Dict[str, Any]:
@@ -464,6 +518,11 @@ async def chat_completion(
             final_answer = raw_text  # Last resort: return raw text if JSON parsing failed
 
         if not isinstance(final_answer, str) or not final_answer.strip():
+            logger.warning(
+                "Empty model response from /api/chat provider payload. keys=%s usage=%s",
+                list(data.keys()),
+                data.get("usage", {}),
+            )
             raise HTTPException(status_code=502, detail="Model provider returned an empty response.")
         final_answer = _ensure_test_mode_disclaimer(final_answer)
 
@@ -529,11 +588,16 @@ async def chat_title(
         actual_tokens = usage.get("total_tokens", 0)
         rate_limiter.record_token_usage(raw_request, tokens_used=actual_tokens)
 
-        content = data.get("choices", [{}])[0].get("message", {}).get("content")
-        if not isinstance(content, str) or not content.strip():
+        content = _extract_text_unified(data).strip()
+        if not content:
+            logger.warning(
+                "Empty model response from /api/chat/title provider payload. keys=%s usage=%s",
+                list(data.keys()),
+                data.get("usage", {}),
+            )
             raise HTTPException(status_code=502, detail="Model provider returned an empty title response.")
 
-        return {"title": content.strip()}
+        return {"title": content}
     finally:
         rate_limiter.release_request(raw_request)
 
@@ -584,8 +648,13 @@ async def analyze_quantitative_data(
         actual_tokens = usage.get("total_tokens", 0)
         rate_limiter.record_token_usage(raw_request, tokens_used=actual_tokens)
 
-        content = data.get("choices", [{}])[0].get("message", {}).get("content")
-        if not isinstance(content, str) or not content.strip():
+        content = _extract_text_unified(data).strip()
+        if not content:
+            logger.warning(
+                "Empty model response from /api/ai/analyze-quantitative provider payload. keys=%s usage=%s",
+                list(data.keys()),
+                data.get("usage", {}),
+            )
             raise HTTPException(status_code=502, detail="Model provider returned an empty analysis response.")
 
         return {"response": content}
