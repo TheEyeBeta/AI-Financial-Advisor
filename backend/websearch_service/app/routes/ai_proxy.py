@@ -209,6 +209,16 @@ def _max_completion_field(model: str, token_limit: int) -> Dict[str, int]:
     return {"max_tokens": token_limit}
 
 
+def _temperature_field(model: str, temperature: float) -> Dict[str, float]:
+    """
+    Use temperature only when model supports custom values.
+    GPT-5/o-series chat-completions models commonly require default temperature.
+    """
+    if model.startswith("gpt-5") or model.startswith("o1") or model.startswith("o3") or model.startswith("o4"):
+        return {"temperature": 1.0} if temperature == 1.0 else {}
+    return {"temperature": temperature}
+
+
 # ── API client functions ───────────────────────────────────────────────────────
 
 async def _call_perplexity(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -509,7 +519,7 @@ async def chat_title(
                 },
                 {"role": "user", "content": f'First message: "{request.first_message}"'},
             ],
-            "temperature": 0.5,
+            **_temperature_field(OPENAI_TITLE_MODEL, 0.5),
             **_max_completion_field(OPENAI_TITLE_MODEL, 20),
         }
 
@@ -564,7 +574,7 @@ async def analyze_quantitative_data(
                     "content": f"Analyze these trading metrics:\n{request.quantitative_data}",
                 },
             ],
-            "temperature": 0.3,
+            **_temperature_field(OPENAI_QUANT_MODEL, 0.3),
             **_max_completion_field(OPENAI_QUANT_MODEL, 500),
         }
 
