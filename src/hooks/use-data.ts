@@ -14,6 +14,7 @@ import {
   pythonApi,
   eyeApi,
   tradeEngineApi,
+  stockRankingApi,
 } from '@/services/api';
 import type {
   OpenPosition,
@@ -529,6 +530,17 @@ export function useTradeEngineHealth() {
     refetchInterval: 30 * 1000, // Check every 30 seconds
     staleTime: 10 * 1000,
     retry: 1,
+  });
+}
+
+// Top stocks ranking hook
+export function useTopStocks(limit = 20, minScore = 0) {
+  return useQuery({
+    queryKey: ['top-stocks', limit, minScore],
+    queryFn: () => stockRankingApi.getRanking({ limit, minScore }),
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 10 * 60 * 1000,
+    retry: 2,
   });
 }
 

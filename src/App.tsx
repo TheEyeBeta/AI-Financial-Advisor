@@ -10,6 +10,7 @@ import ChatHistory from "./pages/ChatHistory";
 import Dashboard from "./pages/Dashboard";
 import PaperTrading from "./pages/PaperTrading";
 import News from "./pages/News";
+import TopStocks from "./pages/TopStocks";
 import Profile from "./pages/Profile";
 import Onboarding from "./pages/Onboarding";
 import Admin from "./pages/Admin";
@@ -96,6 +97,14 @@ const App = () => {
               element={
                 <ProtectedRoute>
                   <News />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/top-stocks"
+              element={
+                <ProtectedRoute>
+                  <TopStocks />
                 </ProtectedRoute>
               }
             />

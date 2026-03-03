@@ -60,6 +60,8 @@ interface WebSearchResponse {
  */
 function detectSearchIntent(message: string): SearchIntent {
   const msgUpper = message.toUpperCase();
+  const financeTopicPattern = /\b(finance|financial|invest|investment|investing|stock|stocks|equity|etf|mutual fund|bond|bonds|portfolio|trading|trade|market|markets|economy|economic|inflation|interest rate|fed|federal reserve|gdp|earnings|sec|tax|taxes|budget|debt|loan|mortgage|retirement|savings|cash flow|net worth|asset allocation|risk|dividend)\b/i;
+  const marketAssetPattern = /\b(stock|stocks|share|shares|ticker|quote|crypto|bitcoin|btc|eth|forex|etf|index)\b/i;
   
   // News-related patterns - things that require current events/news
   const newsPatterns = [
@@ -115,7 +117,7 @@ function detectSearchIntent(message: string): SearchIntent {
 
   // Check for general price lookup intent (e.g., "price of a boat")
   // Keep stock/market pricing queries on The Eye data path.
-  const isLikelyMarketAssetQuery = /\b(stock|stocks|share|shares|ticker|quote|crypto|bitcoin|btc|eth|forex|etf|index)\b/i.test(message);
+  const isLikelyMarketAssetQuery = marketAssetPattern.test(message);
   if (!isLikelyMarketAssetQuery) {
     for (const pattern of pricePatterns) {
       const match = message.match(pattern);
@@ -135,10 +137,25 @@ function detectSearchIntent(message: string): SearchIntent {
     if (pattern.test(message)) {
       // Extract the search query
       const searchMatch = message.match(/(?:search|look up|find|google|browse)\s+(?:for\s+)?(.+?)(?:\?|$|\.)/i);
-      if (searchMatch?.[1]) {
+      const extractedQuery = searchMatch?.[1]?.trim() || message.trim();
+      const hasPriceCue = /\b(price|cost|worth|value|how much)\b/i.test(extractedQuery);
+      const isFinanceRelated = financeTopicPattern.test(extractedQuery);
+      const isMarketAsset = marketAssetPattern.test(extractedQuery);
+
+      // Allow finance searches.
+      if (isFinanceRelated) {
         return {
           shouldSearch: true,
-          searchQuery: searchMatch[1].trim(),
+          searchQuery: extractedQuery,
+          intentType: 'general',
+        };
+      }
+
+      // Allow non-market object price lookup searches.
+      if (hasPriceCue && !isMarketAsset) {
+        return {
+          shouldSearch: true,
+          searchQuery: `${extractedQuery} in USD`,
           intentType: 'general',
         };
       }
@@ -1371,6 +1388,218 @@ export const stockSnapshotsApi = {
   },
 };
 
+// ============================================================
+// Stock Ranking System
+// ============================================================
+
+export interface StockScore {
+  ticker: string;
+  company_name: string | null;
+  last_price: number | null;
+  price_change_pct: number | null;
+  updated_at: string | null;
+  composite_score: number;
+  momentum_score: number;
+  technical_score: number;
+  fundamental_score: number;
+  ml_score: number | null;
+  has_ml_data: boolean;
+  breakdown: {
+    rsi_14: number | null;
+    macd_above_signal: boolean | null;
+    golden_cross: boolean | null;
+    volume_ratio: number | null;
+    pe_ratio: number | null;
+    eps_growth: number | null;
+    revenue_growth: number | null;
+    signal_confidence: number | null;
+    is_bullish: boolean | null;
+  };
+  data_fresh: boolean;
+}
+
+export interface TopStocksOptions {
+  limit?: number;
+  minScore?: number;
+}
+
+export interface TopStocksResult {
+  stocks: StockScore[];
+  hasStaleData: boolean;
+  hasMlData: boolean;
+  totalScored: number;
+}
+
+function _normalizeScores(
+  snapshots: StockSnapshot[],
+  getter: (s: StockSnapshot) => number | null,
+  lowerBetter = false,
+  clampMin?: number,
+  clampMax?: number,
+): Map<string, number> {
+  const pairs: { ticker: string; val: number }[] = [];
+  for (const s of snapshots) {
+    let val = getter(s);
+    if (val === null || !isFinite(val) || isNaN(val)) continue;
+    if (clampMin !== undefined) val = Math.max(clampMin, val);
+    if (clampMax !== undefined) val = Math.min(clampMax, val);
+    pairs.push({ ticker: s.ticker, val });
+  }
+  if (pairs.length === 0) return new Map();
+
+  const vals = pairs.map(p => p.val);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = max - min;
+
+  const result = new Map<string, number>();
+  for (const { ticker, val } of pairs) {
+    let score = range === 0 ? 50 : ((val - min) / range) * 100;
+    if (lowerBetter) score = 100 - score;
+    result.set(ticker, Math.round(score * 10) / 10);
+  }
+  return result;
+}
+
+function _rsiScore(rsi: number | null): number {
+  if (rsi === null || !isFinite(rsi)) return 50;
+  if (rsi >= 50 && rsi <= 70) return 100;
+  if (rsi < 50) return Math.max(0, ((rsi - 30) / 20) * 100);
+  return Math.max(0, ((90 - rsi) / 20) * 100);
+}
+
+function _mlScoreFor(s: StockSnapshot): number | null {
+  if (s.signal_confidence === null) return null;
+  if (s.is_bullish === true) return s.signal_confidence * 100;
+  if (s.is_bullish === false) return (1 - s.signal_confidence) * 100;
+  return 50;
+}
+
+function _computeStockScores(snapshots: StockSnapshot[]): StockScore[] {
+  const staleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  // Min-max normalized metric maps
+  const priceChangePctMap = _normalizeScores(snapshots, s => s.price_change_pct);
+  const priceVsSma50Map = _normalizeScores(snapshots, s => s.price_vs_sma_50);
+  const volumeRatioMap = _normalizeScores(snapshots, s =>
+    s.volume_ratio ?? (s.avg_volume_10d && s.avg_volume_10d > 0 && s.volume
+      ? s.volume / s.avg_volume_10d
+      : null)
+  );
+  const macdDiffMap = _normalizeScores(snapshots, s =>
+    s.macd !== null && s.macd_signal !== null ? s.macd - s.macd_signal : null
+  );
+  const goldenCrossMap = _normalizeScores(snapshots, s =>
+    s.sma_50 !== null && s.sma_200 !== null && s.sma_200 !== 0
+      ? (s.sma_50 / s.sma_200 - 1) * 100
+      : null
+  );
+  const peMap = _normalizeScores(snapshots, s => s.pe_ratio, true, 5, 80);
+  const epsGrowthMap = _normalizeScores(snapshots, s => s.eps_growth, false, -50, 200);
+  const revenueGrowthMap = _normalizeScores(snapshots, s => s.revenue_growth, false, -30, 100);
+
+  const get = (map: Map<string, number>, ticker: string) => map.get(ticker) ?? 50;
+
+  return snapshots.map(s => {
+    // Momentum (25%): price_change_pct 40%, price_vs_sma_50 35%, volume_ratio 25%
+    const momentumScore =
+      get(priceChangePctMap, s.ticker) * 0.40 +
+      get(priceVsSma50Map, s.ticker) * 0.35 +
+      get(volumeRatioMap, s.ticker) * 0.25;
+
+    // Technical (30%): RSI sweet spot 40%, MACD diff 35%, golden cross 25%
+    const technicalScore =
+      _rsiScore(s.rsi_14) * 0.40 +
+      get(macdDiffMap, s.ticker) * 0.35 +
+      get(goldenCrossMap, s.ticker) * 0.25;
+
+    // Fundamental (25%): low P/E 35%, EPS growth 40%, revenue growth 25%
+    const fundamentalScore =
+      get(peMap, s.ticker) * 0.35 +
+      get(epsGrowthMap, s.ticker) * 0.40 +
+      get(revenueGrowthMap, s.ticker) * 0.25;
+
+    // ML (20%): signal_confidence × bullish direction (null if unavailable)
+    const mlRaw = _mlScoreFor(s);
+    const hasMl = mlRaw !== null;
+
+    // Composite — redistribute ML weight if unavailable
+    let compositeScore: number;
+    if (hasMl) {
+      compositeScore =
+        momentumScore * 0.25 +
+        technicalScore * 0.30 +
+        fundamentalScore * 0.25 +
+        mlRaw! * 0.20;
+    } else {
+      compositeScore =
+        momentumScore * (0.25 / 0.80) +
+        technicalScore * (0.30 / 0.80) +
+        fundamentalScore * (0.25 / 0.80);
+    }
+
+    const volumeRatio =
+      s.volume_ratio ??
+      (s.avg_volume_10d && s.avg_volume_10d > 0 && s.volume
+        ? s.volume / s.avg_volume_10d
+        : null);
+
+    return {
+      ticker: s.ticker,
+      company_name: s.company_name,
+      last_price: s.last_price,
+      price_change_pct: s.price_change_pct,
+      updated_at: s.updated_at,
+      composite_score: Math.round(compositeScore * 10) / 10,
+      momentum_score: Math.round(momentumScore * 10) / 10,
+      technical_score: Math.round(technicalScore * 10) / 10,
+      fundamental_score: Math.round(fundamentalScore * 10) / 10,
+      ml_score: hasMl ? Math.round(mlRaw! * 10) / 10 : null,
+      has_ml_data: hasMl,
+      breakdown: {
+        rsi_14: s.rsi_14,
+        macd_above_signal:
+          s.macd !== null && s.macd_signal !== null ? s.macd > s.macd_signal : null,
+        golden_cross:
+          s.sma_50 !== null && s.sma_200 !== null ? s.sma_50 > s.sma_200 : null,
+        volume_ratio: volumeRatio,
+        pe_ratio: s.pe_ratio,
+        eps_growth: s.eps_growth,
+        revenue_growth: s.revenue_growth,
+        signal_confidence: s.signal_confidence,
+        is_bullish: s.is_bullish,
+      },
+      data_fresh: s.updated_at ? new Date(s.updated_at) >= staleCutoff : false,
+    };
+  });
+}
+
+export const stockRankingApi = {
+  async getRanking(options: TopStocksOptions = {}): Promise<TopStocksResult> {
+    const { limit = 20, minScore = 0 } = options;
+
+    const snapshots = await stockSnapshotsApi.getAll(500);
+    if (snapshots.length === 0) {
+      return { stocks: [], hasStaleData: false, hasMlData: false, totalScored: 0 };
+    }
+
+    const staleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const hasStaleData = snapshots.some(
+      s => !s.updated_at || new Date(s.updated_at) < staleCutoff
+    );
+
+    const allScores = _computeStockScores(snapshots);
+    const hasMlData = allScores.some(s => s.has_ml_data);
+
+    const filtered = allScores
+      .filter(s => s.composite_score >= minScore)
+      .sort((a, b) => b.composite_score - a.composite_score)
+      .slice(0, Math.min(limit, 100));
+
+    return { stocks: filtered, hasStaleData, hasMlData, totalScored: allScores.length };
+  },
+};
+
 // Experience level type
 type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 
@@ -1428,33 +1657,34 @@ RESPONSE FORMAT (STRICT):
 5. If a simple answer works, give a simple answer. Don't pad responses.
 
 TOPIC RULES:
-6. Focus primarily on finance, investing, trading, economics, personal finance, and money management.
-7. You may also answer general real-world price/cost questions (for example, "how much is a boat") using web search.
-8. You MAY provide specific, actionable financial views (including buy/sell/hold opinions) when asked.
-9. When giving actionable financial advice, include this exact one-line disclaimer once: "Test mode only. Not financial advice."
-10. Think through the reasoning carefully and give concrete, defensible conclusions.
+6. ONLY discuss finance, investing, trading, economics, personal finance, and money management.
+7. Exception: you may answer real-world price/cost questions about objects users may want to purchase (for example, "how much is a boat").
+8. If asked unrelated non-finance topics (that are not object price/cost lookups), politely decline and redirect to finance.
+9. You MAY provide specific, actionable financial views (including buy/sell/hold opinions) when asked.
+10. When giving actionable financial advice, include this exact one-line disclaimer once: "Test mode only. Not financial advice."
+11. Think through the reasoning carefully and give concrete, defensible conclusions.
 
-WEB SEARCH (for NEWS, GENERAL KNOWLEDGE, and PRICE LOOKUPS):
-11. You can browse the internet for NEWS and GENERAL KNOWLEDGE when needed.
-12. When web search results are provided, use them to answer questions about news, events, or general info.
-13. Cite sources from web search when providing information from the internet.
-14. IMPORTANT: Stock prices, indicators, and signals come from THE EYE DATABASE - NOT from web search.
-15. Use web search for: "Why is X dropping?", "Latest Fed news", "What happened to Y?"
+WEB SEARCH (for NEWS, GENERAL KNOWLEDGE, and OBJECT PRICE LOOKUPS):
+12. You can browse the internet for finance news/general knowledge and object price lookups when needed.
+13. When web search results are provided, use them to answer questions about news, events, or general info.
+14. Cite sources from web search when providing information from the internet.
+15. IMPORTANT: Stock prices, indicators, and signals come from THE EYE DATABASE - NOT from web search.
+16. Use web search for: "Why is X dropping?", "Latest Fed news", "What happened to Y?", "price of a boat"
 `;
 
   // Add The Eye rules based on whether data is available
   const eyeRules = hasEyeData ? `
 THE EYE TRADE ENGINE (CONNECTED):
-16. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
-17. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
-18. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
-19. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
-20. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
+17. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
+18. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
+19. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
+20. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
+21. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
 ` : `
 THE EYE TRADE ENGINE (NOT CONNECTED):
-16. The Eye trade engine is currently not connected or offline.
-17. For questions about live prices, signals, or market data - tell the user The Eye isn't connected.
-18. You can still use web search for NEWS about stocks (why is X dropping), but not for prices/indicators.
+17. The Eye trade engine is currently not connected or offline.
+18. For questions about live prices, signals, or market data - tell the user The Eye isn't connected.
+19. You can still use web search for NEWS about stocks (why is X dropping), but not for prices/indicators.
 `;
 
   const allRules = baseRules + eyeRules;
