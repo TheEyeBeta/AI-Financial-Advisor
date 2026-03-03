@@ -230,7 +230,7 @@ const Advisor = () => {
             </button>
           </div>
           <p className="text-xs text-muted-foreground/50 text-center mt-1">
-            AI-generated content for educational purposes only · Not professional financial advice
+            Test mode only · AI responses can include financial suggestions and are not professional financial advice
           </p>
         </div>
       </div>

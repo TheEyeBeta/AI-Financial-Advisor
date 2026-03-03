@@ -12,12 +12,20 @@ async def test_chat_endpoint_success(client: TestClient):
     """Test successful chat completion."""
     # Clear rate limit state
     rate_limiter._state.clear()
-    
+
+    # Responses API format: classifier + main chat both return this mock.
+    # Classifier will parse it, find no "complexity" key, and default to "medium".
+    # Main chat will extract final_answer = "Test response".
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "Test analysis", '
+        '"final_answer": "Test response", "confidence": 0.9}'
+    )
     mock_response_data = {
-        "choices": [{"message": {"content": "Test response"}}],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": fa_text}]}],
+        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
     }
-    
+
     mock_client = AsyncMock()
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -26,16 +34,48 @@ async def test_chat_endpoint_success(client: TestClient):
     mock_client.post = AsyncMock(return_value=mock_response)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
-    
+
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.post(
             "/api/chat",
             json={"message": "Hello", "user_id": "test-user"},
         )
-        
+
         assert response.status_code == 200
         data = response.json()
         assert data["response"] == "Test response"
+
+
+@pytest.mark.asyncio
+async def test_chat_endpoint_appends_test_disclaimer_for_actionable_advice(client: TestClient):
+    """Actionable recommendations should include the test-mode disclaimer."""
+    rate_limiter._state.clear()
+
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", '
+        '"final_answer": "I would buy AAPL and set a stop loss at 5%.", "confidence": 0.85}'
+    )
+    mock_response_data = {
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": fa_text}]}],
+        "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
+    }
+
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.text = ""
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        response = client.post("/api/chat", json={"message": "Should I buy AAPL?"})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "Test mode only. Not financial advice." in data["response"]
 
 
 def test_chat_endpoint_missing_api_key(client: TestClient, monkeypatch):
@@ -59,12 +99,17 @@ def test_chat_endpoint_with_messages(client: TestClient):
     """Test chat endpoint with messages array."""
     # Clear rate limit state
     rate_limiter._state.clear()
-    
+
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", '
+        '"final_answer": "Test response", "confidence": 0.8}'
+    )
     mock_response_data = {
-        "choices": [{"message": {"content": "Test response"}}],
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": fa_text}]}],
         "usage": {},
     }
-    
+
     mock_client = AsyncMock()
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -73,7 +118,7 @@ def test_chat_endpoint_with_messages(client: TestClient):
     mock_client.post = AsyncMock(return_value=mock_response)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
-    
+
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.post(
             "/api/chat",
@@ -84,7 +129,7 @@ def test_chat_endpoint_with_messages(client: TestClient):
                 ]
             },
         )
-        
+
         assert response.status_code == 200
 
 
@@ -99,12 +144,14 @@ def test_chat_endpoint_empty_response(client: TestClient):
     """Test chat endpoint when provider returns empty response."""
     # Clear rate limit state
     rate_limiter._state.clear()
-    
+
+    # Both classifier and main chat receive empty text.
+    # Classifier falls back to default classification; main chat raises 502.
     mock_response_data = {
-        "choices": [{"message": {"content": ""}}],
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": ""}]}],
         "usage": {},
     }
-    
+
     mock_client = AsyncMock()
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -113,7 +160,7 @@ def test_chat_endpoint_empty_response(client: TestClient):
     mock_client.post = AsyncMock(return_value=mock_response)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
-    
+
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.post("/api/chat", json={"message": "Hello"})
         assert response.status_code == 502
@@ -123,12 +170,16 @@ def test_chat_endpoint_rate_limit(client: TestClient):
     """Test chat endpoint rate limiting."""
     # Clear rate limit state before test
     rate_limiter._state.clear()
-    
+
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", "final_answer": "Test", "confidence": 0.9}'
+    )
     mock_response_data = {
-        "choices": [{"message": {"content": "Test"}}],
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": fa_text}]}],
         "usage": {},
     }
-    
+
     mock_client = AsyncMock()
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -249,9 +300,13 @@ async def test_chat_endpoint_temperature_validation(client: TestClient):
     """Test chat endpoint temperature parameter validation."""
     # Clear rate limit state
     rate_limiter._state.clear()
-    
+
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", "final_answer": "Test", "confidence": 0.9}'
+    )
     mock_response_data = {
-        "choices": [{"message": {"content": "Test"}}],
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": fa_text}]}],
         "usage": {},
     }
     
@@ -294,9 +349,13 @@ async def test_chat_endpoint_max_tokens_validation(client: TestClient):
     """Test chat endpoint max_tokens parameter validation."""
     # Clear rate limit state
     rate_limiter._state.clear()
-    
+
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", "final_answer": "Test", "confidence": 0.9}'
+    )
     mock_response_data = {
-        "choices": [{"message": {"content": "Test"}}],
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": fa_text}]}],
         "usage": {},
     }
     

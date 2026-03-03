@@ -376,6 +376,15 @@ export function useAllNews() {
   });
 }
 
+export function useRecentNews(hours: number = 12, limit: number = 150) {
+  return useQuery({
+    queryKey: ['news-articles', 'recent', hours, limit],
+    queryFn: () => newsApi.getRecent(hours, limit),
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
+  });
+}
+
 // The Eye API hooks
 export function useEyeSnapshot() {
   const { userId } = useAuth();

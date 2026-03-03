@@ -17,6 +17,8 @@ export interface Database {
           email_verified_at: string | null;
           userType: 'User' | 'Admin';
           onboarding_complete: boolean | null;
+          marital_status: 'single' | 'married' | 'divorced' | 'widowed' | null;
+          investment_goal: 'retirement' | 'wealth_building' | 'education' | 'house_purchase' | 'other' | null;
           created_at: string;
           updated_at: string;
         };
@@ -33,6 +35,8 @@ export interface Database {
           email_verified_at?: string | null;
           userType?: 'User' | 'Admin';
           onboarding_complete?: boolean | null;
+          marital_status?: 'single' | 'married' | 'divorced' | 'widowed' | null;
+          investment_goal?: 'retirement' | 'wealth_building' | 'education' | 'house_purchase' | 'other' | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -49,6 +53,8 @@ export interface Database {
           email_verified_at?: string | null;
           userType?: 'User' | 'Admin';
           onboarding_complete?: boolean | null;
+          marital_status?: 'single' | 'married' | 'divorced' | 'widowed' | null;
+          investment_goal?: 'retirement' | 'wealth_building' | 'education' | 'house_purchase' | 'other' | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -364,6 +370,38 @@ export interface Database {
           updated_at?: string;
         };
       };
+      news: {
+        Row: {
+          id: string;
+          title: string;
+          summary: string;
+          link: string;
+          provider: string | null;
+          published_at: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          summary: string;
+          link: string;
+          provider?: string | null;
+          published_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          title?: string;
+          summary?: string;
+          link?: string;
+          provider?: string | null;
+          published_at?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
       news_articles: {
         Row: {
           id: string;
@@ -667,7 +705,8 @@ export type LearningTopic = Database['public']['Tables']['learning_topics']['Row
 export type Achievement = Database['public']['Tables']['achievements']['Row'];
 export type MarketIndex = Database['public']['Tables']['market_indices']['Row'];
 export type TrendingStock = Database['public']['Tables']['trending_stocks']['Row'];
-export type NewsArticle = Database['public']['Tables']['news_articles']['Row'];
+export type NewsArticle = Database['public']['Tables']['news']['Row'];
+export type LegacyNewsArticle = Database['public']['Tables']['news_articles']['Row'];
 export type EyeSnapshot = Database['public']['Tables']['eye_snapshots']['Row'];
 export type StockSnapshot = Database['public']['Tables']['stock_snapshots']['Row'];
 

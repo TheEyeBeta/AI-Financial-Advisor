@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserProfile } from "@/lib/user-helpers";
+import { getSupabaseEnvConfig } from "@/lib/env";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -34,10 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let isMounted = true;
 
     // Handle missing Supabase config gracefully
-    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseKey || supabaseUrl === 'your_supabase_project_url') {
+    if (!getSupabaseEnvConfig().isConfigured) {
       // If Supabase is not configured, just set loading to false
       // The app should still render the landing page
       setLoading(false);
@@ -173,4 +171,3 @@ export function useAuthContext(): AuthContextValue {
   }
   return ctx;
 }
-

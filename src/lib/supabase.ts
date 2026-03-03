@@ -1,19 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@/types/database';
+import { assertSupabaseConfigForProduction, getSupabaseEnvConfig } from './env';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-// Validate URL format
-const isValidUrl = (url: string): boolean => {
-  if (!url || url === 'your_supabase_project_url') return false;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
-  } catch {
-    return false;
-  }
-};
+const supabaseConfig = getSupabaseEnvConfig();
+assertSupabaseConfigForProduction(supabaseConfig);
 
 // Create a dummy client if Supabase is not configured
 const createDummyClient = () => {
@@ -30,7 +20,7 @@ const createDummyClient = () => {
   });
 };
 
-if (!isValidUrl(supabaseUrl) || !supabaseAnonKey || supabaseAnonKey === 'your_supabase_anon_key') {
+if (!supabaseConfig.isConfigured) {
   console.warn(
     '⚠️  Supabase is not configured. The app will run in demo mode.\n' +
     'To enable authentication, please set valid values in your .env file:\n' +
@@ -39,8 +29,8 @@ if (!isValidUrl(supabaseUrl) || !supabaseAnonKey || supabaseAnonKey === 'your_su
   );
 }
 
-export const supabase = isValidUrl(supabaseUrl) && supabaseAnonKey && supabaseAnonKey !== 'your_supabase_anon_key'
-  ? createClient<Database>(supabaseUrl, supabaseAnonKey, {
+export const supabase = supabaseConfig.isConfigured
+  ? createClient<Database>(supabaseConfig.supabaseUrl, supabaseConfig.supabaseAnonKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,

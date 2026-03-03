@@ -28,7 +28,10 @@ An AI-powered financial education platform with paper trading capabilities.
    ```bash
    cp config/env.example .env
    ```
-4. Run the SQL files in `sql/` folder in your Supabase SQL Editor
+4. Run SQL setup in Supabase SQL Editor:
+   - `sql/schema.sql`
+   - `sql/add_news_table.sql` (adds canonical `public.news` table)
+   - `sql/harden_news_policies.sql` (recommended before production go-live)
 5. Start the frontend development server:
    ```bash
    npm run dev
