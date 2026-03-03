@@ -109,10 +109,15 @@ jobs:
 
       - name: Pull Vercel Environment Information
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
       - name: Build Project Artifacts
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
         env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
           VITE_PYTHON_API_URL: ${{ secrets.VITE_PYTHON_API_URL }}
@@ -120,6 +125,9 @@ jobs:
 
       - name: Deploy Project Artifacts to Vercel
         run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
 
   # Deploy to production (Backend - example for Railway/Render)
   deploy-backend:
@@ -129,13 +137,13 @@ jobs:
     if: github.ref == 'refs/heads/main'
 
     steps:
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
       - name: Deploy to Railway
-        uses: bervProject/railway-deploy@v1.0.0
-        with:
-          railway_token: ${{ secrets.RAILWAY_TOKEN }}
-          service: backend
-          # Uncomment and configure for your Railway project
-          # project_id: ${{ secrets.RAILWAY_PROJECT_ID }}
+        run: railway up --service backend --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       # Alternative: Deploy to Render
       # - name: Deploy to Render
