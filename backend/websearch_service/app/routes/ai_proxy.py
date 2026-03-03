@@ -21,7 +21,14 @@ router = APIRouter(tags=["ai-proxy"])
 OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
 OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"        # Chat Completions (title, quantitative)
 OPENAI_RESPONSES_ENDPOINT = "https://api.openai.com/v1/responses"     # Responses API (main chat + classifier)
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.5")
+OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "").strip() or None  # Backward-compatible single-model override
+if OPENAI_MODEL == "gpt-4.5":
+    # Prevent stale config from forcing a retired model.
+    OPENAI_MODEL = None
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", OPENAI_MODEL or "gpt-5-mini")
+OPENAI_CLASSIFIER_MODEL = os.getenv("OPENAI_CLASSIFIER_MODEL", OPENAI_MODEL or "gpt-5-nano")
+OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", OPENAI_MODEL or "gpt-5-nano")
+OPENAI_QUANT_MODEL = os.getenv("OPENAI_QUANT_MODEL", OPENAI_MODEL or "gpt-5-mini")
 PERPLEXITY_API_KEY_ENV = "PERPLEXITY_API_KEY"
 PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-online"  # Cost-effective fallback model
@@ -195,6 +202,13 @@ def _ensure_test_mode_disclaimer(text: str) -> str:
     return f"{text.rstrip()}\n\n{TEST_MODE_DISCLAIMER}"
 
 
+def _max_completion_field(model: str, token_limit: int) -> Dict[str, int]:
+    """Use the token parameter expected by the target chat-completions model."""
+    if model.startswith("gpt-5") or model.startswith("o1") or model.startswith("o3") or model.startswith("o4"):
+        return {"max_completion_tokens": token_limit}
+    return {"max_tokens": token_limit}
+
+
 # ── API client functions ───────────────────────────────────────────────────────
 
 async def _call_perplexity(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -204,7 +218,7 @@ async def _call_perplexity(payload: Dict[str, Any]) -> Dict[str, Any]:
             "model": PERPLEXITY_MODEL,
             "messages": payload.get("messages", []),
             "temperature": payload.get("temperature", 0.7),
-            "max_tokens": payload.get("max_tokens", 300),
+            "max_tokens": payload.get("max_tokens", payload.get("max_completion_tokens", 300)),
         }
         async with httpx.AsyncClient(timeout=25.0) as client:
             response = await client.post(
@@ -313,14 +327,14 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _classify_query(user_message: str) -> Dict[str, Any]:
-    """Classify query complexity using GPT-4.5 Responses API with low reasoning effort."""
+    """Classify query complexity using a lightweight Responses model."""
     default_classification: Dict[str, Any] = {
         "complexity": "medium",
         "requires_calculation": False,
         "high_risk_decision": False,
     }
     payload = {
-        "model": OPENAI_MODEL,
+        "model": OPENAI_CLASSIFIER_MODEL,
         "reasoning": {"effort": "low"},
         "input": [
             {"role": "system", "content": CLASSIFIER_SYSTEM_PROMPT},
@@ -421,7 +435,7 @@ async def chat_completion(
         input_messages = [{"role": "system", "content": combined_system}, *conversation_turns]
 
         payload = {
-            "model": OPENAI_MODEL,
+            "model": OPENAI_CHAT_MODEL,
             "reasoning": {"effort": reasoning_effort},  # ← dynamically set based on classification
             "input": input_messages,
             "max_output_tokens": request.max_tokens,
@@ -487,7 +501,7 @@ async def chat_title(
 
     try:
         payload = {
-            "model": OPENAI_MODEL,
+            "model": OPENAI_TITLE_MODEL,
             "messages": [
                 {
                     "role": "system",
@@ -496,7 +510,7 @@ async def chat_title(
                 {"role": "user", "content": f'First message: "{request.first_message}"'},
             ],
             "temperature": 0.5,
-            "max_tokens": 20,
+            **_max_completion_field(OPENAI_TITLE_MODEL, 20),
         }
 
         data = await _call_openai(payload)
@@ -536,7 +550,7 @@ async def analyze_quantitative_data(
 
     try:
         payload = {
-            "model": OPENAI_MODEL,
+            "model": OPENAI_QUANT_MODEL,
             "messages": [
                 {
                     "role": "system",
@@ -551,7 +565,7 @@ async def analyze_quantitative_data(
                 },
             ],
             "temperature": 0.3,
-            "max_tokens": 500,
+            **_max_completion_field(OPENAI_QUANT_MODEL, 500),
         }
 
         data = await _call_openai(payload)

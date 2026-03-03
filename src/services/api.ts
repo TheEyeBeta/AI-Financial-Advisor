@@ -1430,173 +1430,36 @@ export interface TopStocksResult {
   totalScored: number;
 }
 
-function _normalizeScores(
-  snapshots: StockSnapshot[],
-  getter: (s: StockSnapshot) => number | null,
-  lowerBetter = false,
-  clampMin?: number,
-  clampMax?: number,
-): Map<string, number> {
-  const pairs: { ticker: string; val: number }[] = [];
-  for (const s of snapshots) {
-    let val = getter(s);
-    if (val === null || !isFinite(val) || isNaN(val)) continue;
-    if (clampMin !== undefined) val = Math.max(clampMin, val);
-    if (clampMax !== undefined) val = Math.min(clampMax, val);
-    pairs.push({ ticker: s.ticker, val });
-  }
-  if (pairs.length === 0) return new Map();
-
-  const vals = pairs.map(p => p.val);
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
-  const range = max - min;
-
-  const result = new Map<string, number>();
-  for (const { ticker, val } of pairs) {
-    let score = range === 0 ? 50 : ((val - min) / range) * 100;
-    if (lowerBetter) score = 100 - score;
-    result.set(ticker, Math.round(score * 10) / 10);
-  }
-  return result;
-}
-
-function _rsiScore(rsi: number | null): number {
-  if (rsi === null || !isFinite(rsi)) return 50;
-  if (rsi >= 50 && rsi <= 70) return 100;
-  if (rsi < 50) return Math.max(0, ((rsi - 30) / 20) * 100);
-  return Math.max(0, ((90 - rsi) / 20) * 100);
-}
-
-function _mlScoreFor(s: StockSnapshot): number | null {
-  if (s.signal_confidence === null) return null;
-  if (s.is_bullish === true) return s.signal_confidence * 100;
-  if (s.is_bullish === false) return (1 - s.signal_confidence) * 100;
-  return 50;
-}
-
-function _computeStockScores(snapshots: StockSnapshot[]): StockScore[] {
-  const staleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-
-  // Min-max normalized metric maps
-  const priceChangePctMap = _normalizeScores(snapshots, s => s.price_change_pct);
-  const priceVsSma50Map = _normalizeScores(snapshots, s => s.price_vs_sma_50);
-  const volumeRatioMap = _normalizeScores(snapshots, s =>
-    s.volume_ratio ?? (s.avg_volume_10d && s.avg_volume_10d > 0 && s.volume
-      ? s.volume / s.avg_volume_10d
-      : null)
-  );
-  const macdDiffMap = _normalizeScores(snapshots, s =>
-    s.macd !== null && s.macd_signal !== null ? s.macd - s.macd_signal : null
-  );
-  const goldenCrossMap = _normalizeScores(snapshots, s =>
-    s.sma_50 !== null && s.sma_200 !== null && s.sma_200 !== 0
-      ? (s.sma_50 / s.sma_200 - 1) * 100
-      : null
-  );
-  const peMap = _normalizeScores(snapshots, s => s.pe_ratio, true, 5, 80);
-  const epsGrowthMap = _normalizeScores(snapshots, s => s.eps_growth, false, -50, 200);
-  const revenueGrowthMap = _normalizeScores(snapshots, s => s.revenue_growth, false, -30, 100);
-
-  const get = (map: Map<string, number>, ticker: string) => map.get(ticker) ?? 50;
-
-  return snapshots.map(s => {
-    // Momentum (25%): price_change_pct 40%, price_vs_sma_50 35%, volume_ratio 25%
-    const momentumScore =
-      get(priceChangePctMap, s.ticker) * 0.40 +
-      get(priceVsSma50Map, s.ticker) * 0.35 +
-      get(volumeRatioMap, s.ticker) * 0.25;
-
-    // Technical (30%): RSI sweet spot 40%, MACD diff 35%, golden cross 25%
-    const technicalScore =
-      _rsiScore(s.rsi_14) * 0.40 +
-      get(macdDiffMap, s.ticker) * 0.35 +
-      get(goldenCrossMap, s.ticker) * 0.25;
-
-    // Fundamental (25%): low P/E 35%, EPS growth 40%, revenue growth 25%
-    const fundamentalScore =
-      get(peMap, s.ticker) * 0.35 +
-      get(epsGrowthMap, s.ticker) * 0.40 +
-      get(revenueGrowthMap, s.ticker) * 0.25;
-
-    // ML (20%): signal_confidence × bullish direction (null if unavailable)
-    const mlRaw = _mlScoreFor(s);
-    const hasMl = mlRaw !== null;
-
-    // Composite — redistribute ML weight if unavailable
-    let compositeScore: number;
-    if (hasMl) {
-      compositeScore =
-        momentumScore * 0.25 +
-        technicalScore * 0.30 +
-        fundamentalScore * 0.25 +
-        mlRaw! * 0.20;
-    } else {
-      compositeScore =
-        momentumScore * (0.25 / 0.80) +
-        technicalScore * (0.30 / 0.80) +
-        fundamentalScore * (0.25 / 0.80);
-    }
-
-    const volumeRatio =
-      s.volume_ratio ??
-      (s.avg_volume_10d && s.avg_volume_10d > 0 && s.volume
-        ? s.volume / s.avg_volume_10d
-        : null);
-
-    return {
-      ticker: s.ticker,
-      company_name: s.company_name,
-      last_price: s.last_price,
-      price_change_pct: s.price_change_pct,
-      updated_at: s.updated_at,
-      composite_score: Math.round(compositeScore * 10) / 10,
-      momentum_score: Math.round(momentumScore * 10) / 10,
-      technical_score: Math.round(technicalScore * 10) / 10,
-      fundamental_score: Math.round(fundamentalScore * 10) / 10,
-      ml_score: hasMl ? Math.round(mlRaw! * 10) / 10 : null,
-      has_ml_data: hasMl,
-      breakdown: {
-        rsi_14: s.rsi_14,
-        macd_above_signal:
-          s.macd !== null && s.macd_signal !== null ? s.macd > s.macd_signal : null,
-        golden_cross:
-          s.sma_50 !== null && s.sma_200 !== null ? s.sma_50 > s.sma_200 : null,
-        volume_ratio: volumeRatio,
-        pe_ratio: s.pe_ratio,
-        eps_growth: s.eps_growth,
-        revenue_growth: s.revenue_growth,
-        signal_confidence: s.signal_confidence,
-        is_bullish: s.is_bullish,
-      },
-      data_fresh: s.updated_at ? new Date(s.updated_at) >= staleCutoff : false,
-    };
-  });
-}
-
+// Calls GET /api/stocks/ranking on the Python backend.
+// The backend queries Supabase directly, scores all stocks server-side,
+// caches results for 10 min, and returns only the top-N ranked stocks.
 export const stockRankingApi = {
   async getRanking(options: TopStocksOptions = {}): Promise<TopStocksResult> {
     const { limit = 20, minScore = 0 } = options;
-
-    const snapshots = await stockSnapshotsApi.getAll(500);
-    if (snapshots.length === 0) {
-      return { stocks: [], hasStaleData: false, hasMlData: false, totalScored: 0 };
+    const backendUrl = import.meta.env.VITE_PYTHON_API_URL;
+    if (!backendUrl) {
+      throw new Error('VITE_PYTHON_API_URL is not configured');
     }
 
-    const staleCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    const hasStaleData = snapshots.some(
-      s => !s.updated_at || new Date(s.updated_at) < staleCutoff
-    );
+    const params = new URLSearchParams({
+      limit: String(limit),
+      min_score: String(minScore),
+    });
 
-    const allScores = _computeStockScores(snapshots);
-    const hasMlData = allScores.some(s => s.has_ml_data);
+    const res = await fetch(`${backendUrl}/api/stocks/ranking?${params}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Stock ranking API error: ${res.statusText}`);
+    }
 
-    const filtered = allScores
-      .filter(s => s.composite_score >= minScore)
-      .sort((a, b) => b.composite_score - a.composite_score)
-      .slice(0, Math.min(limit, 100));
-
-    return { stocks: filtered, hasStaleData, hasMlData, totalScored: allScores.length };
+    // Backend returns snake_case; map to camelCase for the frontend
+    const data = await res.json();
+    return {
+      stocks: data.stocks,
+      hasStaleData: data.has_stale_data,
+      hasMlData: data.has_ml_data,
+      totalScored: data.total_scored,
+    };
   },
 };
 
