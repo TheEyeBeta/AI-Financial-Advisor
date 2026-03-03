@@ -12,6 +12,7 @@ from .routes.ai_proxy import router as ai_proxy_router
 from .routes.search import check_search_provider, router as search_router
 from .routes.news import router as news_router
 from .routes.trade_engine import router as trade_engine_router
+from .routes.stock_ranking import router as stock_ranking_router
 
 # Load environment variables from .env file if it exists
 # Check multiple locations: service directory, then project root
@@ -134,6 +135,7 @@ def create_app() -> FastAPI:
     app.include_router(ai_proxy_router, prefix="")
     app.include_router(news_router, prefix="")
     app.include_router(trade_engine_router, prefix="")
+    app.include_router(stock_ranking_router, prefix="")
 
     return app
 
