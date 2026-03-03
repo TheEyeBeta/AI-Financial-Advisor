@@ -12,6 +12,7 @@ import type {
   MarketIndex,
   TrendingStock,
   NewsArticle,
+  LegacyNewsArticle,
   EyeSnapshot,
   StockSnapshot,
 } from '@/types/database';
@@ -19,8 +20,9 @@ import type {
 // Constants for input validation and API configuration
 const MAX_MESSAGE_LENGTH = 10000;
 const MAX_TITLE_LENGTH = 200;
-const MAX_CHAT_HISTORY_MESSAGES = 20;
-const OPENAI_MAX_TOKENS = 300; // Reduced to encourage concise responses
+const MAX_CHAT_HISTORY_MESSAGES = 30;
+const OPENAI_MAX_TOKENS = 700;
+const OPENAI_CHAT_TEMPERATURE = 0.55;
 
 // Web Search Intent Detection
 // NOTE: Web search is ONLY for news and general knowledge
@@ -45,9 +47,10 @@ interface WebSearchResponse {
 /**
  * Detect if the user's message requires a web search.
  * 
- * IMPORTANT: Web search is ONLY used for:
+ * IMPORTANT: Web search is used for:
  * - News (why is stock dropping, latest headlines, what's happening)
  * - General knowledge (what is a P/E ratio, how does Fed affect markets)
+ * - General real-world price lookups (e.g., "price of a boat")
  * - Current events (Fed decisions, earnings announcements)
  * 
  * NOT used for:
@@ -76,6 +79,13 @@ function detectSearchIntent(message: string): SearchIntent {
     /(?:latest|recent)\s+(?:fed|federal reserve|interest rate|inflation|gdp|economic)/i,
     /(?:earnings|quarterly results|annual report)\s+(?:for|of|announcement)/i,
   ];
+
+  // General price lookup patterns (non-market items/services)
+  const pricePatterns = [
+    /(?:what(?:'s| is)\s+the\s+(?:price|cost)\s+(?:of|for)\s+)(.+?)(?:\?|$|\.)/i,
+    /(?:price|cost|value|worth)\s+(?:of|for)\s+(.+?)(?:\?|$|\.)/i,
+    /how much (?:is|does)\s+(.+?)\s+(?:cost|worth|go for)(?:\?|$|\.)/i,
+  ];
   
   // Check for news intent (why is X dropping, what's happening with Y)
   for (const pattern of newsPatterns) {
@@ -100,6 +110,23 @@ function detectSearchIntent(message: string): SearchIntent {
         searchQuery: message.replace(/(?:what(?:'s| is)|tell me|show me|find)/gi, '').trim(),
         intentType: 'news',
       };
+    }
+  }
+
+  // Check for general price lookup intent (e.g., "price of a boat")
+  // Keep stock/market pricing queries on The Eye data path.
+  const isLikelyMarketAssetQuery = /\b(stock|stocks|share|shares|ticker|quote|crypto|bitcoin|btc|eth|forex|etf|index)\b/i.test(message);
+  if (!isLikelyMarketAssetQuery) {
+    for (const pattern of pricePatterns) {
+      const match = message.match(pattern);
+      const subject = match?.[1]?.trim();
+      if (subject) {
+        return {
+          shouldSearch: true,
+          searchQuery: `${subject} price in USD`,
+          intentType: 'general',
+        };
+      }
     }
   }
   
@@ -766,25 +793,158 @@ export const marketApi = {
 };
 
 // News API - for financial news articles
+const MISSING_RELATION_ERROR_CODE = '42P01';
+
+function isMissingNewsTableError(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === MISSING_RELATION_ERROR_CODE) return true;
+  return /public\.news|relation .*news/i.test(error.message ?? '');
+}
+
+function mapLegacyNewsArticle(article: LegacyNewsArticle): NewsArticle {
+  return {
+    id: article.id,
+    title: article.title,
+    summary: article.summary,
+    link: article.link,
+    provider: article.source,
+    published_at: article.published_at,
+    created_at: article.created_at,
+    updated_at: article.updated_at,
+  };
+}
+
+async function fetchLegacyNews(limit?: number): Promise<NewsArticle[]> {
+  const query = supabase
+    .from('news_articles')
+    .select('*')
+    .order('published_at', { ascending: false });
+
+  const { data, error } = typeof limit === 'number' ? await query.limit(limit) : await query;
+
+  if (error) throw error;
+  return (data || []).map(mapLegacyNewsArticle);
+}
+
+/**
+ * Score a news article by financial importance.
+ * Higher score = more market-moving / significant.
+ * Works with NewsArticle or any object with title/summary/provider/published_at.
+ */
+export function scoreNewsImportance(article: {
+  title: string;
+  summary?: string | null;
+  provider?: string | null;
+  published_at?: string | null;
+}): number {
+  let score = 0;
+  const text = `${article.title} ${article.summary ?? ''}`.toLowerCase();
+
+  // Tier 1 – macro / systemic events (+4 each)
+  const macroKeywords = [
+    'fed ', 'federal reserve', 'fomc', 'interest rate', 'rate hike', 'rate cut',
+    'inflation', 'recession', 'gdp', 'jobs report', 'nonfarm', 'cpi', 'pce',
+    'tariff', 'sanctions', 'debt ceiling',
+  ];
+
+  // Tier 2 – crisis / high-impact corporate (+3 each)
+  const crisisKeywords = [
+    'crash', 'collapse', 'bankruptcy', 'default', 'crisis', 'war ', 'conflict',
+    'earnings beat', 'earnings miss', 'earnings surprise', 'profit warning',
+  ];
+
+  // Tier 3 – significant market events (+2 each)
+  const eventKeywords = [
+    'earnings', 'revenue', 'merger', 'acquisition', 'ipo', 'sec ', ' sec',
+    'doj', 'investigation', 'lawsuit', 'layoffs', 'guidance', 'upgrade',
+    'downgrade', 's&p 500', 'nasdaq', 'dow jones', 'wall street',
+  ];
+
+  // Tier 4 – general financial (+1 each)
+  const generalKeywords = [
+    'stock', 'shares', 'market', 'analyst', 'rally', 'surge', 'plunge',
+    'drop', 'rise', 'fall', 'dividend', 'buyback',
+  ];
+
+  macroKeywords.forEach(kw => { if (text.includes(kw)) score += 4; });
+  crisisKeywords.forEach(kw => { if (text.includes(kw)) score += 3; });
+  eventKeywords.forEach(kw => { if (text.includes(kw)) score += 2; });
+  generalKeywords.forEach(kw => { if (text.includes(kw)) score += 1; });
+
+  // Provider reputation bonus
+  const provider = (article.provider ?? '').toLowerCase();
+  if (['reuters', 'bloomberg', 'wall street journal', 'wsj', 'financial times', 'ft.com'].some(p => provider.includes(p))) {
+    score += 3;
+  } else if (['cnbc', 'marketwatch', "barron's", 'barrons', 'seeking alpha'].some(p => provider.includes(p))) {
+    score += 2;
+  } else {
+    score += 1;
+  }
+
+  // Recency bonus (freshness matters, but content wins)
+  if (article.published_at) {
+    const ageHours = (Date.now() - new Date(article.published_at).getTime()) / 3_600_000;
+    if (ageHours <= 6) score += 2;
+    else if (ageHours <= 24) score += 1;
+  }
+
+  return score;
+}
+
 export const newsApi = {
   async getLatest(limit: number = 5): Promise<NewsArticle[]> {
     const { data, error } = await supabase
-      .from('news_articles')
+      .from('news')
       .select('*')
       .order('published_at', { ascending: false })
       .limit(limit);
-    
-    if (error) throw error;
+
+    if (error) {
+      if (isMissingNewsTableError(error)) {
+        return fetchLegacyNews(limit);
+      }
+      throw error;
+    }
+
     return data || [];
   },
 
   async getAll(): Promise<NewsArticle[]> {
     const { data, error } = await supabase
-      .from('news_articles')
+      .from('news')
       .select('*')
       .order('published_at', { ascending: false });
-    
-    if (error) throw error;
+
+    if (error) {
+      if (isMissingNewsTableError(error)) {
+        return fetchLegacyNews();
+      }
+      throw error;
+    }
+
+    return data || [];
+  },
+
+  /** Fetch articles published within the last `hours` hours, up to `limit` rows. */
+  async getRecent(hours: number = 12, limit: number = 150): Promise<NewsArticle[]> {
+    const since = new Date(Date.now() - hours * 3_600_000).toISOString();
+
+    const { data, error } = await supabase
+      .from('news')
+      .select('*')
+      .gte('published_at', since)
+      .order('published_at', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      if (isMissingNewsTableError(error)) {
+        // Fallback: fetch legacy table and filter client-side
+        const all = await fetchLegacyNews(limit);
+        return all.filter(a => a.published_at >= since);
+      }
+      throw error;
+    }
+
     return data || [];
   },
 };
@@ -1268,32 +1428,33 @@ RESPONSE FORMAT (STRICT):
 5. If a simple answer works, give a simple answer. Don't pad responses.
 
 TOPIC RULES:
-6. ONLY discuss finance, investing, trading, economics, personal finance, and money management.
-7. If asked about unrelated topics, politely decline and redirect to finance.
-8. This is educational content. Users should consult licensed advisors for specific decisions.
-9. Never give specific buy/sell recommendations for individual securities.
+6. Focus primarily on finance, investing, trading, economics, personal finance, and money management.
+7. You may also answer general real-world price/cost questions (for example, "how much is a boat") using web search.
+8. You MAY provide specific, actionable financial views (including buy/sell/hold opinions) when asked.
+9. When giving actionable financial advice, include this exact one-line disclaimer once: "Test mode only. Not financial advice."
+10. Think through the reasoning carefully and give concrete, defensible conclusions.
 
-WEB SEARCH (for NEWS and GENERAL KNOWLEDGE only):
-10. You can browse the internet for NEWS and GENERAL KNOWLEDGE when needed.
-11. When web search results are provided, use them to answer questions about news, events, or general info.
-12. Cite sources from web search when providing information from the internet.
-13. IMPORTANT: Stock prices, indicators, and signals come from THE EYE DATABASE - NOT from web search.
-14. Use web search for: "Why is X dropping?", "Latest Fed news", "What happened to Y?"
+WEB SEARCH (for NEWS, GENERAL KNOWLEDGE, and PRICE LOOKUPS):
+11. You can browse the internet for NEWS and GENERAL KNOWLEDGE when needed.
+12. When web search results are provided, use them to answer questions about news, events, or general info.
+13. Cite sources from web search when providing information from the internet.
+14. IMPORTANT: Stock prices, indicators, and signals come from THE EYE DATABASE - NOT from web search.
+15. Use web search for: "Why is X dropping?", "Latest Fed news", "What happened to Y?"
 `;
 
   // Add The Eye rules based on whether data is available
   const eyeRules = hasEyeData ? `
 THE EYE TRADE ENGINE (CONNECTED):
-15. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
-16. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
-17. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
-18. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
-19. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
+16. You have LIVE access to The Eye trade engine. The data below this prompt is REAL and CURRENT.
+17. When answering about stocks, signals, prices, or market data - USE the data provided. It's real.
+18. Always attribute market data to The Eye: "According to The Eye..." or "The Eye shows..."
+19. Be confident. You HAVE the data. NEVER say "I don't have access" - because you DO have access right now.
+20. The Eye tracks stocks, generates trading signals (BUY/SELL/HOLD), and monitors market news.
 ` : `
 THE EYE TRADE ENGINE (NOT CONNECTED):
-15. The Eye trade engine is currently not connected or offline.
-16. For questions about live prices, signals, or market data - tell the user The Eye isn't connected.
-17. You can still use web search for NEWS about stocks (why is X dropping), but not for prices/indicators.
+16. The Eye trade engine is currently not connected or offline.
+17. For questions about live prices, signals, or market data - tell the user The Eye isn't connected.
+18. You can still use web search for NEWS about stocks (why is X dropping), but not for prices/indicators.
 `;
 
   const allRules = baseRules + eyeRules;
@@ -1549,6 +1710,17 @@ export const pythonApi = {
     
     const hasStockSnapshotsData = stockSnapshotsData.length > 0 || !!specificTickerSnapshot;
     const hasAnyFinancialData = hasTradeEngineData || hasStockSnapshotsData;
+
+    // Fetch recent news from Supabase news table for AI context, sorted by importance
+    let supabaseNewsData: NewsArticle[] = [];
+    try {
+      const rawNews = await newsApi.getLatest(20); // fetch more, then pick top 8 by importance
+      supabaseNewsData = rawNews
+        .sort((a, b) => scoreNewsImportance(b) - scoreNewsImportance(a))
+        .slice(0, 8);
+    } catch (error) {
+      console.log('[AI] Supabase news fetch failed, continuing without news data:', error);
+    }
     
     const systemPrompt = getSystemPrompt(experienceLevel ?? null, hasAnyFinancialData);
     
@@ -2018,6 +2190,34 @@ export const pythonApi = {
       }
     }
     
+    // === SUPABASE NEWS FEED ===
+    // Inject latest news articles from the Supabase news table into AI context.
+    // This runs in addition to Trade Engine news and web search results.
+    if (supabaseNewsData.length > 0) {
+      const tradeEngineHasNews = hasTradeEngineData && tradeEngineContext && tradeEngineContext.recent_news.length > 0;
+      const newsHeader = tradeEngineHasNews
+        ? `\n--- SUPABASE NEWS FEED (${supabaseNewsData.length} additional articles) ---\n`
+        : `\n--- SUPABASE NEWS FEED (${supabaseNewsData.length} recent articles) ---\n`;
+      eyeDataContext += newsHeader;
+      supabaseNewsData.forEach(article => {
+        const date = article.published_at
+          ? new Date(article.published_at).toLocaleDateString()
+          : '';
+        eyeDataContext += `• ${article.title}`;
+        if (article.provider) eyeDataContext += ` (${article.provider})`;
+        if (date) eyeDataContext += ` [${date}]`;
+        eyeDataContext += '\n';
+        if (article.summary) {
+          eyeDataContext += `  ${article.summary.slice(0, 180)}${article.summary.length > 180 ? '...' : ''}\n`;
+        }
+        if (article.link) {
+          eyeDataContext += `  Link: ${article.link}\n`;
+        }
+      });
+      eyeDataContext += 'When citing these articles, include the Link so the user can click through to read the full article.\n';
+      eyeDataContext += '--- END SUPABASE NEWS FEED ---\n';
+    }
+
     // === WEB SEARCH INTEGRATION ===
     // Detect if the user's message requires a web search for NEWS or GENERAL KNOWLEDGE
     // NOTE: Quantitative data (prices, indicators, signals) comes from The Eye database, NOT web search
@@ -2073,7 +2273,7 @@ export const pythonApi = {
           body: JSON.stringify({
             messages,
             user_id: userId,
-            temperature: 0.7,
+            temperature: OPENAI_CHAT_TEMPERATURE,
             max_tokens: OPENAI_MAX_TOKENS,
           }),
         });

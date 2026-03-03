@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { tradesApi, chatsApi, chatApi, portfolioApi } from '../api';
+import { tradesApi, chatsApi, chatApi, portfolioApi, newsApi } from '../api';
 
 // Mock supabase with a more robust mock
-const createChainableMock = (finalResult: { data: unknown; error: Error | null }) => {
+const createChainableMock = (finalResult: { data: unknown; error: unknown }) => {
   const chain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
@@ -21,13 +21,18 @@ const createChainableMock = (finalResult: { data: unknown; error: Error | null }
 };
 
 let mockChain = createChainableMock({ data: [], error: null });
+let mockChainsByTable: Record<string, ReturnType<typeof createChainableMock>> = {};
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
-    from: vi.fn(() => mockChain),
+    from: vi.fn((table: string) => mockChainsByTable[table] ?? mockChain),
   },
   getCurrentUserId: vi.fn().mockResolvedValue('user-123'),
 }));
+
+beforeEach(() => {
+  mockChainsByTable = {};
+});
 
 describe('tradesApi', () => {
   beforeEach(() => {
@@ -314,6 +319,83 @@ describe('portfolioApi', () => {
         value: 12000,
       });
       expect(result).toEqual(mockEntry);
+    });
+  });
+});
+
+describe('newsApi', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('getLatest', () => {
+    it('fetches latest news from canonical news table', async () => {
+      const canonicalRows = [
+        {
+          id: 'news-1',
+          title: 'Fed keeps rates unchanged',
+          summary: 'Policy update summary',
+          link: 'https://example.com/fed',
+          provider: 'Reuters',
+          published_at: '2026-03-01T10:00:00.000Z',
+          created_at: '2026-03-01T10:00:00.000Z',
+          updated_at: '2026-03-01T10:00:00.000Z',
+        },
+      ];
+
+      const canonicalChain = createChainableMock({ data: canonicalRows, error: null });
+      mockChainsByTable = { news: canonicalChain };
+
+      const result = await newsApi.getLatest(5);
+
+      expect(canonicalChain.select).toHaveBeenCalledWith('*');
+      expect(canonicalChain.order).toHaveBeenCalledWith('published_at', { ascending: false });
+      expect(canonicalChain.limit).toHaveBeenCalledWith(5);
+      expect(result).toEqual(canonicalRows);
+    });
+
+    it('falls back to legacy news_articles when canonical table is missing', async () => {
+      const missingTableError = {
+        code: '42P01',
+        message: 'relation "public.news" does not exist',
+      };
+
+      const canonicalChain = createChainableMock({ data: null, error: missingTableError });
+      const legacyRows = [
+        {
+          id: 'legacy-1',
+          title: 'Earnings beat expectations',
+          summary: 'Quarterly earnings summary',
+          link: 'https://example.com/earnings',
+          source: 'Bloomberg',
+          published_at: '2026-02-28T09:00:00.000Z',
+          created_at: '2026-02-28T09:00:00.000Z',
+          updated_at: '2026-02-28T09:00:00.000Z',
+        },
+      ];
+      const legacyChain = createChainableMock({ data: legacyRows, error: null });
+
+      mockChainsByTable = {
+        news: canonicalChain,
+        news_articles: legacyChain,
+      };
+
+      const result = await newsApi.getLatest(3);
+
+      expect(canonicalChain.limit).toHaveBeenCalledWith(3);
+      expect(legacyChain.limit).toHaveBeenCalledWith(3);
+      expect(result).toEqual([
+        {
+          id: 'legacy-1',
+          title: 'Earnings beat expectations',
+          summary: 'Quarterly earnings summary',
+          link: 'https://example.com/earnings',
+          provider: 'Bloomberg',
+          published_at: '2026-02-28T09:00:00.000Z',
+          created_at: '2026-02-28T09:00:00.000Z',
+          updated_at: '2026-02-28T09:00:00.000Z',
+        },
+      ]);
     });
   });
 });

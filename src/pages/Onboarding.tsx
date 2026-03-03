@@ -11,12 +11,11 @@ import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { learningApi } from "@/services/api";
 
-type MaritalStatus = "single" | "married" | "divorced" | "widowed" | "partnered";
-type InvestmentGoal = "retirement" | "wealth_building" | "income" | "education" | "major_purchase" | "other";
+type MaritalStatus = "single" | "married" | "divorced" | "widowed";
+type InvestmentGoal = "retirement" | "wealth_building" | "education" | "house_purchase" | "other";
 type RiskTolerance = "low" | "mid" | "high" | "very_high";
 
 interface OnboardingAnswers {
-  age: string;
   maritalStatus: MaritalStatus | "";
   goal: InvestmentGoal | "";
   riskTolerance: RiskTolerance | "";
@@ -28,7 +27,6 @@ const Onboarding = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [answers, setAnswers] = useState<OnboardingAnswers>({
-    age: "",
     maritalStatus: "",
     goal: "",
     riskTolerance: "",
@@ -40,7 +38,7 @@ const Onboarding = () => {
     return null;
   }
 
-  const totalSteps = 4;
+  const totalSteps = 3;
 
   const handleNext = () => {
     if (currentStep < totalSteps) {
@@ -54,42 +52,6 @@ const Onboarding = () => {
     }
   };
 
-  const calculateRiskLevel = (answers: OnboardingAnswers): RiskTolerance => {
-    // If user explicitly stated their risk tolerance, use that
-    if (answers.riskTolerance) {
-      return answers.riskTolerance;
-    }
-
-    // Otherwise, calculate based on age, marital status, and goals
-    let riskScore = 0;
-
-    // Age factor (younger = higher risk tolerance)
-    const ageNum = parseInt(answers.age, 10);
-    if (ageNum < 30) riskScore += 2;
-    else if (ageNum < 40) riskScore += 1;
-    else if (ageNum < 50) riskScore += 0;
-    else if (ageNum < 60) riskScore -= 1;
-    else riskScore -= 2;
-
-    // Marital status factor
-    if (answers.maritalStatus === "single") riskScore += 1;
-    else if (answers.maritalStatus === "married" || answers.maritalStatus === "partnered") riskScore -= 1;
-
-    // Goal factor
-    if (answers.goal === "wealth_building") riskScore += 2;
-    else if (answers.goal === "retirement") {
-      if (ageNum < 40) riskScore += 1;
-      else riskScore -= 1;
-    } else if (answers.goal === "income") riskScore -= 2;
-    else if (answers.goal === "education" || answers.goal === "major_purchase") riskScore -= 1;
-
-    // Convert score to risk level
-    if (riskScore >= 2) return "very_high";
-    if (riskScore >= 1) return "high";
-    if (riskScore >= -1) return "mid";
-    return "low";
-  };
-
   const handleSubmit = async () => {
     if (!userProfile?.id || !userId) {
       toast({
@@ -101,7 +63,7 @@ const Onboarding = () => {
     }
 
     // Validate all answers
-    if (!answers.age || !answers.maritalStatus || !answers.goal || !answers.riskTolerance) {
+    if (!answers.maritalStatus || !answers.goal || !answers.riskTolerance) {
       toast({
         title: "Incomplete",
         description: "Please answer all questions before continuing.",
@@ -112,15 +74,13 @@ const Onboarding = () => {
 
     setIsSubmitting(true);
     try {
-      // Calculate risk level
-      const calculatedRiskLevel = calculateRiskLevel(answers);
-      
-      // Update user profile with answers and calculated risk level
+      // Update user profile with onboarding answers
       const { error } = await supabase
         .from("users")
         .update({
-          age: parseInt(answers.age, 10),
-          risk_level: calculatedRiskLevel,
+          marital_status: answers.maritalStatus,
+          investment_goal: answers.goal,
+          risk_level: answers.riskTolerance,
           onboarding_complete: true,
           updated_at: new Date().toISOString(),
         })
@@ -161,12 +121,10 @@ const Onboarding = () => {
   const canProceed = () => {
     switch (currentStep) {
       case 1:
-        return answers.age !== "";
-      case 2:
         return answers.maritalStatus !== "";
-      case 3:
+      case 2:
         return answers.goal !== "";
-      case 4:
+      case 3:
         return answers.riskTolerance !== "";
       default:
         return false;
@@ -197,29 +155,8 @@ const Onboarding = () => {
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* Step 1: Age */}
+          {/* Step 1: Marital Status */}
           {currentStep === 1 && (
-            <div className="space-y-4">
-              <div>
-                <Label className="text-lg font-semibold">What is your age?</Label>
-                <p className="text-sm text-muted-foreground mt-1">
-                  This helps us understand your investment time horizon.
-                </p>
-              </div>
-              <input
-                type="number"
-                min="13"
-                max="150"
-                value={answers.age}
-                onChange={(e) => setAnswers({ ...answers, age: e.target.value })}
-                placeholder="Enter your age"
-                className="w-full px-4 py-2 border border-input rounded-md bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-              />
-            </div>
-          )}
-
-          {/* Step 2: Marital Status */}
-          {currentStep === 2 && (
             <div className="space-y-4">
               <div>
                 <Label className="text-lg font-semibold">What is your marital status?</Label>
@@ -245,12 +182,6 @@ const Onboarding = () => {
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2 p-3 rounded-lg border border-input hover:bg-accent cursor-pointer">
-                  <RadioGroupItem value="partnered" id="partnered" />
-                  <Label htmlFor="partnered" className="cursor-pointer flex-1">
-                    Domestic Partnership
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2 p-3 rounded-lg border border-input hover:bg-accent cursor-pointer">
                   <RadioGroupItem value="divorced" id="divorced" />
                   <Label htmlFor="divorced" className="cursor-pointer flex-1">
                     Divorced
@@ -266,8 +197,8 @@ const Onboarding = () => {
             </div>
           )}
 
-          {/* Step 3: Investment Goals */}
-          {currentStep === 3 && (
+          {/* Step 2: Investment Goals */}
+          {currentStep === 2 && (
             <div className="space-y-4">
               <div>
                 <Label className="text-lg font-semibold">What is your primary investment goal?</Label>
@@ -293,21 +224,15 @@ const Onboarding = () => {
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2 p-3 rounded-lg border border-input hover:bg-accent cursor-pointer">
-                  <RadioGroupItem value="income" id="income" />
-                  <Label htmlFor="income" className="cursor-pointer flex-1">
-                    Generate Regular Income
-                  </Label>
-                </div>
-                <div className="flex items-center space-x-2 p-3 rounded-lg border border-input hover:bg-accent cursor-pointer">
                   <RadioGroupItem value="education" id="education" />
                   <Label htmlFor="education" className="cursor-pointer flex-1">
                     Education Funding
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2 p-3 rounded-lg border border-input hover:bg-accent cursor-pointer">
-                  <RadioGroupItem value="major_purchase" id="major_purchase" />
-                  <Label htmlFor="major_purchase" className="cursor-pointer flex-1">
-                    Major Purchase (Home, Car, etc.)
+                  <RadioGroupItem value="house_purchase" id="house_purchase" />
+                  <Label htmlFor="house_purchase" className="cursor-pointer flex-1">
+                    House Purchase
                   </Label>
                 </div>
                 <div className="flex items-center space-x-2 p-3 rounded-lg border border-input hover:bg-accent cursor-pointer">
@@ -320,8 +245,8 @@ const Onboarding = () => {
             </div>
           )}
 
-          {/* Step 4: Risk Tolerance */}
-          {currentStep === 4 && (
+          {/* Step 3: Risk Tolerance */}
+          {currentStep === 3 && (
             <div className="space-y-4">
               <div>
                 <Label className="text-lg font-semibold">What level of risk are you willing to take?</Label>

@@ -185,6 +185,31 @@ CREATE TABLE IF NOT EXISTS public.news_articles (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- News (Canonical table for UI and integrations)
+CREATE TABLE IF NOT EXISTS public.news (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    link TEXT NOT NULL UNIQUE,
+    provider TEXT,
+    published_at TIMESTAMPTZ DEFAULT NOW(),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Backfill canonical news table from legacy news_articles when available.
+INSERT INTO public.news (title, summary, link, provider, published_at, created_at, updated_at)
+SELECT
+    na.title,
+    na.summary,
+    na.link,
+    na.source,
+    na.published_at,
+    na.created_at,
+    na.updated_at
+FROM public.news_articles na
+ON CONFLICT (link) DO NOTHING;
+
 -- The Eye Trade Engine Snapshots
 CREATE TABLE IF NOT EXISTS public.eye_snapshots (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -290,6 +315,8 @@ CREATE INDEX IF NOT EXISTS idx_trade_journal_user ON public.trade_journal(user_i
 CREATE INDEX IF NOT EXISTS idx_learning_topics_user ON public.learning_topics(user_id);
 CREATE INDEX IF NOT EXISTS idx_news_articles_published_at ON public.news_articles(published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_news_articles_created_at ON public.news_articles(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_published_at ON public.news(published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_news_created_at ON public.news(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_eye_snapshots_user_id ON public.eye_snapshots(user_id);
 CREATE INDEX IF NOT EXISTS idx_eye_snapshots_user_latest ON public.eye_snapshots(user_id, is_latest) WHERE (is_latest = TRUE);
 CREATE INDEX IF NOT EXISTS idx_eye_snapshots_user_active ON public.eye_snapshots(user_id, is_active) WHERE (is_active = TRUE);
@@ -310,6 +337,7 @@ ALTER TABLE public.achievements ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.market_indices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trending_stocks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.news_articles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.news ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.eye_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_snapshots ENABLE ROW LEVEL SECURITY;
 
@@ -594,6 +622,11 @@ CREATE POLICY "Anyone can view news articles"
 ON public.news_articles FOR SELECT
 TO authenticated, anon USING (true);
 
+DROP POLICY IF EXISTS "Anyone can view news" ON public.news;
+CREATE POLICY "Anyone can view news"
+ON public.news FOR SELECT
+TO authenticated, anon USING (true);
+
 -- Eye Snapshots policies
 DROP POLICY IF EXISTS "Users can view their own eye snapshots" ON public.eye_snapshots;
 DROP POLICY IF EXISTS "Users can insert their own eye snapshots" ON public.eye_snapshots;
@@ -654,6 +687,11 @@ CREATE TRIGGER update_learning_topics_updated_at
 DROP TRIGGER IF EXISTS update_eye_snapshots_updated_at ON public.eye_snapshots;
 CREATE TRIGGER update_eye_snapshots_updated_at
     BEFORE UPDATE ON public.eye_snapshots
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_news_updated_at ON public.news;
+CREATE TRIGGER update_news_updated_at
+    BEFORE UPDATE ON public.news
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Auth user creation trigger
