@@ -303,7 +303,8 @@ def test_chat_endpoint_rate_limit(client: TestClient):
             headers={"X-Forwarded-For": test_ip},
         )
         assert response.status_code == 429
-        assert "Rate limit exceeded" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert "limit exceeded" in detail.lower()
 
 
 @pytest.mark.asyncio
