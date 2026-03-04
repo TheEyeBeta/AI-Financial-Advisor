@@ -29,6 +29,11 @@ OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", OPENAI_MODEL or "gpt-5-mini")
 OPENAI_CLASSIFIER_MODEL = os.getenv("OPENAI_CLASSIFIER_MODEL", OPENAI_MODEL or "gpt-5-nano")
 OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", OPENAI_MODEL or "gpt-5-nano")
 OPENAI_QUANT_MODEL = os.getenv("OPENAI_QUANT_MODEL", OPENAI_MODEL or "gpt-5-mini")
+try:
+    OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
+except ValueError:
+    OPENAI_MAX_TOKENS = 8000
+OPENAI_MAX_TOKENS = max(1, OPENAI_MAX_TOKENS)
 PERPLEXITY_API_KEY_ENV = "PERPLEXITY_API_KEY"
 PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-online"  # Cost-effective fallback model
@@ -236,9 +241,10 @@ def _is_reasoning_model(model: str) -> bool:
 
 def _effective_chat_max_output_tokens(requested_tokens: int) -> int:
     """Reasoning models often need extra output budget before returning visible text."""
+    base_tokens = max(requested_tokens, OPENAI_MAX_TOKENS)
     if _is_reasoning_model(OPENAI_CHAT_MODEL):
-        return max(requested_tokens, MIN_REASONING_MAX_OUTPUT_TOKENS)
-    return requested_tokens
+        return max(base_tokens, MIN_REASONING_MAX_OUTPUT_TOKENS)
+    return base_tokens
 
 
 def _looks_like_reasoning_budget_exhaustion(data: Dict[str, Any]) -> bool:
@@ -585,7 +591,11 @@ async def chat_completion(
             and _is_reasoning_model(OPENAI_CHAT_MODEL)
             and _looks_like_reasoning_budget_exhaustion(data)
         ):
-            retry_max_output_tokens = min(2000, max(payload["max_output_tokens"], RETRY_REASONING_MAX_OUTPUT_TOKENS))
+            retry_max_output_tokens = max(
+                payload["max_output_tokens"],
+                RETRY_REASONING_MAX_OUTPUT_TOKENS,
+                OPENAI_MAX_TOKENS,
+            )
             retry_payload = {
                 **payload,
                 "reasoning": {"effort": "low"},

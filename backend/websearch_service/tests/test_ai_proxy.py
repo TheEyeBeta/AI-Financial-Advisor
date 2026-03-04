@@ -250,9 +250,9 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
         call_args = mock_client.post.await_args_list
         first_chat_payload = call_args[1].kwargs["json"]
         retry_chat_payload = call_args[2].kwargs["json"]
-        assert first_chat_payload["max_output_tokens"] == 1200
+        assert first_chat_payload["max_output_tokens"] == 8000
         assert retry_chat_payload["reasoning"]["effort"] == "low"
-        assert retry_chat_payload["max_output_tokens"] == 1800
+        assert retry_chat_payload["max_output_tokens"] == 8000
 
 
 def test_chat_endpoint_rate_limit(client: TestClient):
