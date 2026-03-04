@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSearchParams, useLocation } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { ChatInterface } from "@/components/advisor/ChatInterface";
@@ -22,6 +22,9 @@ const Advisor = () => {
   
   const [showTopics, setShowTopics] = useState(true);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  // Track the message count before sending to identify the new AI response for streaming
+  const prevMessageCountRef = useRef<number>(0);
+  const [streamingResponseContent, setStreamingResponseContent] = useState<string | null>(null);
   
   // Handle initial message from navigation state (e.g., from learning topics)
   useEffect(() => {
@@ -80,6 +83,8 @@ const Advisor = () => {
     // Show user message immediately (optimistic update)
     setPendingMessage(content);
     setShowTopics(false);
+    // Remember current count so we can identify the new AI response
+    prevMessageCountRef.current = (currentChat?.messages?.length ?? 0);
 
     try {
       let chatId = currentChatId;
@@ -95,12 +100,17 @@ const Advisor = () => {
         isFirstMessage = true;
       }
 
-      await sendMessageMutation.mutateAsync({ 
-        chatId, 
+      const result = await sendMessageMutation.mutateAsync({
+        chatId,
         message: content,
         isFirstMessage,
       });
-      
+
+      // Flag the AI response for streaming typewriter effect
+      if (result?.response) {
+        setStreamingResponseContent(result.response);
+      }
+
       // Clear pending message after mutation completes
       setPendingMessage(null);
     } catch (error) {
@@ -128,10 +138,17 @@ const Advisor = () => {
 
   // Convert database messages to component format
   const messages = currentChat?.messages || [];
-  const chatMessages = messages.map(msg => ({
-    role: msg.role as "user" | "assistant",
-    content: msg.content,
-  }));
+  const chatMessages = messages.map((msg, index) => {
+    // Flag the last assistant message as streaming if it matches the streaming content
+    const isLastAssistant = msg.role === 'assistant' && index === messages.length - 1;
+    const shouldStream = isLastAssistant && streamingResponseContent !== null && msg.content === streamingResponseContent;
+
+    return {
+      role: msg.role as "user" | "assistant",
+      content: msg.content,
+      isStreaming: shouldStream,
+    };
+  });
 
   // Add pending message if it exists and hasn't been saved yet
   let displayMessages = chatMessages;
@@ -171,6 +188,8 @@ const Advisor = () => {
   }
 
   const isLoading = chatsLoading || chatLoading || sendMessageMutation.isPending || createChatMutation.isPending;
+  // Only show "Thinking..." when waiting for an AI response, not during initial loads
+  const isThinking = sendMessageMutation.isPending;
 
   return (
     <AppLayout title="AI Financial Advisor">
@@ -190,7 +209,9 @@ const Advisor = () => {
             messages={displayMessages}
             onNewChat={handleNewChat}
             isLoading={isLoading}
+            isThinking={isThinking}
             chatTitle={currentChat?.title}
+            onStreamingComplete={() => setStreamingResponseContent(null)}
           />
         </div>
         
