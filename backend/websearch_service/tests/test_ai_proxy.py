@@ -490,7 +490,7 @@ async def test_chat_endpoint_max_tokens_validation(client: TestClient):
         # Test max_tokens too high
         response = client.post(
             "/api/chat",
-            json={"message": "Hello", "max_tokens": 3000},
+            json={"message": "Hello", "max_tokens": 20000},
         )
         assert response.status_code == 422
         
@@ -512,18 +512,75 @@ async def test_chat_endpoint_max_tokens_validation(client: TestClient):
 
 
 @pytest.mark.asyncio
+async def test_chat_endpoint_plain_text_response(client: TestClient):
+    """Test chat endpoint with natural language (non-JSON) model response."""
+    rate_limiter._state.clear()
+
+    plain_text = "AAPL is currently trading at $185.50, up 1.2% today. The RSI is at 62, suggesting neutral momentum."
+    mock_response_data = {
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": plain_text}]}],
+        "usage": {"input_tokens": 10, "output_tokens": 30, "total_tokens": 40},
+    }
+
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.text = ""
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        response = client.post("/api/chat", json={"message": "What is AAPL price?"})
+        assert response.status_code == 200
+        assert response.json()["response"] == plain_text
+
+
+@pytest.mark.asyncio
+async def test_chat_title_fallback_on_empty_response(client: TestClient):
+    """Title generation should fall back to message-based title when model returns empty."""
+    rate_limiter._state.clear()
+
+    mock_response_data = {
+        "choices": [{"message": {"content": ""}}],
+        "usage": {},
+    }
+
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.text = ""
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        response = client.post(
+            "/api/chat/title",
+            json={"first_message": "How do I start investing in index funds?"},
+        )
+        # Should succeed with a fallback title instead of 502
+        assert response.status_code == 200
+        title = response.json()["title"]
+        assert len(title) > 0
+        assert "invest" in title.lower() or "index" in title.lower() or "How" in title
+
+
+@pytest.mark.asyncio
 async def test_chat_endpoint_network_error(client: TestClient):
     """Test chat endpoint when network error occurs."""
     import httpx
-    
+
     # Clear rate limit state
     rate_limiter._state.clear()
-    
+
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(side_effect=httpx.RequestError("Connection failed"))
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
-    
+
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.post("/api/chat", json={"message": "Hello"})
         assert response.status_code == 502

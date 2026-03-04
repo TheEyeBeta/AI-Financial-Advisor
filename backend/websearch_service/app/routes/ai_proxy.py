@@ -27,7 +27,7 @@ if OPENAI_MODEL == "gpt-4.5":
     OPENAI_MODEL = None
 OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", OPENAI_MODEL or "gpt-5-mini")
 OPENAI_CLASSIFIER_MODEL = os.getenv("OPENAI_CLASSIFIER_MODEL", OPENAI_MODEL or "gpt-5-nano")
-OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", OPENAI_MODEL or "gpt-5-nano")
+OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", OPENAI_MODEL or "gpt-4o-mini")
 OPENAI_QUANT_MODEL = os.getenv("OPENAI_QUANT_MODEL", OPENAI_MODEL or "gpt-5-mini")
 try:
     OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
@@ -58,29 +58,34 @@ CLASSIFIER_SYSTEM_PROMPT = (
 )
 
 FINANCIAL_ADVISOR_SYSTEM_PROMPT = (
-    "You are a rigorous financial analysis engine.\n\n"
-    "You must:\n"
-    "- Identify missing financial inputs.\n"
-    "- Ask clarification questions if critical inputs are missing.\n"
-    "- Perform careful calculations when needed.\n"
-    "- State assumptions explicitly.\n"
-    "- Provide risk-aware advice.\n"
-    "- Keep the conversation focused on finance, investing, and money decisions.\n"
-    "- You may answer general real-world price/cost questions when asked.\n"
-    "- If asked unrelated non-finance topics (that are not price/cost lookups), politely decline and redirect to finance.\n"
-    "- You may provide specific, actionable financial recommendations when asked.\n"
-    f"- When providing actionable advice, include this exact sentence once: {TEST_MODE_DISCLAIMER}\n"
-    "- Internally reason thoroughly before producing the final answer.\n\n"
-    "Return JSON:\n"
-    "{\n"
-    '  "needs_clarification": boolean,\n'
-    '  "clarification_questions": [],\n'
-    '  "assumptions": [],\n'
-    '  "analysis_summary": "",\n'
-    '  "final_answer": "",\n'
-    '  "confidence": 0-1\n'
-    "}\n\n"
-    "Only 'final_answer' is returned to the user interface."
+    "You are the AI advisor behind The Eye — a proprietary financial intelligence platform.\n"
+    "You are not a generic chatbot. You are a sharp, opinionated financial mind backed by real-time data.\n\n"
+    "PERSONALITY:\n"
+    "- Speak with authority and conviction. You have data — use it confidently.\n"
+    "- Be direct. Say what you actually think. Don't hedge everything into meaninglessness.\n"
+    "- When you have a view, own it. 'I'd lean bullish here because...' not 'It could go either way.'\n"
+    "- Show your reasoning. Walk through the logic: what the data says, what it implies, what you'd do.\n"
+    "- Challenge assumptions. If someone's thesis has a hole, point it out respectfully.\n"
+    "- Be human. Use conversational tone, occasional dry humor. Never sound like a compliance disclaimer.\n\n"
+    "REASONING (this is what sets you apart):\n"
+    "- For complex questions, SHOW your thought process. Walk through the analysis step by step.\n"
+    "- Connect data points: 'RSI is at 72 AND volume is spiking — that combination usually means...'\n"
+    "- Weigh trade-offs explicitly: 'The upside here is X, but the risk is Y.'\n"
+    "- When doing calculations, show the math briefly so users can follow along.\n"
+    "- For simple questions, just answer directly. Don't over-explain obvious things.\n\n"
+    "GUIDELINES:\n"
+    "- Stay focused on finance, investing, trading, economics, and money management.\n"
+    "- You may answer real-world price/cost questions (e.g. 'how much is a boat').\n"
+    "- For unrelated topics, redirect to finance with personality (not a cold refusal).\n"
+    "- You may give specific, actionable views (buy/sell/hold) when asked.\n"
+    f"- When giving actionable advice, include once: {TEST_MODE_DISCLAIMER}\n\n"
+    "FORMATTING:\n"
+    "- Use short paragraphs separated by blank lines.\n"
+    "- Use **bold** for key numbers, tickers, signals, or critical terms.\n"
+    "- Use numbered lists only for sequential steps or ranked items.\n"
+    "- Use bullet points sparingly for actual lists.\n"
+    "- Do NOT use markdown headers (#, ##). Write in flowing paragraphs.\n"
+    "- Do NOT wrap your response in JSON or code blocks. Just write naturally.\n"
 )
 
 # ── Token estimation ───────────────────────────────────────────────────────────
@@ -102,7 +107,7 @@ class ChatRequest(BaseModel):
     message: Optional[str] = Field(default=None, min_length=1, max_length=10000)
     user_id: Optional[str] = None
     temperature: float = Field(default=0.7, ge=0, le=2)
-    max_tokens: int = Field(default=700, ge=1, le=2000)
+    max_tokens: int = Field(default=2000, ge=1, le=16000)
 
 
 class ChatTitleRequest(BaseModel):
@@ -582,8 +587,16 @@ async def chat_completion(
         data = await _call_openai_responses(payload)
         usage_entries.append(data.get("usage", {}))
 
-        # Step 4: Extract final_answer from structured JSON response (do not expose reasoning)
-        final_answer = _extract_final_answer(data)
+        # Step 4: Extract the response text.
+        # Try direct text first (natural language), fall back to JSON extraction for legacy responses.
+        raw_text = _extract_text_unified(data)
+        final_answer = raw_text.strip() if raw_text.strip() else ""
+        # If the response is wrapped in JSON (legacy behavior), extract final_answer from it.
+        if final_answer.lstrip().startswith("{"):
+            parsed = _extract_json_from_response(final_answer)
+            extracted = parsed.get("final_answer", "") or parsed.get("analysis_summary", "")
+            if extracted:
+                final_answer = extracted
 
         # Retry once when reasoning models exhaust the output budget without visible text.
         if (
@@ -622,7 +635,13 @@ async def chat_completion(
             )
             data = await _call_openai_responses(retry_payload)
             usage_entries.append(data.get("usage", {}))
-            final_answer = _extract_final_answer(data)
+            raw_text = _extract_text_unified(data)
+            final_answer = raw_text.strip() if raw_text.strip() else ""
+            if final_answer.lstrip().startswith("{"):
+                parsed = _extract_json_from_response(final_answer)
+                extracted = parsed.get("final_answer", "") or parsed.get("analysis_summary", "")
+                if extracted:
+                    final_answer = extracted
 
         if not isinstance(final_answer, str) or not final_answer.strip():
             logger.warning(
@@ -661,7 +680,7 @@ async def chat_title(
     response: Response,
 ) -> Dict[str, str]:
     # Estimate tokens (title generation is lightweight)
-    estimated_tokens = estimate_tokens(request.first_message, system_overhead=50) + 20
+    estimated_tokens = estimate_tokens(request.first_message, system_overhead=50) + 60
 
     # Enforce rate limits
     allowed, error_msg, rate_limit_info = rate_limiter.check_rate_limit(
@@ -674,33 +693,52 @@ async def chat_title(
     rate_limiter.add_rate_limit_headers(response, rate_limit_info)
 
     try:
+        title_model = OPENAI_TITLE_MODEL
+        # Use Chat Completions API with a lightweight model for title generation.
+        # For reasoning models (gpt-5, o-series), use higher token budget since they
+        # consume tokens on internal reasoning before producing visible output.
+        token_limit = 60 if _is_reasoning_model(title_model) else 40
         payload = {
-            "model": OPENAI_TITLE_MODEL,
+            "model": title_model,
             "messages": [
                 {
                     "role": "system",
-                    "content": "Generate a short, concise title (3-6 words max) for this chat conversation about finance. Only return the title, nothing else.",
+                    "content": "Generate a short, concise title (3-6 words max) for this chat conversation. Only return the title text, nothing else. No quotes, no punctuation at the end.",
                 },
-                {"role": "user", "content": f'First message: "{request.first_message}"'},
+                {"role": "user", "content": f'First message: "{request.first_message[:500]}"'},
             ],
-            **_temperature_field(OPENAI_TITLE_MODEL, 0.5),
-            **_max_completion_field(OPENAI_TITLE_MODEL, 20),
+            **_temperature_field(title_model, 0.5),
+            **_max_completion_field(title_model, token_limit),
         }
 
-        data = await _call_openai(payload)
+        content = ""
+        try:
+            data = await _call_openai(payload)
+            usage = data.get("usage", {})
+            actual_tokens = usage.get("total_tokens", 0)
+            rate_limiter.record_token_usage(raw_request, tokens_used=actual_tokens)
+            content = _extract_text_unified(data).strip().strip('"').strip("'")
+        except Exception as exc:
+            logger.warning("Title generation model call failed: %s", exc)
 
-        usage = data.get("usage", {})
-        actual_tokens = usage.get("total_tokens", 0)
-        rate_limiter.record_token_usage(raw_request, tokens_used=actual_tokens)
-
-        content = _extract_text_unified(data).strip()
+        # Fallback: derive title from the message itself
         if not content:
-            logger.warning(
-                "Empty model response from /api/chat/title provider payload. keys=%s usage=%s",
-                list(data.keys()),
-                data.get("usage", {}),
-            )
-            raise HTTPException(status_code=502, detail="Model provider returned an empty title response.")
+            logger.info("Title generation returned empty, using message-based fallback")
+            msg = request.first_message.strip()
+            # Take first sentence or first N chars
+            for sep in (".", "?", "!", "\n"):
+                idx = msg.find(sep)
+                if 0 < idx < 60:
+                    content = msg[:idx].strip()
+                    break
+            if not content:
+                content = msg[:50].strip()
+                if len(msg) > 50:
+                    # Cut at last word boundary
+                    last_space = content.rfind(" ")
+                    if last_space > 20:
+                        content = content[:last_space]
+                    content += "..."
 
         return {"title": content}
     finally:
