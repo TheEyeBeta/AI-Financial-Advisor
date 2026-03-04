@@ -1,4 +1,4 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { Bot, User, Plus, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -6,13 +6,16 @@ import { cn } from "@/lib/utils";
 interface Message {
   role: "user" | "assistant";
   content: string;
+  isStreaming?: boolean;
 }
 
 interface ChatInterfaceProps {
   messages: Message[];
   onNewChat?: () => void;
   isLoading?: boolean;
+  isThinking?: boolean;
   chatTitle?: string;
+  onStreamingComplete?: () => void;
 }
 
 // Format AI response with better readability
@@ -100,7 +103,64 @@ function formatInlineText(text: string): React.ReactNode {
   });
 }
 
-export function ChatInterface({ messages, onNewChat, isLoading = false, chatTitle }: ChatInterfaceProps) {
+// Animated "Thinking..." indicator
+function ThinkingText() {
+  const [dots, setDots] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setDots(d => (d + 1) % 4);
+    }, 400);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <span className="text-sm text-muted-foreground italic">
+      Thinking{'.'.repeat(dots)}
+    </span>
+  );
+}
+
+// Typewriter effect for streaming AI responses
+function StreamingMessage({ content, onComplete }: { content: string; onComplete?: () => void }) {
+  const [displayed, setDisplayed] = useState("");
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    setDisplayed("");
+    setDone(false);
+    let index = 0;
+
+    const interval = setInterval(() => {
+      if (index < content.length) {
+        // Add characters in small chunks for natural feel
+        const chunkSize = Math.floor(Math.random() * 3) + 1;
+        const nextIndex = Math.min(index + chunkSize, content.length);
+        setDisplayed(content.slice(0, nextIndex));
+        index = nextIndex;
+      } else {
+        setDone(true);
+        onComplete?.();
+        clearInterval(interval);
+      }
+    }, 15);
+
+    return () => clearInterval(interval);
+  }, [content]);
+
+  if (done) {
+    return <div className="prose prose-sm dark:prose-invert max-w-none">{formatMessage(content)}</div>;
+  }
+
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none">
+      {formatMessage(displayed)}
+      <span className="inline-block w-0.5 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom" />
+    </div>
+  );
+}
+
+export function ChatInterface({ messages, onNewChat, isLoading = false, isThinking = false, chatTitle, onStreamingComplete }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -169,9 +229,13 @@ export function ChatInterface({ messages, onNewChat, isLoading = false, chatTitl
               )}
             >
               {message.role === "assistant" ? (
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  {formatMessage(message.content)}
-                </div>
+                message.isStreaming ? (
+                  <StreamingMessage content={message.content} onComplete={onStreamingComplete} />
+                ) : (
+                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                    {formatMessage(message.content)}
+                  </div>
+                )
               ) : (
                 <p className="text-sm">
                   {message.content}
@@ -181,19 +245,13 @@ export function ChatInterface({ messages, onNewChat, isLoading = false, chatTitl
           </div>
         ))}
         
-        {isLoading && (
+        {isThinking && (
           <div className="flex gap-3 animate-in fade-in duration-200">
             <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
               <Bot className="h-4 w-4 text-primary animate-pulse" />
             </div>
             <div className="rounded-2xl rounded-bl-sm bg-muted/50 px-4 py-2.5">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="h-2 w-2 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              </div>
+              <ThinkingText />
             </div>
           </div>
         )}
