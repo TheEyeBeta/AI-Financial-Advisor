@@ -29,8 +29,8 @@ const News = () => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('latest');
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  // Supabase: last 12 hours, up to 150 articles
-  const { data: supabaseArticles = [], isLoading: supabaseLoading, error: supabaseError } = useRecentNews(12, 150);
+  // Supabase: last 24 hours, up to 150 articles
+  const { data: supabaseArticles = [], isLoading: supabaseLoading, error: supabaseError } = useRecentNews(24, 150);
 
   // Trade Engine news (live from backend)
   const { data: engineNewsData, isLoading: engineLoading, error: engineError, refetch: refetchEngine } = useTradeEngineNews(30);
@@ -181,7 +181,7 @@ const News = () => {
             <>
               <Database className="h-3 w-3" />
               <span>
-                Showing news from the last 12 hours
+                Showing news from the last 24 hours
                 {!isLoading && allArticles.length > 0 && (
                   <span className="ml-1 text-muted-foreground/60">
                     · {allArticles.length} article{allArticles.length !== 1 ? 's' : ''}
@@ -251,11 +251,11 @@ const News = () => {
               <div className="p-3 rounded-full bg-muted mx-auto mb-4 w-fit">
                 <Newspaper className="h-8 w-8 text-muted-foreground" />
               </div>
-              <p className="text-muted-foreground font-medium">No news in the last 12 hours</p>
+              <p className="text-muted-foreground font-medium">No news in the last 24 hours</p>
               <p className="text-xs text-muted-foreground mt-2">
                 {source === 'trade-engine'
                   ? "The Trade Engine hasn't collected any news yet. Make sure it's running."
-                  : "No articles have been published in the last 12 hours."}
+                  : "No articles have been published in the last 24 hours."}
               </p>
             </CardContent>
           </Card>
