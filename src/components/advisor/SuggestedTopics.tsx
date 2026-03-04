@@ -23,37 +23,37 @@ const beginnerTopics: Topic[] = [
   {
     icon: TrendingUp,
     label: "Getting Started",
-    question: "I'm new to investing. What are the first steps I should take to start building wealth? Please explain the basics of stocks, bonds, and index funds.",
+    question: "I'm new to investing — what's the simplest way to get started?",
     gradient: "from-blue-500 to-cyan-500",
   },
   {
     icon: Coins,
     label: "Smart Saving",
-    question: "What's the best strategy for someone who wants to invest consistently but doesn't have a lot of money to start with? Explain dollar-cost averaging and how much I should be investing monthly.",
+    question: "I don't have a lot of money to start with. How can I invest consistently on a small budget?",
     gradient: "from-green-500 to-emerald-500",
   },
   {
     icon: BarChart3,
     label: "Portfolio Building",
-    question: "How do I build a diversified investment portfolio? What's the right mix of stocks, bonds, and other assets for someone my age? Explain asset allocation strategies.",
+    question: "What's a good starter portfolio for someone who's never invested before?",
     gradient: "from-purple-500 to-pink-500",
   },
   {
     icon: Shield,
     label: "Risk & Protection",
-    question: "How do I protect my investments during market downturns? Explain risk management strategies, stop-losses, and how to avoid emotional investing decisions.",
+    question: "How do I avoid losing money when the market drops?",
     gradient: "from-orange-500 to-red-500",
   },
   {
     icon: PiggyBank,
     label: "Retirement Planning",
-    question: "How should I plan for retirement? Explain different retirement savings strategies, how compound interest works, how much I should be saving, and what types of retirement accounts or pension plans are available in my country.",
+    question: "When should I start saving for retirement, and what's the best account to use?",
     gradient: "from-indigo-500 to-blue-500",
   },
   {
     icon: Lightbulb,
     label: "Market Analysis",
-    question: "How do professional investors analyze stocks before buying? Explain fundamental analysis (P/E ratio, earnings) vs technical analysis (charts, trends). Which should I use?",
+    question: "How do I know if a stock is worth buying?",
     gradient: "from-yellow-500 to-amber-500",
   },
 ];
