@@ -196,6 +196,65 @@ def test_chat_endpoint_empty_response(client: TestClient):
         assert response.status_code == 502
 
 
+@pytest.mark.asyncio
+async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: TestClient):
+    """Retry once when output budget is fully consumed by reasoning tokens."""
+    rate_limiter._state.clear()
+
+    classifier_json = '{"complexity":"high","requires_calculation":true,"high_risk_decision":false}'
+    exhausted_response_data = {
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": ""}]}],
+        "usage": {
+            "input_tokens": 120,
+            "output_tokens": 640,
+            "output_tokens_details": {"reasoning_tokens": 640},
+        },
+    }
+    final_json = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", '
+        '"final_answer": "Recovered answer after retry.", "confidence": 0.9}'
+    )
+
+    classifier_response = MagicMock()
+    classifier_response.status_code = 200
+    classifier_response.json.return_value = {
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": classifier_json}]}],
+        "usage": {"input_tokens": 8, "output_tokens": 5, "total_tokens": 13},
+    }
+    classifier_response.text = ""
+
+    exhausted_response = MagicMock()
+    exhausted_response.status_code = 200
+    exhausted_response.json.return_value = exhausted_response_data
+    exhausted_response.text = ""
+
+    retry_response = MagicMock()
+    retry_response.status_code = 200
+    retry_response.json.return_value = {
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": final_json}]}],
+        "usage": {"input_tokens": 150, "output_tokens": 60, "total_tokens": 210},
+    }
+    retry_response.text = ""
+
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(side_effect=[classifier_response, exhausted_response, retry_response])
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        response = client.post("/api/chat", json={"message": "Hello", "max_tokens": 700})
+        assert response.status_code == 200
+        assert response.json()["response"] == "Recovered answer after retry."
+
+        call_args = mock_client.post.await_args_list
+        first_chat_payload = call_args[1].kwargs["json"]
+        retry_chat_payload = call_args[2].kwargs["json"]
+        assert first_chat_payload["max_output_tokens"] == 1200
+        assert retry_chat_payload["reasoning"]["effort"] == "low"
+        assert retry_chat_payload["max_output_tokens"] == 1800
+
+
 def test_chat_endpoint_rate_limit(client: TestClient):
     """Test chat endpoint rate limiting."""
     # Clear rate limit state before test
