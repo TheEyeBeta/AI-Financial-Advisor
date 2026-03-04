@@ -8,10 +8,13 @@ doesn't error out. The frontend will fall back to Supabase data when this return
 
 from __future__ import annotations
 
+import json
+import os
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 
@@ -213,3 +216,131 @@ async def get_engine_status() -> Dict[str, Any]:
         "message": "Trade Engine not deployed. Using Supabase data fallback.",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _get_supabase_client():
+    """Lazy-init Supabase client using either prefixed or plain env vars."""
+    url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+    key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("VITE_SUPABASE_ANON_KEY")
+    )
+    if not url or not key:
+        return None
+    from supabase import create_client
+    return create_client(url, key)
+
+
+@router.get("/api/stock-price/{ticker}")
+async def get_stock_price(ticker: str) -> Dict[str, Any]:
+    """
+    Return the last known price for a ticker from stock_snapshots.
+
+    Falls back gracefully when Supabase is unavailable or the ticker is not found.
+    """
+    ticker = ticker.upper()
+    client = _get_supabase_client()
+    if client:
+        try:
+            result = (
+                client.table("stock_snapshots")
+                .select("ticker,last_price,price_change_pct,updated_at")
+                .eq("ticker", ticker)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                row = result.data[0]
+                return {
+                    "ticker": ticker,
+                    "price": row.get("last_price"),
+                    "change_percent": row.get("price_change_pct"),
+                    "updated_at": row.get("updated_at"),
+                    "source": "supabase",
+                }
+        except Exception:
+            pass
+
+    # Ticker not found or Supabase unavailable — return null price so the
+    # frontend can handle it gracefully instead of getting a 404.
+    return {"ticker": ticker, "price": None, "change_percent": None, "source": "unavailable"}
+
+
+@router.websocket("/ws/live")
+async def websocket_live(websocket: WebSocket) -> None:
+    """
+    WebSocket endpoint matching the TradeEngineWebSocket frontend client.
+
+    Supports: subscribe, unsubscribe, get_subscriptions, ping.
+    No live price streaming — sends engine_status on connect so the
+    frontend knows the engine is in stub mode.
+    """
+    await websocket.accept()
+    connection_id = str(uuid.uuid4())
+    subscriptions: set[str] = set()
+
+    await websocket.send_json({
+        "type": "connected",
+        "connection_id": connection_id,
+        "message": "Connected (stub mode — Trade Engine not deployed)",
+    })
+    await websocket.send_json({
+        "type": "engine_status",
+        "is_operational": False,
+        "is_halted": False,
+        "halt_reason": "Trade Engine not deployed",
+        "workers": {"price": False, "news": False, "algorithm": False},
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            try:
+                data = json.loads(raw)
+            except json.JSONDecodeError:
+                await websocket.send_json({"type": "error", "message": "Invalid JSON"})
+                continue
+
+            action = data.get("action")
+
+            if action == "ping":
+                await websocket.send_json({"type": "pong", "timestamp": data.get("timestamp", 0)})
+
+            elif action == "subscribe":
+                tickers = [t.upper() for t in data.get("tickers", [])]
+                subscriptions.update(tickers)
+                await websocket.send_json({
+                    "type": "subscribed",
+                    "tickers": tickers,
+                    "message": f"Subscribed to {len(tickers)} ticker(s) (stub — no live data)",
+                })
+
+            elif action == "unsubscribe":
+                tickers = [t.upper() for t in data.get("tickers", [])]
+                subscriptions.difference_update(tickers)
+                await websocket.send_json({
+                    "type": "unsubscribed",
+                    "tickers": tickers,
+                    "message": f"Unsubscribed from {len(tickers)} ticker(s)",
+                })
+
+            elif action == "get_subscriptions":
+                ticker_list = list(subscriptions)
+                await websocket.send_json({
+                    "type": "subscriptions",
+                    "tickers": ticker_list,
+                    "count": len(ticker_list),
+                })
+
+            else:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Unknown action: {action!r}",
+                    "supported_actions": ["subscribe", "unsubscribe", "get_subscriptions", "ping"],
+                })
+
+    except WebSocketDisconnect:
+        pass
