@@ -34,6 +34,9 @@ PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-online"  # Cost-effective fallback model
 MAX_CHAT_MESSAGE_CONTENT_LENGTH = 50000
 TEST_MODE_DISCLAIMER = "Test mode only. Not financial advice."
+REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
+MIN_REASONING_MAX_OUTPUT_TOKENS = 1200
+RETRY_REASONING_MAX_OUTPUT_TOKENS = 1800
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -225,6 +228,66 @@ def _extract_json_from_response(text: str) -> Dict[str, Any]:
         "final_answer": text,
         "confidence": 0.5,
     }
+
+
+def _is_reasoning_model(model: str) -> bool:
+    return model.startswith(REASONING_MODEL_PREFIXES)
+
+
+def _effective_chat_max_output_tokens(requested_tokens: int) -> int:
+    """Reasoning models often need extra output budget before returning visible text."""
+    if _is_reasoning_model(OPENAI_CHAT_MODEL):
+        return max(requested_tokens, MIN_REASONING_MAX_OUTPUT_TOKENS)
+    return requested_tokens
+
+
+def _looks_like_reasoning_budget_exhaustion(data: Dict[str, Any]) -> bool:
+    """
+    Detect provider responses where output budget was consumed by reasoning tokens,
+    leaving no visible answer text.
+    """
+    usage = data.get("usage", {})
+    if not isinstance(usage, dict):
+        return False
+
+    output_tokens = usage.get("output_tokens")
+    if not isinstance(output_tokens, int) or output_tokens <= 0:
+        return False
+
+    output_details = usage.get("output_tokens_details", {})
+    if not isinstance(output_details, dict):
+        return False
+
+    reasoning_tokens = output_details.get("reasoning_tokens")
+    if not isinstance(reasoning_tokens, int) or reasoning_tokens <= 0:
+        return False
+
+    return reasoning_tokens >= output_tokens
+
+
+def _extract_final_answer(data: Dict[str, Any]) -> str:
+    """Extract a user-facing answer from structured JSON or raw text."""
+    raw_text = _extract_text_unified(data)
+    parsed = _extract_json_from_response(raw_text)
+    final_answer = parsed.get("final_answer", "")
+    if not final_answer:
+        final_answer = parsed.get("analysis_summary", "")
+    if not final_answer:
+        final_answer = raw_text
+    return final_answer if isinstance(final_answer, str) else ""
+
+
+def _usage_total_tokens(usage: Dict[str, Any]) -> int:
+    if not isinstance(usage, dict):
+        return 0
+    total_tokens = usage.get("total_tokens")
+    if isinstance(total_tokens, int):
+        return total_tokens
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    return (input_tokens if isinstance(input_tokens, int) else 0) + (
+        output_tokens if isinstance(output_tokens, int) else 0
+    )
 
 
 def _get_reasoning_effort(classification: Dict[str, Any]) -> str:
@@ -440,9 +503,11 @@ async def chat_completion(
     else:
         raise HTTPException(status_code=422, detail="Either 'messages' or 'message' must be provided.")
 
+    effective_max_output_tokens = _effective_chat_max_output_tokens(request.max_tokens)
+
     # Estimate tokens for rate limiting
     total_text = " ".join(m.get("content", "") for m in messages)
-    estimated_tokens = estimate_tokens(total_text) + request.max_tokens
+    estimated_tokens = estimate_tokens(total_text) + effective_max_output_tokens
 
     # Enforce rate limits
     allowed, error_msg, rate_limit_info = rate_limiter.check_rate_limit(
@@ -464,6 +529,7 @@ async def chat_completion(
                 "user_id": request.user_id,
                 "message_count": len(messages),
                 "estimated_tokens": estimated_tokens,
+                "max_output_tokens": effective_max_output_tokens,
             },
         )
 
@@ -502,20 +568,51 @@ async def chat_completion(
             "model": OPENAI_CHAT_MODEL,
             "reasoning": {"effort": reasoning_effort},  # ← dynamically set based on classification
             "input": input_messages,
-            "max_output_tokens": request.max_tokens,
+            "max_output_tokens": effective_max_output_tokens,
         }
 
         # Step 3: Call Responses API
+        usage_entries: List[Dict[str, Any]] = []
         data = await _call_openai_responses(payload)
+        usage_entries.append(data.get("usage", {}))
 
         # Step 4: Extract final_answer from structured JSON response (do not expose reasoning)
-        raw_text = _extract_text_unified(data)
-        parsed = _extract_json_from_response(raw_text)
-        final_answer = parsed.get("final_answer", "")
-        if not final_answer:
-            final_answer = parsed.get("analysis_summary", "")
-        if not final_answer:
-            final_answer = raw_text  # Last resort: return raw text if JSON parsing failed
+        final_answer = _extract_final_answer(data)
+
+        # Retry once when reasoning models exhaust the output budget without visible text.
+        if (
+            (not isinstance(final_answer, str) or not final_answer.strip())
+            and _is_reasoning_model(OPENAI_CHAT_MODEL)
+            and _looks_like_reasoning_budget_exhaustion(data)
+        ):
+            retry_max_output_tokens = min(2000, max(payload["max_output_tokens"], RETRY_REASONING_MAX_OUTPUT_TOKENS))
+            retry_payload = {
+                **payload,
+                "reasoning": {"effort": "low"},
+                "max_output_tokens": retry_max_output_tokens,
+            }
+            logger.warning(
+                "Retrying /api/chat after reasoning budget exhaustion: model=%s initial_effort=%s initial_max=%s retry_max=%s usage=%s",
+                OPENAI_CHAT_MODEL,
+                reasoning_effort,
+                payload["max_output_tokens"],
+                retry_max_output_tokens,
+                data.get("usage", {}),
+            )
+            await audit_log(
+                "chat_reasoning_retry",
+                {
+                    "user_id": request.user_id,
+                    "initial_reasoning_effort": reasoning_effort,
+                    "retry_reasoning_effort": "low",
+                    "initial_max_output_tokens": payload["max_output_tokens"],
+                    "retry_max_output_tokens": retry_max_output_tokens,
+                    "initial_usage": data.get("usage", {}),
+                },
+            )
+            data = await _call_openai_responses(retry_payload)
+            usage_entries.append(data.get("usage", {}))
+            final_answer = _extract_final_answer(data)
 
         if not isinstance(final_answer, str) or not final_answer.strip():
             logger.warning(
@@ -528,10 +625,7 @@ async def chat_completion(
 
         # Step 5: Record token usage (Responses API uses input_tokens/output_tokens)
         usage = data.get("usage", {})
-        actual_tokens = (
-            usage.get("total_tokens")
-            or usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
-        )
+        actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
         rate_limiter.record_token_usage(raw_request, user_id=request.user_id, tokens_used=actual_tokens)
         await audit_log(
             "chat_response",
@@ -539,6 +633,7 @@ async def chat_completion(
                 "client_id": client_id,
                 "user_id": request.user_id,
                 "usage": usage,
+                "usage_attempts": usage_entries,
                 "actual_tokens": actual_tokens,
                 "reasoning_effort": reasoning_effort,
             },
