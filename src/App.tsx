@@ -8,6 +8,7 @@ import Landing from "./pages/Landing";
 import Advisor from "./pages/Advisor";
 import ChatHistory from "./pages/ChatHistory";
 import Dashboard from "./pages/Dashboard";
+import Learning from "./pages/Learning";
 import PaperTrading from "./pages/PaperTrading";
 import News from "./pages/News";
 import TopStocks from "./pages/TopStocks";
@@ -81,6 +82,14 @@ const App = () => {
               element={
                 <ProtectedRoute>
                   <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/learning"
+              element={
+                <ProtectedRoute>
+                  <Learning />
                 </ProtectedRoute>
               }
             />

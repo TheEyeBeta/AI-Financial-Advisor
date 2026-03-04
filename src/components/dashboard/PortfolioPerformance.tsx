@@ -1,15 +1,18 @@
-import { TrendingUp, TrendingDown } from "lucide-react";
+import { TrendingUp, TrendingDown, LineChart } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { usePortfolioHistory } from "@/hooks/use-data";
 import { format, parseISO } from "date-fns";
+import { useNavigate } from "react-router-dom";
+import { Button } from "@/components/ui/button";
 
 export function PortfolioPerformance() {
   const { data: portfolioHistory = [], isLoading } = usePortfolioHistory();
+  const navigate = useNavigate();
 
   // Transform data for chart (group by month and format)
   const portfolioData = portfolioHistory.map((entry) => ({
-    date: format(parseISO(entry.date), "MMM"),
+    date: format(parseISO(entry.date), "MMM dd"),
     value: entry.value,
     fullDate: entry.date,
   })).sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime());
@@ -33,9 +36,19 @@ export function PortfolioPerformance() {
   if (portfolioData.length === 0) {
     return (
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-        <CardContent className="py-12 text-center">
-          <p className="text-sm text-muted-foreground">No portfolio data yet</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Start trading to see your performance</p>
+        <CardContent className="py-10 text-center">
+          <LineChart className="h-10 w-10 mx-auto mb-3 text-muted-foreground/30" />
+          <p className="text-sm font-medium text-muted-foreground">No portfolio history yet</p>
+          <p className="text-xs text-muted-foreground/60 mt-1 mb-4">
+            Open a position to start tracking your portfolio performance
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/paper-trading')}
+          >
+            Start Trading
+          </Button>
         </CardContent>
       </Card>
     );
@@ -53,12 +66,17 @@ export function PortfolioPerformance() {
         {/* Value Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
-            <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-1">Total Value</p>
+            <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-1">Portfolio Performance</p>
             <span className="text-3xl font-bold tracking-tight">${currentValue.toLocaleString()}</span>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-xs text-muted-foreground/60">
+                {totalReturn >= 0 ? "+" : ""}${totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2 })} all time
+              </span>
+            </div>
           </div>
           <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-sm font-medium ${
-            isPositive 
-              ? "bg-profit/10 text-profit" 
+            isPositive
+              ? "bg-profit/10 text-profit"
               : "bg-loss/10 text-loss"
           }`}>
             {isPositive ? (
@@ -69,7 +87,7 @@ export function PortfolioPerformance() {
             <span>{isPositive ? "+" : ""}{percentReturn}%</span>
           </div>
         </div>
-        
+
         {/* Chart */}
         <div className="h-[200px] w-full -mx-2">
           <ResponsiveContainer width="100%" height="100%">

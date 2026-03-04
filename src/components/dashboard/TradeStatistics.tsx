@@ -21,53 +21,43 @@ export function TradeStatistics() {
     );
   }
 
-  if (!stats || stats.totalTrades === 0) {
-    return (
-      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-        <CardContent className="py-10 text-center">
-          <BarChart2 className="h-8 w-8 mx-auto mb-3 text-muted-foreground/30" />
-          <p className="text-sm text-muted-foreground">No trades yet</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Statistics appear after your first trade</p>
-        </CardContent>
-      </Card>
-    );
-  }
+  const hasTrades = stats && stats.totalTrades > 0;
 
   const displayStats = [
     {
       label: "Win Rate",
-      value: `${stats.winRate.toFixed(0)}%`,
-      subtext: `${stats.winningTrades}/${stats.totalTrades}`,
+      value: hasTrades ? `${stats.winRate.toFixed(0)}%` : "—",
+      subtext: hasTrades ? `${stats.winningTrades}/${stats.totalTrades}` : "no trades",
       icon: Target,
-      trend: stats.winRate >= 50 ? "positive" : "negative",
+      trend: hasTrades && stats.winRate >= 50 ? "positive" : "neutral",
     },
     {
       label: "Avg Profit",
-      value: `$${Math.abs(stats.avgProfit).toFixed(0)}`,
-      subtext: "per win",
+      value: hasTrades ? `$${Math.abs(stats.avgProfit).toFixed(0)}` : "—",
+      subtext: hasTrades ? "per win" : "no trades",
       icon: TrendingUp,
-      trend: "positive",
+      trend: hasTrades ? "positive" : "neutral",
     },
     {
       label: "Avg Loss",
-      value: `$${stats.avgLoss.toFixed(0)}`,
-      subtext: "per loss",
+      value: hasTrades ? `$${stats.avgLoss.toFixed(0)}` : "—",
+      subtext: hasTrades ? "per loss" : "no trades",
       icon: TrendingDown,
-      trend: "negative",
+      trend: hasTrades ? "negative" : "neutral",
     },
     {
       label: "Profit Factor",
-      value: stats.profitFactor.toFixed(2),
-      subtext: "ratio",
+      value: hasTrades ? stats.profitFactor.toFixed(2) : "—",
+      subtext: hasTrades ? "ratio" : "no trades",
       icon: BarChart2,
-      trend: stats.profitFactor >= 1 ? "positive" : "negative",
+      trend: hasTrades && stats.profitFactor >= 1 ? "positive" : "neutral",
     },
   ];
 
   return (
     <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
       <CardContent className="pt-5 pb-4">
-        <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-4">Statistics</p>
+        <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-4">Trade Statistics</p>
         <div className="grid grid-cols-2 gap-3">
           {displayStats.map((stat) => (
             <div
@@ -79,7 +69,9 @@ export function TradeStatistics() {
                 <stat.icon
                   className={cn(
                     "h-3.5 w-3.5",
-                    stat.trend === "positive" ? "text-profit/70" : "text-loss/70"
+                    stat.trend === "positive" ? "text-profit/70" :
+                    stat.trend === "negative" ? "text-loss/70" :
+                    "text-muted-foreground/30"
                   )}
                 />
               </div>
@@ -87,7 +79,9 @@ export function TradeStatistics() {
                 <span
                   className={cn(
                     "text-xl font-bold",
-                    stat.trend === "positive" ? "text-profit" : "text-loss"
+                    stat.trend === "positive" ? "text-profit" :
+                    stat.trend === "negative" ? "text-loss" :
+                    "text-muted-foreground/50"
                   )}
                 >
                   {stat.value}
