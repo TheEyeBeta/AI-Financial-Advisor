@@ -31,7 +31,7 @@ export function TradeHistory() {
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-muted-foreground/70">
-            {trades.length} trades · {winningTrades} wins · {trades.length - winningTrades} losses
+            {trades.length} closed trades · {winningTrades} wins · {trades.length - winningTrades} losses
           </p>
         </div>
         <div className="flex gap-2">
