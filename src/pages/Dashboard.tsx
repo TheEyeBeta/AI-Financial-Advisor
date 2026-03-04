@@ -28,9 +28,13 @@ const Dashboard = () => {
   const totalPositions = positions.length;
   const totalTrades = closedTrades.length;
   const totalPnL = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
+  const openPositionsValue = positions.reduce(
+    (sum, pos) => sum + ((pos.current_price || pos.entry_price) * pos.quantity),
+    0
+  );
   const latestValue = portfolioHistory.length > 0
     ? portfolioHistory[portfolioHistory.length - 1]?.value || 0
-    : 0;
+    : openPositionsValue;
 
   const quickStats = [
     {

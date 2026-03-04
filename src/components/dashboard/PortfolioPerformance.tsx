@@ -1,13 +1,14 @@
 import { TrendingUp, TrendingDown, LineChart } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { usePortfolioHistory } from "@/hooks/use-data";
+import { useOpenPositions, usePortfolioHistory } from "@/hooks/use-data";
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 
 export function PortfolioPerformance() {
   const { data: portfolioHistory = [], isLoading } = usePortfolioHistory();
+  const { data: openPositions = [] } = useOpenPositions();
   const navigate = useNavigate();
 
   // Transform data for chart (group by month and format)
@@ -16,6 +17,21 @@ export function PortfolioPerformance() {
     value: entry.value,
     fullDate: entry.date,
   })).sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime());
+
+  const openPositionsValue = openPositions.reduce(
+    (sum, position) => sum + ((position.current_price || position.entry_price) * position.quantity),
+    0
+  );
+
+  const fallbackData = openPositionsValue > 0
+    ? [{
+        date: "Now",
+        value: openPositionsValue,
+        fullDate: new Date().toISOString(),
+      }]
+    : [];
+
+  const displayData = portfolioData.length > 0 ? portfolioData : fallbackData;
 
   if (isLoading) {
     return (
@@ -33,7 +49,7 @@ export function PortfolioPerformance() {
     );
   }
 
-  if (portfolioData.length === 0) {
+  if (displayData.length === 0) {
     return (
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardContent className="py-10 text-center">
@@ -54,8 +70,8 @@ export function PortfolioPerformance() {
     );
   }
 
-  const currentValue = portfolioData[portfolioData.length - 1].value;
-  const startValue = portfolioData[0].value;
+  const currentValue = displayData[displayData.length - 1].value;
+  const startValue = displayData[0].value;
   const totalReturn = currentValue - startValue;
   const percentReturn = ((totalReturn / startValue) * 100).toFixed(2);
   const isPositive = totalReturn >= 0;
@@ -91,7 +107,7 @@ export function PortfolioPerformance() {
         {/* Chart */}
         <div className="h-[200px] w-full -mx-2">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={portfolioData}>
+            <AreaChart data={displayData}>
               <defs>
                 <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor={isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} stopOpacity={0.2} />

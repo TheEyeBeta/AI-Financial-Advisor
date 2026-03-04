@@ -61,7 +61,8 @@ export function TradeJournal() {
         ? data.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
         : [];
 
-      const symbol = data.symbol.toUpperCase();
+      const symbol = data.symbol.trim().toUpperCase();
+      const tradeDateIso = new Date(`${data.date}T12:00:00.000Z`).toISOString();
       let tradeId: string | null = null;
 
       // If BUY, create an open position
@@ -73,7 +74,7 @@ export function TradeJournal() {
           entry_price: data.price,
           current_price: data.price,
           type: 'LONG',
-          entry_date: new Date(data.date).toISOString(),
+          entry_date: tradeDateIso,
         });
 
         const trade = await tradesApi.create(userId, {
@@ -83,54 +84,66 @@ export function TradeJournal() {
           quantity: data.quantity,
           entry_price: data.price,
           exit_price: null,
-          entry_date: new Date(data.date).toISOString(),
+          entry_date: tradeDateIso,
           exit_date: null,
           pnl: null,
         });
         tradeId = trade.id;
       } 
       else if (data.type === 'SELL') {
-        const matchingPosition = openPositions.find(
-          pos => pos.symbol === symbol && pos.type === 'LONG'
-        );
+        const matchingPositions = openPositions
+          .filter((pos) => pos.symbol.toUpperCase() === symbol && pos.type === 'LONG')
+          .sort((a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime());
 
-        if (matchingPosition) {
-          const pnl = (data.price - matchingPosition.entry_price) * Math.min(data.quantity, matchingPosition.quantity);
-          
-          const trade = await tradesApi.create(userId, {
-            symbol,
-            type: 'LONG',
-            action: 'CLOSED',
-            quantity: Math.min(data.quantity, matchingPosition.quantity),
-            entry_price: matchingPosition.entry_price,
-            exit_price: data.price,
-            entry_date: matchingPosition.entry_date,
-            exit_date: new Date(data.date).toISOString(),
-            pnl,
-          });
-          tradeId = trade.id;
+        const totalAvailableQuantity = matchingPositions.reduce((sum, pos) => sum + pos.quantity, 0);
 
-          if (data.quantity >= matchingPosition.quantity) {
-            await positionsApi.delete(matchingPosition.id, userId);
+        if (matchingPositions.length === 0 || totalAvailableQuantity <= 0) {
+          throw new Error(`No open ${symbol} position available to sell.`);
+        }
+
+        if (data.quantity > totalAvailableQuantity) {
+          throw new Error(
+            `Cannot sell ${data.quantity} shares of ${symbol}. You only have ${totalAvailableQuantity} shares open.`
+          );
+        }
+
+        let remainingToSell = data.quantity;
+        let soldQuantity = 0;
+        let costBasisSold = 0;
+        const oldestEntryDate = matchingPositions[0].entry_date;
+
+        for (const position of matchingPositions) {
+          if (remainingToSell <= 0) break;
+
+          const quantityFromLot = Math.min(position.quantity, remainingToSell);
+          soldQuantity += quantityFromLot;
+          costBasisSold += quantityFromLot * position.entry_price;
+          remainingToSell -= quantityFromLot;
+
+          if (quantityFromLot === position.quantity) {
+            await positionsApi.delete(position.id, userId);
           } else {
-            await positionsApi.update(matchingPosition.id, userId, {
-              quantity: matchingPosition.quantity - data.quantity,
+            await positionsApi.update(position.id, userId, {
+              quantity: position.quantity - quantityFromLot,
             });
           }
-        } else {
-          const trade = await tradesApi.create(userId, {
-            symbol,
-            type: 'LONG',
-            action: 'CLOSED',
-            quantity: data.quantity,
-            entry_price: data.price,
-            exit_price: data.price,
-            entry_date: new Date(data.date).toISOString(),
-            exit_date: new Date(data.date).toISOString(),
-            pnl: 0,
-          });
-          tradeId = trade.id;
         }
+
+        const averageEntryPrice = soldQuantity > 0 ? costBasisSold / soldQuantity : data.price;
+        const pnl = (data.price - averageEntryPrice) * soldQuantity;
+
+        const trade = await tradesApi.create(userId, {
+          symbol,
+          type: 'LONG',
+          action: 'CLOSED',
+          quantity: soldQuantity,
+          entry_price: averageEntryPrice,
+          exit_price: data.price,
+          entry_date: oldestEntryDate,
+          exit_date: tradeDateIso,
+          pnl,
+        });
+        tradeId = trade.id;
       }
 
       await createEntry.mutateAsync({
@@ -358,7 +371,7 @@ export function TradeJournal() {
                         </span>
                         <span className="flex items-center gap-1">
                           <DollarSign className="h-3 w-3" />
-                          {entry.quantity} @ ${entry.price.toFixed(2)}
+                          {entry.quantity} shares @ ${entry.price.toFixed(2)}
                         </span>
                       </div>
                     </div>
