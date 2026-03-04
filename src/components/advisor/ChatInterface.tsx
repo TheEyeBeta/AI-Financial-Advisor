@@ -17,62 +17,84 @@ interface ChatInterfaceProps {
 
 // Format AI response with better readability
 function formatMessage(content: string): React.ReactNode {
-  // First, normalize line breaks - join numbered/bullet items that are separated by double newlines
-  const normalized = content
+  // Clean up common model artifacts
+  let cleaned = content
+    // Remove leading/trailing quotes that some models add
+    .replace(/^["']|["']$/g, '')
+    // Normalize excessive blank lines
+    .replace(/\n{3,}/g, '\n\n')
     // Join numbered list items separated by blank lines
     .replace(/(\d+\.\s[^\n]+)\n\n+(?=\d+\.\s)/g, '$1\n')
-    // Join bullet list items separated by blank lines  
+    // Join bullet list items separated by blank lines
     .replace(/([-•*]\s[^\n]+)\n\n+(?=[-•*]\s)/g, '$1\n');
 
   // Split content into paragraphs
-  const paragraphs = normalized.split(/\n\n+/);
-  
+  const paragraphs = cleaned.split(/\n\n+/);
+
   return paragraphs.map((para, pIndex) => {
+    const trimmed = para.trim();
+    if (!trimmed) return null;
+
     // Check if it's a numbered list
-    if (/^\d+\.\s/.test(para)) {
-      const items = para.split(/\n(?=\d+\.\s)/);
+    if (/^\d+\.\s/.test(trimmed)) {
+      const items = trimmed.split(/\n(?=\d+\.\s)/);
       return (
-        <ol key={pIndex} className="list-decimal list-outside space-y-2 my-3 ml-6">
+        <ol key={pIndex} className="list-decimal list-outside space-y-1.5 my-2.5 ml-6">
           {items.map((item, iIndex) => (
-            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90">
+            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90 pl-1">
               {formatInlineText(item.replace(/^\d+\.\s*/, ''))}
             </li>
           ))}
         </ol>
       );
     }
-    
+
     // Check if it's a bullet list
-    if (/^[-•*]\s/.test(para)) {
-      const items = para.split(/\n(?=[-•*]\s)/);
+    if (/^[-•*]\s/.test(trimmed)) {
+      const items = trimmed.split(/\n(?=[-•*]\s)/);
       return (
-        <ul key={pIndex} className="list-disc list-outside space-y-2 my-3 ml-6">
+        <ul key={pIndex} className="list-disc list-outside space-y-1.5 my-2.5 ml-6">
           {items.map((item, iIndex) => (
-            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90">
+            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90 pl-1">
               {formatInlineText(item.replace(/^[-•*]\s*/, ''))}
             </li>
           ))}
         </ul>
       );
     }
-    
+
+    // Check for disclaimer line - style it distinctly
+    if (trimmed === 'Test mode only. Not financial advice.') {
+      return (
+        <p key={pIndex} className="text-xs text-muted-foreground/70 italic mt-3 pt-2 border-t border-border/30">
+          {trimmed}
+        </p>
+      );
+    }
+
     // Regular paragraph
     return (
-      <p key={pIndex} className="text-sm leading-relaxed my-3 first:mt-0 last:mb-0 text-foreground/90">
-        {formatInlineText(para)}
+      <p key={pIndex} className="text-sm leading-relaxed my-2 first:mt-0 last:mb-0 text-foreground/90">
+        {formatInlineText(trimmed)}
       </p>
     );
   });
 }
 
-// Format inline text (bold, italic, etc.)
+// Format inline text (bold, italic, links, etc.)
 function formatInlineText(text: string): React.ReactNode {
-  // Handle **bold** text
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  
+  // Split on bold (**text**), italic (*text*), and inline code (`text`)
+  const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
+
   return parts.map((part, index) => {
     if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index} className="font-semibold">{part.slice(2, -2)}</strong>;
+      return <strong key={index} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('*') && part.endsWith('*') && !part.startsWith('**')) {
+      return <em key={index} className="italic">{part.slice(1, -1)}</em>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={index} className="text-xs bg-muted/80 px-1.5 py-0.5 rounded font-mono">{part.slice(1, -1)}</code>;
     }
     return part;
   });

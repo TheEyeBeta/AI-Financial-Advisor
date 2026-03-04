@@ -21,8 +21,8 @@ import type {
 const MAX_MESSAGE_LENGTH = 10000;
 const MAX_TITLE_LENGTH = 200;
 const MAX_CHAT_HISTORY_MESSAGES = 30;
-const OPENAI_MAX_TOKENS = 700;
-const OPENAI_CHAT_TEMPERATURE = 0.55;
+const OPENAI_MAX_TOKENS = 2000;
+const OPENAI_CHAT_TEMPERATURE = 0.7;
 
 // Web Search Intent Detection
 // NOTE: Web search is ONLY for news and general knowledge
@@ -1508,27 +1508,28 @@ function getSystemPrompt(experienceLevel: ExperienceLevel, hasEyeData: boolean =
   const level = experienceLevel ?? 'intermediate';
   
   const baseRules = `
-RESPONSE FORMAT (STRICT):
-1. Be BRIEF. Give short, direct answers. Only elaborate when the topic genuinely requires depth.
-2. DO NOT use markdown headers (no #, ##, ###). Write in plain paragraphs.
-3. DO NOT overuse bullet points. Use them sparingly for actual lists only.
-4. Write conversationally, like a knowledgeable friend. Not like a textbook.
-5. If a simple answer works, give a simple answer. Don't pad responses.
+RESPONSE STYLE:
+- Write in clear, natural language. Sound like a knowledgeable friend, not a textbook.
+- Be concise. Give direct answers. Only elaborate when the topic genuinely needs depth.
+- Use short paragraphs separated by blank lines for readability.
+- Use **bold** to highlight key numbers, tickers, or important terms.
+- Use numbered lists (1. 2. 3.) only for sequential steps or ranked items.
+- Use bullet points sparingly, only for actual lists of comparable items.
+- Do NOT use markdown headers (#, ##, ###). Write in flowing paragraphs.
+- Do NOT wrap your response in JSON or code blocks. Just write naturally.
 
 TOPIC RULES:
-6. ONLY discuss finance, investing, trading, economics, personal finance, and money management.
-7. Exception: you may answer real-world price/cost questions about objects users may want to purchase (for example, "how much is a boat").
-8. If asked unrelated non-finance topics (that are not object price/cost lookups), politely decline and redirect to finance.
-9. You MAY provide specific, actionable financial views (including buy/sell/hold opinions) when asked.
-10. When giving actionable financial advice, include this exact one-line disclaimer once: "Test mode only. Not financial advice."
-11. Think through the reasoning carefully and give concrete, defensible conclusions.
+- ONLY discuss finance, investing, trading, economics, personal finance, and money management.
+- Exception: you may answer real-world price/cost questions (e.g. "how much is a boat").
+- For unrelated topics, politely decline and redirect to finance.
+- You MAY provide specific, actionable financial views (buy/sell/hold opinions) when asked.
+- When giving actionable advice, include this exact one-line disclaimer once: "Test mode only. Not financial advice."
+- Think carefully and give concrete, defensible conclusions.
 
-WEB SEARCH (for NEWS, GENERAL KNOWLEDGE, and OBJECT PRICE LOOKUPS):
-12. You can browse the internet for finance news/general knowledge and object price lookups when needed.
-13. When web search results are provided, use them to answer questions about news, events, or general info.
-14. Cite sources from web search when providing information from the internet.
-15. IMPORTANT: Stock prices, indicators, and signals come from THE EYE DATABASE - NOT from web search.
-16. Use web search for: "Why is X dropping?", "Latest Fed news", "What happened to Y?", "price of a boat"
+WEB SEARCH (for NEWS and GENERAL KNOWLEDGE):
+- When web search results are provided, use them to answer questions about news, events, or general info.
+- Cite sources when using web search information.
+- IMPORTANT: Stock prices, indicators, and signals come from THE EYE DATABASE, not web search.
 `;
 
   // Add The Eye rules based on whether data is available
@@ -2390,37 +2391,42 @@ export const pythonApi = {
 
   // Generate a short title for a chat based on the first user message
   async generateChatTitle(firstMessage: string): Promise<string> {
-    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
+    const fallbackTitle = (msg: string) => {
+      const clean = msg.trim();
+      if (clean.length <= 40) return clean;
+      // Cut at last word boundary within 40 chars
+      const truncated = clean.substring(0, 40);
+      const lastSpace = truncated.lastIndexOf(' ');
+      return (lastSpace > 15 ? truncated.substring(0, lastSpace) : truncated) + '...';
+    };
 
+    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
     if (!pythonBackendUrl) {
-      return firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
+      return fallbackTitle(firstMessage);
     }
 
     try {
       const response = await fetch(`${pythonBackendUrl}/api/chat/title`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          first_message: firstMessage,
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ first_message: firstMessage }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || 'Failed to generate title');
+        // Don't throw - just use fallback title silently
+        console.warn('Chat title API returned', response.status, '- using fallback');
+        return fallbackTitle(firstMessage);
       }
 
       const data = await response.json();
       const title = data.title?.trim();
       if (!title || typeof title !== 'string') {
-        return firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
+        return fallbackTitle(firstMessage);
       }
       return title;
     } catch (error) {
-      console.error('Error generating chat title:', error);
-      return firstMessage.length > 30 ? firstMessage.substring(0, 30) + '...' : firstMessage;
+      console.warn('Chat title generation failed, using fallback:', error);
+      return fallbackTitle(firstMessage);
     }
   },
 
