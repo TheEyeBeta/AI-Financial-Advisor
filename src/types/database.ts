@@ -217,6 +217,82 @@ export interface Database {
           updated_at?: string;
         };
       };
+      paper_trades: {
+        Row: {
+          id: string;
+          user_id: string;
+          symbol: string;
+          buy_time: string;
+          buy_quantity: number;
+          buy_price: number;
+          status: 'OPEN' | 'CLOSED';
+          tags: string[] | null;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          symbol: string;
+          buy_time?: string;
+          buy_quantity: number;
+          buy_price: number;
+          status?: 'OPEN' | 'CLOSED';
+          tags?: string[] | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          symbol?: string;
+          buy_time?: string;
+          buy_quantity?: number;
+          buy_price?: number;
+          status?: 'OPEN' | 'CLOSED';
+          tags?: string[] | null;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      paper_trade_closes: {
+        Row: {
+          id: string;
+          user_id: string;
+          buy_trade_id: string;
+          close_time: string;
+          close_quantity: number;
+          close_price: number;
+          reason: string | null;
+          tags: string[] | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          buy_trade_id: string;
+          close_time?: string;
+          close_quantity: number;
+          close_price: number;
+          reason?: string | null;
+          tags?: string[] | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          buy_trade_id?: string;
+          close_time?: string;
+          close_quantity?: number;
+          close_price?: number;
+          reason?: string | null;
+          tags?: string[] | null;
+          created_at?: string;
+        };
+      };
       chats: {
         Row: {
           id: string;
@@ -699,6 +775,8 @@ export type PortfolioHistory = Database['public']['Tables']['portfolio_history']
 export type OpenPosition = Database['public']['Tables']['open_positions']['Row'];
 export type Trade = Database['public']['Tables']['trades']['Row'];
 export type TradeJournalEntry = Database['public']['Tables']['trade_journal']['Row'];
+export type PaperTrade = Database['public']['Tables']['paper_trades']['Row'];
+export type PaperTradeClose = Database['public']['Tables']['paper_trade_closes']['Row'];
 export type Chat = Database['public']['Tables']['chats']['Row'];
 export type ChatMessage = Database['public']['Tables']['chat_messages']['Row'];
 export type LearningTopic = Database['public']['Tables']['learning_topics']['Row'];

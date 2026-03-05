@@ -28,18 +28,18 @@ export function TradeHistory() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs text-muted-foreground/70">
             {trades.length} closed trades · {winningTrades} wins · {trades.length - winningTrades} losses
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1.5">
+        <div className="flex w-full gap-2 sm:w-auto">
+          <Button variant="ghost" size="sm" className="h-8 flex-1 text-xs gap-1.5 sm:flex-none">
             <Filter className="h-3 w-3" />
             Filter
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 text-xs gap-1.5">
+          <Button variant="ghost" size="sm" className="h-8 flex-1 text-xs gap-1.5 sm:flex-none">
             <Download className="h-3 w-3" />
             Export
           </Button>
@@ -64,11 +64,15 @@ export function TradeHistory() {
                 const duration = exitDate
                   ? Math.ceil((exitDate.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24))
                   : 0;
+                const realizedPercent =
+                  trade.entry_price > 0 && trade.quantity > 0
+                    ? (((trade.pnl || 0) / (trade.entry_price * trade.quantity)) * 100)
+                    : 0;
 
                 return (
                   <div 
                     key={trade.id} 
-                    className="flex items-center justify-between p-4 hover:bg-muted/30 transition-colors animate-in fade-in"
+                    className="flex flex-col gap-3 p-4 hover:bg-muted/30 transition-colors animate-in fade-in sm:flex-row sm:items-center sm:justify-between"
                     style={{ animationDelay: `${index * 30}ms` }}
                   >
                     <div className="flex items-center gap-3">
@@ -83,7 +87,7 @@ export function TradeHistory() {
                         )}
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-medium text-sm">{trade.symbol}</span>
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4">
                             {trade.type}
@@ -95,7 +99,7 @@ export function TradeHistory() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center gap-4">
+                    <div className="flex w-full items-center justify-between gap-3 sm:w-auto sm:justify-end sm:gap-4">
                       <div className="text-right hidden sm:block">
                         <div className="text-xs text-muted-foreground/70">
                           {format(entryDate, "MMM d")} → {exitDate ? format(exitDate, "MMM d") : 'N/A'}
@@ -108,6 +112,9 @@ export function TradeHistory() {
                       <div className="text-right min-w-[70px]">
                         <div className={cn("text-sm font-mono font-medium", isProfit ? "text-profit" : "text-loss")}>
                           {isProfit ? "+" : ""}${(trade.pnl || 0).toFixed(2)}
+                        </div>
+                        <div className={cn("text-[10px]", isProfit ? "text-profit/70" : "text-loss/70")}>
+                          {realizedPercent >= 0 ? "+" : ""}{realizedPercent.toFixed(2)}%
                         </div>
                       </div>
                     </div>
@@ -122,7 +129,7 @@ export function TradeHistory() {
       {/* Total P&L */}
       {trades.length > 0 && (
         <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
-          <CardContent className="flex items-center justify-between py-3 px-4">
+          <CardContent className="flex flex-col items-start gap-1 py-3 px-4 sm:flex-row sm:items-center sm:justify-between">
             <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Total Realized P&L</span>
             <span className={cn("text-lg font-bold", totalPnL >= 0 ? "text-profit" : "text-loss")}>
               {totalPnL >= 0 ? "+" : ""}${totalPnL.toFixed(2)}

@@ -4,6 +4,8 @@ import type {
   OpenPosition,
   Trade,
   TradeJournalEntry,
+  PaperTrade,
+  PaperTradeClose,
   Chat,
   ChatMessage,
   ChatWithMessages,
@@ -264,103 +266,326 @@ export const portfolioApi = {
   },
 };
 
-// Open Positions API
-export const positionsApi = {
-  async getAll(userId: string): Promise<OpenPosition[]> {
+interface PaperTradeWithQuantities {
+  trade: PaperTrade;
+  closedQuantity: number;
+  openQuantity: number;
+  latestPrice: number | null;
+}
+
+interface PaperTradeCloseWithTrade {
+  close: PaperTradeClose;
+  trade: PaperTrade;
+}
+
+interface ClosePaperTradeInput {
+  close_time: string;
+  close_quantity: number;
+  close_price: number;
+  reason?: string | null;
+  tags?: string[] | null;
+}
+
+interface LogBuyTradeInput {
+  symbol: string;
+  buy_time: string;
+  buy_quantity: number;
+  buy_price: number;
+  tags?: string[] | null;
+  notes?: string | null;
+}
+
+async function getLatestPriceBySymbol(symbols: string[]): Promise<Map<string, number | null>> {
+  const normalizedSymbols = [...new Set(
+    symbols
+      .map((symbol) => symbol.trim().toUpperCase())
+      .filter((symbol) => symbol.length > 0)
+  )];
+  const priceBySymbol = new Map<string, number | null>();
+
+  if (normalizedSymbols.length === 0) {
+    return priceBySymbol;
+  }
+
+  // Fetch the latest snapshot per symbol explicitly so unrealized P&L
+  // is always based on the newest available price in the database.
+  await Promise.all(
+    normalizedSymbols.map(async (symbol) => {
+      const { data, error } = await supabase
+        .from('stock_snapshots')
+        .select('last_price')
+        .ilike('ticker', symbol)
+        .order('updated_at', { ascending: false, nullsFirst: false })
+        .order('last_price_ts', { ascending: false, nullsFirst: false })
+        .order('synced_at', { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) {
+        priceBySymbol.set(symbol, null);
+        return;
+      }
+
+      priceBySymbol.set(symbol, data?.last_price ?? null);
+    })
+  );
+
+  return priceBySymbol;
+}
+
+const paperTradingApi = {
+  async logBuyTrade(userId: string, input: LogBuyTradeInput): Promise<PaperTrade> {
     const { data, error } = await supabase
-      .from('open_positions')
+      .from('paper_trades')
+      .insert({
+        user_id: userId,
+        symbol: input.symbol.toUpperCase(),
+        buy_time: input.buy_time,
+        buy_quantity: input.buy_quantity,
+        buy_price: input.buy_price, // Must remain exactly as user entered
+        status: 'OPEN',
+        tags: input.tags ?? null,
+        notes: input.notes ?? null,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data;
+  },
+
+  async getLots(userId: string): Promise<PaperTradeWithQuantities[]> {
+    const { data: trades, error: tradeError } = await supabase
+      .from('paper_trades')
       .select('*')
       .eq('user_id', userId)
-      .order('entry_date', { ascending: false });
-    
-    if (error) throw error;
-    return data || [];
-  },
+      .order('buy_time', { ascending: false });
 
-  async create(userId: string, position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<OpenPosition> {
-    const { data, error } = await supabase
-      .from('open_positions')
-      .insert({ ...position, user_id: userId })
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  async update(id: string, userId: string, updates: Partial<OpenPosition>): Promise<OpenPosition> {
-    // First verify ownership
-    const { data: position, error: fetchError } = await supabase
-      .from('open_positions')
-      .select('user_id')
-      .eq('id', id)
-      .eq('user_id', userId)
-      .single();
-    
-    if (fetchError || !position) {
-      throw new Error('Position not found or access denied');
+    if (tradeError) throw tradeError;
+    const buyTrades = trades || [];
+    if (buyTrades.length === 0) {
+      return [];
     }
-    
-    // Update with user_id check for defense-in-depth
-    const { data, error } = await supabase
-      .from('open_positions')
-      .update(updates)
-      .eq('id', id)
+
+    const buyTradeIds = buyTrades.map((trade) => trade.id);
+    const { data: closes, error: closeError } = await supabase
+      .from('paper_trade_closes')
+      .select('buy_trade_id,close_quantity')
       .eq('user_id', userId)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+      .in('buy_trade_id', buyTradeIds);
+
+    if (closeError) throw closeError;
+
+    const closedByTradeId = new Map<string, number>();
+    (closes || []).forEach((close) => {
+      const current = closedByTradeId.get(close.buy_trade_id) || 0;
+      closedByTradeId.set(close.buy_trade_id, current + close.close_quantity);
+    });
+
+    const latestPriceByTicker = await getLatestPriceBySymbol(buyTrades.map((trade) => trade.symbol));
+
+    return buyTrades.map((trade) => {
+      const closedQuantity = closedByTradeId.get(trade.id) || 0;
+      const openQuantity = Math.max(trade.buy_quantity - closedQuantity, 0);
+      const latestPrice = latestPriceByTicker.get(trade.symbol.toUpperCase()) ?? null;
+
+      return {
+        trade,
+        closedQuantity,
+        openQuantity,
+        latestPrice,
+      };
+    });
   },
 
-  async delete(id: string, userId: string): Promise<void> {
-    // First verify ownership
-    const { data: position, error: fetchError } = await supabase
-      .from('open_positions')
-      .select('user_id')
-      .eq('id', id)
+  async getOpenLots(userId: string): Promise<PaperTradeWithQuantities[]> {
+    const lots = await this.getLots(userId);
+    return lots.filter((lot) => lot.openQuantity > 0);
+  },
+
+  async closeTrade(userId: string, buyTradeId: string, input: ClosePaperTradeInput): Promise<PaperTradeClose> {
+    if (input.close_quantity <= 0) {
+      throw new Error('Close quantity must be greater than 0.');
+    }
+    if (input.close_price <= 0) {
+      throw new Error('Close price must be greater than 0.');
+    }
+
+    const { data: trade, error: tradeError } = await supabase
+      .from('paper_trades')
+      .select('*')
+      .eq('id', buyTradeId)
       .eq('user_id', userId)
       .single();
-    
-    if (fetchError || !position) {
-      throw new Error('Position not found or access denied');
+
+    if (tradeError || !trade) {
+      throw new Error('Buy trade not found or access denied.');
     }
-    
-    // Delete with user_id check for defense-in-depth
-    const { error } = await supabase
-      .from('open_positions')
-      .delete()
-      .eq('id', id)
+
+    const { data: closeRows, error: closeFetchError } = await supabase
+      .from('paper_trade_closes')
+      .select('close_quantity')
+      .eq('buy_trade_id', buyTradeId)
       .eq('user_id', userId);
-    
-    if (error) throw error;
+
+    if (closeFetchError) {
+      throw closeFetchError;
+    }
+
+    const alreadyClosed = (closeRows || []).reduce((sum, row) => sum + row.close_quantity, 0);
+    const openQuantity = trade.buy_quantity - alreadyClosed;
+
+    if (openQuantity <= 0) {
+      throw new Error('This trade is already fully closed.');
+    }
+
+    if (input.close_quantity > openQuantity) {
+      throw new Error(`Cannot close ${input.close_quantity} shares. Open quantity is ${openQuantity}.`);
+    }
+
+    const { data: insertedClose, error: insertError } = await supabase
+      .from('paper_trade_closes')
+      .insert({
+        user_id: userId,
+        buy_trade_id: buyTradeId,
+        close_time: input.close_time,
+        close_quantity: input.close_quantity,
+        close_price: input.close_price,
+        reason: input.reason ?? null,
+        tags: input.tags ?? null,
+      })
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    return insertedClose;
+  },
+
+  async getCloseEvents(userId: string): Promise<PaperTradeCloseWithTrade[]> {
+    const { data: closes, error: closeError } = await supabase
+      .from('paper_trade_closes')
+      .select('*')
+      .eq('user_id', userId)
+      .order('close_time', { ascending: false });
+
+    if (closeError) throw closeError;
+    const closeEvents = closes || [];
+    if (closeEvents.length === 0) {
+      return [];
+    }
+
+    const buyTradeIds = [...new Set(closeEvents.map((close) => close.buy_trade_id))];
+    const { data: buyTrades, error: tradeError } = await supabase
+      .from('paper_trades')
+      .select('*')
+      .eq('user_id', userId)
+      .in('id', buyTradeIds);
+
+    if (tradeError) throw tradeError;
+
+    const tradeById = new Map((buyTrades || []).map((trade) => [trade.id, trade]));
+
+    return closeEvents
+      .map((close) => {
+        const trade = tradeById.get(close.buy_trade_id);
+        if (!trade) return null;
+        return { close, trade };
+      })
+      .filter((event): event is PaperTradeCloseWithTrade => event !== null);
   },
 };
 
-// Trades API
+function mapLotToOpenPosition(lot: PaperTradeWithQuantities): OpenPosition {
+  return {
+    id: lot.trade.id,
+    user_id: lot.trade.user_id,
+    symbol: lot.trade.symbol,
+    name: null,
+    quantity: lot.openQuantity,
+    entry_price: lot.trade.buy_price,
+    current_price: lot.latestPrice,
+    type: 'LONG',
+    entry_date: lot.trade.buy_time,
+    updated_at: lot.trade.updated_at,
+    created_at: lot.trade.created_at,
+  };
+}
+
+function mapCloseToTrade(event: PaperTradeCloseWithTrade): Trade {
+  const pnl = (event.close.close_price - event.trade.buy_price) * event.close.close_quantity;
+  return {
+    id: event.close.id,
+    user_id: event.close.user_id,
+    symbol: event.trade.symbol,
+    type: 'LONG',
+    action: 'CLOSED',
+    quantity: event.close.close_quantity,
+    entry_price: event.trade.buy_price,
+    exit_price: event.close.close_price,
+    entry_date: event.trade.buy_time,
+    exit_date: event.close.close_time,
+    pnl,
+    created_at: event.close.created_at,
+    updated_at: event.close.created_at,
+  };
+}
+
+// Open Positions API (paper trading lots)
+export const positionsApi = {
+  async getAll(userId: string): Promise<OpenPosition[]> {
+    const openLots = await paperTradingApi.getOpenLots(userId);
+    return openLots.map(mapLotToOpenPosition);
+  },
+
+  async create(
+    userId: string,
+    position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
+      tags?: string[] | null;
+      notes?: string | null;
+    }
+  ): Promise<OpenPosition> {
+    const created = await paperTradingApi.logBuyTrade(userId, {
+      symbol: position.symbol,
+      buy_time: position.entry_date,
+      buy_quantity: position.quantity,
+      buy_price: position.entry_price,
+      tags: position.tags ?? null,
+      notes: position.notes ?? position.name ?? null,
+    });
+
+    const latestPrice = await getLatestPriceBySymbol([created.symbol]);
+    return mapLotToOpenPosition({
+      trade: created,
+      closedQuantity: 0,
+      openQuantity: created.buy_quantity,
+      latestPrice: latestPrice.get(created.symbol.toUpperCase()) ?? null,
+    });
+  },
+
+  async closeTrade(id: string, userId: string, input: ClosePaperTradeInput): Promise<void> {
+    await paperTradingApi.closeTrade(userId, id, input);
+  },
+
+  async update(_id: string, _userId: string, _updates: Partial<OpenPosition>): Promise<OpenPosition> {
+    throw new Error('Paper-trade BUY lots are immutable. Use Close Trade to reduce quantity.');
+  },
+
+  async delete(_id: string, _userId: string): Promise<void> {
+    throw new Error('Deleting positions is not supported. Use Close Trade.');
+  },
+};
+
+// Trades API (realized close events)
 export const tradesApi = {
   async getAll(userId: string): Promise<Trade[]> {
-    const { data, error } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('user_id', userId)
-      .order('exit_date', { ascending: false, nullsFirst: false });
-    
-    if (error) throw error;
-    return data || [];
+    const closeEvents = await paperTradingApi.getCloseEvents(userId);
+    return closeEvents.map(mapCloseToTrade);
   },
 
   async getClosed(userId: string): Promise<Trade[]> {
-    const { data, error } = await supabase
-      .from('trades')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('action', 'CLOSED')
-      .order('exit_date', { ascending: false });
-    
-    if (error) throw error;
-    return data || [];
+    const closeEvents = await paperTradingApi.getCloseEvents(userId);
+    return closeEvents.map(mapCloseToTrade);
   },
 
   async create(userId: string, trade: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<Trade> {
@@ -369,7 +594,7 @@ export const tradesApi = {
       .insert({ ...trade, user_id: userId })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -378,21 +603,17 @@ export const tradesApi = {
     const trades = await this.getClosed(userId);
     const winningTrades = trades.filter(t => (t.pnl || 0) > 0);
     const losingTrades = trades.filter(t => (t.pnl || 0) <= 0);
-    
+
     const avgProfit = winningTrades.length > 0
       ? winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0) / winningTrades.length
       : 0;
-    
+
     const avgLoss = losingTrades.length > 0
       ? losingTrades.reduce((sum, t) => sum + Math.abs(t.pnl || 0), 0) / losingTrades.length
       : 0;
-    
-    // Calculate profit factor: ratio of average profit to average loss
-    // Edge case: If all trades are winners (avgLoss = 0), profit factor is undefined
-    // In this case, we return 0 to indicate we can't calculate a meaningful ratio
-    // This represents a perfect trading record with no losses
+
     const profitFactor = avgLoss > 0 ? Math.abs(avgProfit) / avgLoss : 0;
-    
+
     return {
       winRate: trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0,
       avgProfit,
@@ -1171,6 +1392,13 @@ const stockCache = {
   },
 };
 
+export interface StockSnapshotLatestPrice {
+  ticker: string;
+  last_price: number | null;
+  price_change_pct: number | null;
+  updated_at: string | null;
+}
+
 // Stock Snapshots API - Read financial data from database (with caching)
 export const stockSnapshotsApi = {
   // Initialize cache by pre-loading first 60 stocks
@@ -1260,6 +1488,49 @@ export const stockSnapshotsApi = {
       stockCache.setTicker(ticker, data);
     }
     return data;
+  },
+
+  // Get latest price payload for a ticker, optionally bypassing cache.
+  async getLatestPrice(
+    ticker: string,
+    options?: { bypassCache?: boolean }
+  ): Promise<StockSnapshotLatestPrice | null> {
+    const normalizedTicker = ticker.toUpperCase();
+
+    if (!options?.bypassCache) {
+      const cached = stockCache.getTicker(normalizedTicker);
+      if (cached) {
+        return {
+          ticker: cached.ticker,
+          last_price: cached.last_price,
+          price_change_pct: cached.price_change_pct,
+          updated_at: cached.updated_at,
+        };
+      }
+    }
+
+    const { data, error } = await supabase
+      .from('stock_snapshots')
+      .select('ticker,last_price,price_change_pct,updated_at')
+      .eq('ticker', normalizedTicker)
+      .order('updated_at', { ascending: false, nullsFirst: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (!data) {
+      return null;
+    }
+
+    return {
+      ticker: data.ticker,
+      last_price: data.last_price,
+      price_change_pct: data.price_change_pct,
+      updated_at: data.updated_at,
+    };
   },
 
   // Get stock snapshot by company name (with caching)

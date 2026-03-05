@@ -5,33 +5,62 @@ import { useOpenPositions, usePortfolioHistory } from "@/hooks/use-data";
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { useMemo } from "react";
 
 export function PortfolioPerformance() {
   const { data: portfolioHistory = [], isLoading } = usePortfolioHistory();
   const { data: openPositions = [] } = useOpenPositions();
   const navigate = useNavigate();
+  const hasMissingLatestPrice = openPositions.some((position) => position.current_price === null);
 
-  // Transform data for chart (group by month and format)
-  const portfolioData = portfolioHistory.map((entry) => ({
-    date: format(parseISO(entry.date), "MMM dd"),
-    value: entry.value,
-    fullDate: entry.date,
-  })).sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime());
+  const livePortfolioValue = useMemo<number | null>(() => {
+    if (hasMissingLatestPrice && openPositions.length > 0) {
+      return null;
+    }
 
-  const openPositionsValue = openPositions.reduce(
-    (sum, position) => sum + ((position.current_price || position.entry_price) * position.quantity),
-    0
-  );
+    return openPositions.reduce(
+      (sum, position) => sum + ((position.current_price as number) * position.quantity),
+      0
+    );
+  }, [openPositions, hasMissingLatestPrice]);
 
-  const fallbackData = openPositionsValue > 0
-    ? [{
+  const liveCostBasis = useMemo(() => {
+    return openPositions.reduce(
+      (sum, position) => sum + (position.entry_price * position.quantity),
+      0
+    );
+  }, [openPositions]);
+
+  const portfolioData = useMemo(() => {
+    return portfolioHistory
+      .map((entry) => ({
+        date: format(parseISO(entry.date), "MMM dd"),
+        value: entry.value,
+        fullDate: entry.date,
+      }))
+      .sort((a, b) => new Date(a.fullDate).getTime() - new Date(b.fullDate).getTime());
+  }, [portfolioHistory]);
+
+  const displayData = useMemo(() => {
+    if (portfolioData.length === 0) {
+      return (livePortfolioValue ?? 0) > 0
+        ? [{ date: "Now", value: livePortfolioValue, fullDate: new Date().toISOString() }]
+        : [];
+    }
+
+    if (livePortfolioValue === null || livePortfolioValue <= 0) {
+      return portfolioData;
+    }
+
+    return [
+      ...portfolioData,
+      {
         date: "Now",
-        value: openPositionsValue,
+        value: livePortfolioValue,
         fullDate: new Date().toISOString(),
-      }]
-    : [];
-
-  const displayData = portfolioData.length > 0 ? portfolioData : fallbackData;
+      },
+    ];
+  }, [portfolioData, livePortfolioValue]);
 
   if (isLoading) {
     return (
@@ -70,10 +99,14 @@ export function PortfolioPerformance() {
     );
   }
 
-  const currentValue = displayData[displayData.length - 1].value;
-  const startValue = displayData[0].value;
+  const currentValue = livePortfolioValue !== null && livePortfolioValue > 0
+    ? livePortfolioValue
+    : displayData[displayData.length - 1].value;
+  const startValue = portfolioData.length > 0
+    ? portfolioData[0].value
+    : (liveCostBasis > 0 ? liveCostBasis : currentValue);
   const totalReturn = currentValue - startValue;
-  const percentReturn = ((totalReturn / startValue) * 100).toFixed(2);
+  const percentReturn = startValue > 0 ? ((totalReturn / startValue) * 100).toFixed(2) : "0.00";
   const isPositive = totalReturn >= 0;
 
   return (
@@ -83,10 +116,16 @@ export function PortfolioPerformance() {
         <div className="flex items-start justify-between mb-4">
           <div>
             <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-1">Portfolio Performance</p>
-            <span className="text-3xl font-bold tracking-tight">${currentValue.toLocaleString()}</span>
+            <span className="text-3xl font-bold tracking-tight">
+              {livePortfolioValue === null && openPositions.length > 0
+                ? "N/A"
+                : `$${currentValue.toLocaleString()}`}
+            </span>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-muted-foreground/60">
-                {totalReturn >= 0 ? "+" : ""}${totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2 })} all time
+                {livePortfolioValue === null && openPositions.length > 0
+                  ? "Missing latest price for one or more open trades"
+                  : `${totalReturn >= 0 ? "+" : ""}$${totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2 })} all time`}
               </span>
             </div>
           </div>
@@ -100,7 +139,11 @@ export function PortfolioPerformance() {
             ) : (
               <TrendingDown className="h-3.5 w-3.5" />
             )}
-            <span>{isPositive ? "+" : ""}{percentReturn}%</span>
+            <span>
+              {livePortfolioValue === null && openPositions.length > 0
+                ? "N/A"
+                : `${isPositive ? "+" : ""}${percentReturn}%`}
+            </span>
           </div>
         </div>
 

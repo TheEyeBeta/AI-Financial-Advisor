@@ -14,9 +14,7 @@ import {
 } from "recharts";
 import { usePortfolioHistory, useClosedTrades, useOpenPositions } from "@/hooks/use-data";
 import { format, parseISO, startOfWeek } from "date-fns";
-import { useMemo, useEffect, useState } from "react";
-import { pythonApi } from "@/services/api";
-import type { OpenPosition } from "@/types/database";
+import { useMemo } from "react";
 import { TrendingUp, TrendingDown, Activity, PieChart as PieChartIcon, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,74 +22,49 @@ export function PerformanceCharts() {
   const { data: portfolioHistory = [], isLoading: portfolioLoading } = usePortfolioHistory();
   const { data: trades = [], isLoading: tradesLoading } = useClosedTrades();
   const { data: positions = [], isLoading: positionsLoading } = useOpenPositions();
-  const [livePositions, setLivePositions] = useState<OpenPosition[]>([]);
-  const [currentPortfolioValue, setCurrentPortfolioValue] = useState<number | null>(null);
+  const hasMissingLatestPrice = positions.some((pos) => pos.current_price === null);
 
-  // Fetch live prices for open positions
-  useEffect(() => {
-    const updateLivePrices = async () => {
-      if (positions.length === 0) {
-        setLivePositions([]);
-        return;
-      }
-      
-      try {
-        const updated = await Promise.all(
-          positions.map(async (pos) => {
-            try {
-              const currentPrice = await pythonApi.getStockPrice(pos.symbol);
-              return { ...pos, current_price: currentPrice };
-            } catch {
-              return pos;
-            }
-          })
-        );
-        
-        setLivePositions(updated);
-        
-        const totalMarketValue = updated.reduce((sum, pos) => {
-          const currentPrice = pos.current_price || pos.entry_price;
-          return sum + (currentPrice * pos.quantity);
-        }, 0);
-        
-        setCurrentPortfolioValue(totalMarketValue);
-      } catch (error) {
-        console.error('Error updating live prices:', error);
-      }
-    };
+  const currentPortfolioValue = useMemo<number | null>(() => {
+    if (hasMissingLatestPrice && positions.length > 0) {
+      return null;
+    }
 
-    updateLivePrices();
-    const interval = setInterval(updateLivePrices, 30000);
-    return () => clearInterval(interval);
+    return positions.reduce((sum, pos) => {
+      return sum + ((pos.current_price as number) * pos.quantity);
+    }, 0);
+  }, [positions, hasMissingLatestPrice]);
+
+  const totalCostBasis = useMemo(() => {
+    return positions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
   }, [positions]);
 
   // Calculate equity curve
   const equityData = useMemo(() => {
     const data: Array<{ date: string; value: number; fullDate: string; isLive?: boolean }> = [];
-    
+
     if (portfolioHistory.length > 0) {
-      const sorted = [...portfolioHistory].sort((a, b) => 
+      const sorted = [...portfolioHistory].sort((a, b) =>
         new Date(a.date).getTime() - new Date(b.date).getTime()
       );
-      
+
       const weeklyData: Record<string, number> = {};
       sorted.forEach(entry => {
         const date = parseISO(entry.date);
         const weekStart = format(startOfWeek(date), 'MMM d');
         weeklyData[weekStart] = entry.value;
       });
-      
+
       Object.entries(weeklyData).forEach(([date, value], index) => {
         data.push({ date: `W${index + 1}`, value, fullDate: date });
       });
     }
-    
-    if (currentPortfolioValue !== null) {
+
+    if (positions.length > 0 && currentPortfolioValue !== null) {
       data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
     }
-    
+
     return data;
-  }, [portfolioHistory, currentPortfolioValue]);
+  }, [portfolioHistory, currentPortfolioValue, positions.length]);
 
   // Calculate win/loss distribution
   const winLossData = useMemo(() => {
@@ -106,9 +79,9 @@ export function PerformanceCharts() {
   // Calculate monthly performance
   const monthlyData = useMemo(() => {
     if (trades.length === 0) return [];
-    
+
     const monthly: Record<string, { profit: number; loss: number }> = {};
-    
+
     trades.forEach(trade => {
       if (!trade.exit_date || !trade.pnl) return;
       const month = format(parseISO(trade.exit_date), 'MMM');
@@ -116,7 +89,7 @@ export function PerformanceCharts() {
       if (trade.pnl > 0) monthly[month].profit += trade.pnl;
       else monthly[month].loss += trade.pnl;
     });
-    
+
     return Object.entries(monthly).map(([month, data]) => ({
       month, profit: data.profit, loss: data.loss,
     })).slice(-6);
@@ -124,19 +97,31 @@ export function PerformanceCharts() {
 
   // Calculate portfolio stats
   const portfolioStats = useMemo(() => {
-    const currentValue = currentPortfolioValue ?? 0;
-    const totalCostBasis = livePositions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
-    const unrealizedPnL = livePositions.reduce((sum, pos) => {
-      const currentPrice = pos.current_price || pos.entry_price;
-      return sum + ((currentPrice - pos.entry_price) * pos.quantity);
-    }, 0);
+    const currentValue = currentPortfolioValue;
+    const unrealizedPnL = currentPortfolioValue === null && positions.length > 0
+      ? null
+      : positions.reduce((sum, pos) => {
+          const currentPrice = pos.current_price as number;
+          return sum + ((currentPrice - pos.entry_price) * pos.quantity);
+        }, 0);
     const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
-    const baseValue = portfolioHistory.length > 0 ? portfolioHistory[0].value : totalCostBasis;
-    const totalReturn = currentValue - baseValue;
-    const percentReturn = baseValue > 0 ? ((totalReturn / baseValue) * 100) : 0;
-    
-    return { currentValue, totalReturn, percentReturn, unrealizedPnL, realizedPnL, totalPnL: unrealizedPnL + realizedPnL };
-  }, [portfolioHistory, currentPortfolioValue, livePositions, trades]);
+    const totalReturn = unrealizedPnL === null ? null : unrealizedPnL + realizedPnL;
+    const percentReturn = totalReturn === null
+      ? null
+      : totalCostBasis > 0
+        ? ((totalReturn / totalCostBasis) * 100)
+        : 0;
+
+    return {
+      currentValue,
+      totalReturn,
+      percentReturn,
+      unrealizedPnL,
+      realizedPnL,
+      totalPnL: totalReturn,
+      hasMissingLatestPrice,
+    };
+  }, [currentPortfolioValue, positions, trades, totalCostBasis, hasMissingLatestPrice]);
 
   if (portfolioLoading || tradesLoading || positionsLoading) {
     return (
@@ -159,14 +144,22 @@ export function PerformanceCharts() {
               <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">Portfolio Value</span>
             </div>
             <div className="text-2xl font-bold">
-              ${portfolioStats.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              {portfolioStats.currentValue === null
+                ? 'N/A'
+                : `$${portfolioStats.currentValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
             </div>
-            <div className={cn("flex items-center gap-1 text-sm mt-1", portfolioStats.totalReturn >= 0 ? 'text-profit' : 'text-loss')}>
-              {portfolioStats.totalReturn >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-              <span>{portfolioStats.totalReturn >= 0 ? '+' : ''}${portfolioStats.totalReturn.toFixed(2)} ({portfolioStats.percentReturn.toFixed(2)}%)</span>
-            </div>
-            {currentPortfolioValue !== null && (
-              <div className="text-[10px] text-muted-foreground/50 mt-1">Live · Updates every 30s</div>
+            {portfolioStats.totalReturn !== null ? (
+              <div className={cn("flex items-center gap-1 text-sm mt-1", portfolioStats.totalReturn >= 0 ? 'text-profit' : 'text-loss')}>
+                {portfolioStats.totalReturn >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                <span>
+                  {portfolioStats.totalReturn >= 0 ? '+' : ''}${portfolioStats.totalReturn.toFixed(2)} ({(portfolioStats.percentReturn || 0).toFixed(2)}%)
+                </span>
+              </div>
+            ) : (
+              <div className="text-[11px] text-muted-foreground/60 mt-1">N/A (latest price unavailable)</div>
+            )}
+            {positions.length > 0 && !portfolioStats.hasMissingLatestPrice && (
+              <div className="text-[10px] text-muted-foreground/50 mt-1">Synced from Supabase snapshots</div>
             )}
           </CardContent>
         </Card>
@@ -175,7 +168,7 @@ export function PerformanceCharts() {
           <CardContent className="pt-4 pb-3">
             <div className="flex items-center gap-2 mb-2">
               <BarChart3 className="h-3.5 w-3.5 text-muted-foreground/50" />
-              <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">P&L Breakdown</span>
+              <span className="text-[10px] text-muted-foreground/70 uppercase tracking-wide">P&amp;L Breakdown</span>
             </div>
             <div className="space-y-1.5 text-xs">
               <div className="flex justify-between">
@@ -186,15 +179,23 @@ export function PerformanceCharts() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground/70">Unrealized</span>
-                <span className={cn("font-mono font-medium", portfolioStats.unrealizedPnL >= 0 ? 'text-profit' : 'text-loss')}>
-                  {portfolioStats.unrealizedPnL >= 0 ? '+' : ''}${portfolioStats.unrealizedPnL.toFixed(2)}
-                </span>
+                {portfolioStats.unrealizedPnL === null ? (
+                  <span className="font-mono font-medium text-muted-foreground/60">N/A</span>
+                ) : (
+                  <span className={cn("font-mono font-medium", portfolioStats.unrealizedPnL >= 0 ? 'text-profit' : 'text-loss')}>
+                    {portfolioStats.unrealizedPnL >= 0 ? '+' : ''}${portfolioStats.unrealizedPnL.toFixed(2)}
+                  </span>
+                )}
               </div>
               <div className="flex justify-between pt-1.5 border-t border-border/30">
                 <span className="font-medium">Total</span>
-                <span className={cn("font-mono font-bold", portfolioStats.totalPnL >= 0 ? 'text-profit' : 'text-loss')}>
-                  {portfolioStats.totalPnL >= 0 ? '+' : ''}${portfolioStats.totalPnL.toFixed(2)}
-                </span>
+                {portfolioStats.totalPnL === null ? (
+                  <span className="font-mono font-bold text-muted-foreground/60">N/A</span>
+                ) : (
+                  <span className={cn("font-mono font-bold", portfolioStats.totalPnL >= 0 ? 'text-profit' : 'text-loss')}>
+                    {portfolioStats.totalPnL >= 0 ? '+' : ''}${portfolioStats.totalPnL.toFixed(2)}
+                  </span>
+                )}
               </div>
             </div>
           </CardContent>
@@ -206,7 +207,7 @@ export function PerformanceCharts() {
         <CardContent className="pt-4 pb-3">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Equity Curve</span>
-            {currentPortfolioValue !== null && (
+            {positions.length > 0 && (
               <span className="text-[10px] text-muted-foreground/50">(Live)</span>
             )}
           </div>
@@ -283,7 +284,7 @@ export function PerformanceCharts() {
           <CardContent className="pt-4 pb-3">
             <div className="flex items-center gap-2 mb-3">
               <BarChart3 className="h-3.5 w-3.5 text-muted-foreground/50" />
-              <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Monthly P&L</span>
+              <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Monthly P&amp;L</span>
             </div>
             <div className="h-[140px]">
               {monthlyData.length === 0 ? (

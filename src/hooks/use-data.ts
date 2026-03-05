@@ -41,6 +41,8 @@ export function useOpenPositions() {
     queryKey: ['open-positions', userId],
     queryFn: () => positionsApi.getAll(userId!),
     enabled: !!userId,
+    refetchInterval: 30000,
+    staleTime: 10000,
   });
 }
 
@@ -49,7 +51,10 @@ export function useCreatePosition() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'>) =>
+    mutationFn: (position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
+      tags?: string[] | null;
+      notes?: string | null;
+    }) =>
       positionsApi.create(userId!, position),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['open-positions', userId] });
@@ -76,6 +81,45 @@ export function useDeletePosition() {
       queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] });
       queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
       // Sync Dashboard: closing a position alters win-rate/profit-factor shown in TradeStatistics
+      queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
+    },
+  });
+}
+
+export function useClosePosition() {
+  const { userId } = useAuth();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      close_time,
+      close_quantity,
+      close_price,
+      reason,
+      tags,
+    }: {
+      id: string;
+      close_time: string;
+      close_quantity: number;
+      close_price: number;
+      reason?: string | null;
+      tags?: string[] | null;
+    }) => {
+      if (!userId) throw new Error('Not authenticated');
+      return positionsApi.closeTrade(id, userId, {
+        close_time,
+        close_quantity,
+        close_price,
+        reason: reason ?? null,
+        tags: tags ?? null,
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['open-positions', userId] });
+      queryClient.invalidateQueries({ queryKey: ['trades', userId] });
+      queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] });
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
       queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
     },
   });

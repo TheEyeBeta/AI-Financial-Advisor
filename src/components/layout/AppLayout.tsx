@@ -19,8 +19,10 @@ export function AppLayout({ children, title }: AppLayoutProps) {
             <UserAuth />
           </div>
         </header>
-        <div className="flex-1 overflow-auto p-4 sm:p-6">
-          {children}
+        <div className="flex-1 overflow-y-auto overflow-x-hidden px-3 py-4 sm:px-6 sm:py-6">
+          <div className="mx-auto w-full max-w-7xl">
+            {children}
+          </div>
         </div>
       </SidebarInset>
     </SidebarProvider>

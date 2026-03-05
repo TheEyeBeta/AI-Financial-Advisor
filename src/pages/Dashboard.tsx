@@ -5,7 +5,7 @@ import { MarketOverview } from "@/components/dashboard/MarketOverview";
 import { OpenPositions } from "@/components/trading/OpenPositions";
 import { TradeHistory } from "@/components/trading/TradeHistory";
 import { useAuth } from "@/hooks/use-auth";
-import { useOpenPositions, useClosedTrades, usePortfolioHistory } from "@/hooks/use-data";
+import { useOpenPositions, useClosedTrades } from "@/hooks/use-data";
 import { DollarSign, TrendingUp, BarChart2, Briefcase } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -14,7 +14,6 @@ const Dashboard = () => {
   const { userProfile } = useAuth();
   const { data: positions = [] } = useOpenPositions();
   const { data: closedTrades = [] } = useClosedTrades();
-  const { data: portfolioHistory = [] } = usePortfolioHistory();
 
   const greeting = userProfile?.first_name
     ? `Welcome back, ${userProfile.first_name}`
@@ -28,18 +27,20 @@ const Dashboard = () => {
   const totalPositions = positions.length;
   const totalTrades = closedTrades.length;
   const totalPnL = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-  const openPositionsValue = positions.reduce(
-    (sum, pos) => sum + ((pos.current_price || pos.entry_price) * pos.quantity),
-    0
-  );
-  const latestValue = portfolioHistory.length > 0
-    ? portfolioHistory[portfolioHistory.length - 1]?.value || 0
-    : openPositionsValue;
+  const missingLatestPrice = positions.some((pos) => pos.current_price === null);
+  const openPositionsValue = positions.reduce((sum, pos) => {
+    if (pos.current_price === null) return sum;
+    return sum + (pos.current_price * pos.quantity);
+  }, 0);
 
   const quickStats = [
     {
       label: "Portfolio Value",
-      value: latestValue > 0 ? `$${latestValue.toLocaleString()}` : "—",
+      value: totalPositions === 0
+        ? "—"
+        : missingLatestPrice
+          ? "N/A"
+          : `$${openPositionsValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       icon: DollarSign,
       color: "text-primary",
       bgColor: "bg-primary/10",
