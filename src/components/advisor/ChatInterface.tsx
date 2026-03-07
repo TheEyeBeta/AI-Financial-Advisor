@@ -21,7 +21,7 @@ interface ChatInterfaceProps {
 // Format AI response with better readability
 function formatMessage(content: string): React.ReactNode {
   // Clean up common model artifacts
-  let cleaned = content
+  const cleaned = content
     // Remove leading/trailing quotes that some models add
     .replace(/^["']|["']$/g, '')
     // Normalize excessive blank lines
@@ -146,7 +146,7 @@ function StreamingMessage({ content, onComplete }: { content: string; onComplete
     }, 15);
 
     return () => clearInterval(interval);
-  }, [content]);
+  }, [content, onComplete]);
 
   if (done) {
     return <div className="prose prose-sm dark:prose-invert max-w-none">{formatMessage(content)}</div>;
@@ -160,7 +160,7 @@ function StreamingMessage({ content, onComplete }: { content: string; onComplete
   );
 }
 
-export function ChatInterface({ messages, onNewChat, isLoading = false, isThinking = false, chatTitle, onStreamingComplete }: ChatInterfaceProps) {
+export function ChatInterface({ messages, onNewChat, isLoading: _isLoading = false, isThinking = false, chatTitle, onStreamingComplete }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {

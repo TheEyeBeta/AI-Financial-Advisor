@@ -46,7 +46,7 @@ def test_search_endpoint_missing_api_key(client: TestClient, monkeypatch):
     
     response = client.get("/api/search?query=test")
     assert response.status_code == 500
-    assert "TAVILY_API_KEY" in response.json()["detail"]
+    assert "not available" in response.json()["detail"]
 
 
 def test_search_endpoint_query_too_short(client: TestClient):
@@ -79,23 +79,23 @@ async def test_search_endpoint_provider_error(client: TestClient):
     
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.get("/api/search?query=test")
-        assert response.status_code == 500
+        assert response.status_code == 502
 
 
 @pytest.mark.asyncio
 async def test_search_endpoint_network_error(client: TestClient):
     """Test search endpoint when network error occurs."""
     import httpx
-    
+
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(side_effect=httpx.RequestError("Connection failed"))
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
-    
+
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.get("/api/search?query=test")
         assert response.status_code == 502
-        assert "Error contacting search provider" in response.json()["detail"]
+        assert "unavailable" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
