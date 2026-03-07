@@ -1395,21 +1395,50 @@ export interface StockScore {
   price_change_pct: number | null;
   updated_at: string | null;
   composite_score: number;
+  rank_tier: string;       // "Strong Buy" | "Buy" | "Hold" | "Underperform" | "Sell"
+  conviction: string;      // "High" | "Medium" | "Low"
   momentum_score: number;
   technical_score: number;
   fundamental_score: number;
+  risk_score: number;
+  quality_score: number;
   ml_score: number | null;
   has_ml_data: boolean;
+  dimensions_bullish: number;
   breakdown: {
+    // Technical
     rsi_14: number | null;
+    rsi_9: number | null;
     macd_above_signal: boolean | null;
+    macd_histogram: number | null;
     golden_cross: boolean | null;
+    adx: number | null;
+    stochastic_k: number | null;
+    stochastic_d: number | null;
+    williams_r: number | null;
+    cci: number | null;
+    bollinger_position: number | null;
+    // Momentum
     volume_ratio: number | null;
+    price_vs_sma_50: number | null;
+    price_vs_sma_200: number | null;
+    price_vs_ema_50: number | null;
+    fifty_two_week_position: number | null;
+    // Fundamental
     pe_ratio: number | null;
+    forward_pe: number | null;
+    peg_ratio: number | null;
+    price_to_book: number | null;
+    price_to_sales: number | null;
+    eps: number | null;
     eps_growth: number | null;
     revenue_growth: number | null;
+    dividend_yield: number | null;
+    market_cap: number | null;
+    // ML/Signals
     signal_confidence: number | null;
     is_bullish: boolean | null;
+    signal_strategy: string | null;
   };
   data_fresh: boolean;
 }
