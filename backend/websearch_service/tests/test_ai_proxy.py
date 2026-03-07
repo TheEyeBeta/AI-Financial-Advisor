@@ -116,7 +116,7 @@ def test_chat_endpoint_missing_api_key(client: TestClient, monkeypatch):
     
     response = client.post("/api/chat", json={"message": "Hello"})
     assert response.status_code == 500
-    assert "OPENAI_API_KEY" in response.json()["detail"]
+    assert "not configured" in response.json()["detail"]
 
 
 def test_chat_endpoint_missing_message(client: TestClient):

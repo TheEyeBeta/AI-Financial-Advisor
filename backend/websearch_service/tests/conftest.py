@@ -31,6 +31,7 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("APP_VERSION", "test-version")
     monkeypatch.setenv("ENVIRONMENT", "test")
+    monkeypatch.setenv("AUTH_REQUIRED", "false")
 
 
 @pytest.fixture
