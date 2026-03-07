@@ -63,7 +63,7 @@ export function OpenPositions() {
   if (isLoading) {
     return (
       <div className="space-y-4">
-        <div className="grid gap-3 grid-cols-3">
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-20 bg-muted/30 rounded-xl animate-pulse" />
           ))}
