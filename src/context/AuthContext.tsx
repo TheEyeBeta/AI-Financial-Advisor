@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getCurrentUserProfile } from "@/lib/user-helpers";
 import { getSupabaseEnvConfig } from "@/lib/env";
+import { analytics, AnalyticsEvents } from "@/services/analytics";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
@@ -92,6 +93,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUserProfile(profile);
         setProfileLoading(false);
         setProfileFetched(authUser.id);
+        if (profile) {
+          analytics.identify(profile.id, {
+            experience_level: profile.experience_level,
+            risk_level: profile.risk_level,
+            onboarding_complete: profile.onboarding_complete,
+          });
+        }
       })
       .catch((error) => {
         console.error("Error fetching user profile:", error);
@@ -107,6 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
     });
     if (error) throw error;
+    AnalyticsEvents.signIn('email');
     return data;
   };
 
@@ -116,12 +125,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       password,
     });
     if (error) throw error;
+    AnalyticsEvents.signUp('email');
     return data;
   };
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
+    AnalyticsEvents.signOut();
+    analytics.reset();
   };
 
   const resetPassword = async (email: string) => {

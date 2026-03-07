@@ -22,11 +22,14 @@ import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import { AuthProvider } from "@/context/AuthContext";
 import { healthCheck } from "@/services/healthCheck";
+import { analytics } from "@/services/analytics";
+import { AnalyticsPageTracker } from "@/components/AnalyticsPageTracker";
 
 const queryClient = new QueryClient();
 
 const App = () => {
   useEffect(() => {
+    analytics.init();
     healthCheck.startMonitoring();
 
     return () => {
@@ -46,6 +49,7 @@ const App = () => {
             v7_relativeSplatPath: true,
           }}
         >
+          <AnalyticsPageTracker />
           <Routes>
             {/* Landing page - shows when not authenticated */}
             <Route path="/" element={<Landing />} />
