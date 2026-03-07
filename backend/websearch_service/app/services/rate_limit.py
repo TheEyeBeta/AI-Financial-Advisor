@@ -113,28 +113,72 @@ class RateLimitService:
         """Get rate limit config for an endpoint."""
         return self._endpoint_configs.get(endpoint, self._default_config)
     
+    # Trusted proxy CIDR ranges whose X-Forwarded-For / X-Real-IP headers we honour.
+    # Railway, Render, Vercel, and common cloud load balancers all fall in RFC-1918
+    # or well-known ranges. Extend via TRUSTED_PROXY_IPS env var (comma-separated).
+    _TRUSTED_PROXY_NETS: tuple[str, ...] = (
+        "127.0.0.1",
+        "::1",
+        "10.",       # RFC 1918
+        "172.16.",   # RFC 1918
+        "172.17.",
+        "172.18.",
+        "172.19.",
+        "172.20.",
+        "172.21.",
+        "172.22.",
+        "172.23.",
+        "172.24.",
+        "172.25.",
+        "172.26.",
+        "172.27.",
+        "172.28.",
+        "172.29.",
+        "172.30.",
+        "172.31.",
+        "192.168.", # RFC 1918
+    )
+
+    def _is_trusted_proxy(self, ip: str) -> bool:
+        """Return True if the connecting IP is a known trusted proxy."""
+        extra_trusted = [
+            p.strip()
+            for p in os.getenv("TRUSTED_PROXY_IPS", "").split(",")
+            if p.strip()
+        ]
+        all_trusted = list(self._TRUSTED_PROXY_NETS) + extra_trusted
+        return any(ip.startswith(prefix) for prefix in all_trusted)
+
     def _get_identifier(self, request: Request, user_id: Optional[str] = None) -> str:
         """
-        Get rate limit identifier.
-        Priority: user_id > IP address > unknown
+        Get a rate-limit identifier.
+        Priority: verified user_id (from auth token) > direct client IP.
+
+        SECURITY: X-Forwarded-For and X-Real-IP are only trusted when the
+        direct connection comes from a known private-network proxy address.
+        An attacker connecting directly CANNOT spoof these headers to bypass
+        IP-based rate limits.
         """
         if user_id:
             return f"user:{user_id}"
-        
-        # Get IP address, handling proxies
-        client_ip = request.client.host if request.client else None
-        
-        # Check for forwarded IP (from proxy/load balancer)
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # Take first IP in chain
-            client_ip = forwarded_for.split(",")[0].strip()
-        
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            client_ip = real_ip
-        
-        return f"ip:{client_ip}" if client_ip else "ip:unknown"
+
+        # Direct connecting IP — always reliable
+        direct_ip = request.client.host if request.client else None
+
+        if direct_ip and self._is_trusted_proxy(direct_ip):
+            # The connection comes from an internal proxy — trust the forwarded header.
+            forwarded_for = request.headers.get("X-Forwarded-For")
+            if forwarded_for:
+                # First IP in the chain is the original client
+                client_ip = forwarded_for.split(",")[0].strip()
+                return f"ip:{client_ip}" if client_ip else "ip:unknown"
+
+            real_ip = request.headers.get("X-Real-IP", "").strip()
+            if real_ip:
+                return f"ip:{real_ip}"
+
+        # Either not behind a trusted proxy, or no forwarded header — use direct IP.
+        return f"ip:{direct_ip}" if direct_ip else "ip:unknown"
     
     def _cleanup_old_entries(self):
         """Remove old entries to prevent memory leaks."""
