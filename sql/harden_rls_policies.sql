@@ -3,6 +3,9 @@
 -- ============================================================
 -- Run this in Supabase SQL Editor immediately.
 --
+-- Each fix is wrapped in its own DO block so a single failure
+-- does not abort the entire script.
+--
 -- Fixes:
 -- 1. Privilege escalation via users UPDATE (missing WITH CHECK)
 --    A regular user could update their own userType to 'Admin'.
@@ -23,27 +26,35 @@
 --   - Normal users cannot change their own userType.
 --   - Only admins can change userType on any row.
 
-DROP POLICY IF EXISTS "Users can update profiles" ON public.users;
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Users can update profiles" ON public.users;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Could not drop "Users can update profiles": %', SQLERRM;
+END $$;
 
-CREATE POLICY "Users can update profiles"
-ON public.users FOR UPDATE
-USING (
-  -- Who can target a row for update:
-  auth_id = auth.uid()             -- own row
-  OR public.is_current_user_admin() -- or admin targets any row
-)
-WITH CHECK (
-  -- What values are allowed to be written:
-  (
-    -- Regular users updating their own row: userType must remain unchanged.
-    auth_id = auth.uid()
-    AND NOT public.is_current_user_admin()
-    AND "userType" = (SELECT "userType" FROM public.users WHERE auth_id = auth.uid())
+DO $$ BEGIN
+  CREATE POLICY "Users can update profiles"
+  ON public.users FOR UPDATE
+  USING (
+    -- Who can target a row for update:
+    auth_id = auth.uid()             -- own row
+    OR public.is_current_user_admin() -- or admin targets any row
   )
-  OR
-  -- Admins may change any column on any row.
-  public.is_current_user_admin()
-);
+  WITH CHECK (
+    -- What values are allowed to be written:
+    (
+      -- Regular users updating their own row: userType must remain unchanged.
+      auth_id = auth.uid()
+      AND NOT public.is_current_user_admin()
+      AND "userType" = (SELECT "userType" FROM public.users WHERE auth_id = auth.uid())
+    )
+    OR
+    -- Admins may change any column on any row.
+    public.is_current_user_admin()
+  );
+EXCEPTION WHEN duplicate_object THEN
+  RAISE NOTICE '"Users can update profiles" already exists with correct definition — skipping.';
+END $$;
 
 -- ============================================================
 -- FIX 2: Users INSERT — Restrict to service role / auth trigger only
@@ -57,7 +68,11 @@ WITH CHECK (
 -- The handle_new_user() trigger runs as SECURITY DEFINER and bypasses RLS,
 -- so legitimate inserts still work. This policy prevents client-side abuse.
 
-DROP POLICY IF EXISTS "Service role can insert user profiles" ON public.users;
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Service role can insert user profiles" ON public.users;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Could not drop "Service role can insert user profiles": %', SQLERRM;
+END $$;
 
 -- No INSERT policy for authenticated/anon roles.
 -- The handle_new_user() SECURITY DEFINER trigger handles all inserts.
@@ -71,13 +86,31 @@ DROP POLICY IF EXISTS "Service role can insert user profiles" ON public.users;
 -- that allows FOR ALL (SELECT + INSERT + UPDATE + DELETE) to anon and
 -- authenticated users. Any user could inject malicious news articles.
 
-DROP POLICY IF EXISTS "Open access to news" ON public.news;
-DROP POLICY IF EXISTS "Anyone can view news" ON public.news;
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Open access to news" ON public.news;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Could not drop "Open access to news": %', SQLERRM;
+END $$;
 
-CREATE POLICY "Anyone can read news"
-ON public.news FOR SELECT
-TO authenticated, anon
-USING (true);
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Anyone can view news" ON public.news;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Could not drop "Anyone can view news": %', SQLERRM;
+END $$;
+
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Anyone can read news" ON public.news;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Anyone can read news"
+  ON public.news FOR SELECT
+  TO authenticated, anon
+  USING (true);
+EXCEPTION WHEN duplicate_object THEN
+  RAISE NOTICE '"Anyone can read news" already exists — skipping.';
+END $$;
 
 -- Only service_role (backend) may write news. Authenticated users cannot.
 -- The backend uses the service_role key, which bypasses RLS.
@@ -86,12 +119,26 @@ USING (true);
 -- ============================================================
 -- FIX 4: news_articles table — Restrict writes similarly
 -- ============================================================
-DROP POLICY IF EXISTS "Anyone can view news articles" ON public.news_articles;
 
-CREATE POLICY "Anyone can read news articles"
-ON public.news_articles FOR SELECT
-TO authenticated, anon
-USING (true);
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Anyone can view news articles" ON public.news_articles;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Could not drop "Anyone can view news articles": %', SQLERRM;
+END $$;
+
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Anyone can read news articles" ON public.news_articles;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  CREATE POLICY "Anyone can read news articles"
+  ON public.news_articles FOR SELECT
+  TO authenticated, anon
+  USING (true);
+EXCEPTION WHEN duplicate_object THEN
+  RAISE NOTICE '"Anyone can read news articles" already exists — skipping.';
+END $$;
 
 -- No write policy for authenticated/anon on news_articles.
 
@@ -110,9 +157,21 @@ USING (true);
 -- FIX 7: stock_snapshots — Ensure no write policy for authenticated
 -- ============================================================
 -- Currently only SELECT is granted to authenticated. Verify no write exists.
-DROP POLICY IF EXISTS "Authenticated users can insert stock snapshots" ON public.stock_snapshots;
-DROP POLICY IF EXISTS "Authenticated users can update stock snapshots" ON public.stock_snapshots;
-DROP POLICY IF EXISTS "Authenticated users can delete stock snapshots" ON public.stock_snapshots;
+
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Authenticated users can insert stock snapshots" ON public.stock_snapshots;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Authenticated users can update stock snapshots" ON public.stock_snapshots;
+EXCEPTION WHEN others THEN NULL;
+END $$;
+
+DO $$ BEGIN
+  DROP POLICY IF EXISTS "Authenticated users can delete stock snapshots" ON public.stock_snapshots;
+EXCEPTION WHEN others THEN NULL;
+END $$;
 
 -- ============================================================
 -- FIX 8: Achievements — Prevent users from self-awarding achievements
@@ -131,8 +190,11 @@ DROP POLICY IF EXISTS "Authenticated users can delete stock snapshots" ON public
 -- VERIFY: Confirm is_current_user_admin function is STABLE SECURITY DEFINER
 -- ============================================================
 -- This prevents function inlining that could break RLS.
--- Already defined correctly in schema.sql but ensure it is set:
 
-ALTER FUNCTION public.is_current_user_admin() SECURITY DEFINER;
+DO $$ BEGIN
+  ALTER FUNCTION public.is_current_user_admin() SECURITY DEFINER;
+EXCEPTION WHEN others THEN
+  RAISE NOTICE 'Could not alter is_current_user_admin: %', SQLERRM;
+END $$;
 
 SELECT '✅ RLS policies hardened — privilege escalation vectors closed.' AS status;
