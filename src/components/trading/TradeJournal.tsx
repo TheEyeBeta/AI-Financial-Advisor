@@ -198,7 +198,7 @@ export function TradeJournal() {
         <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-200">
           <CardContent className="pt-5 pb-4">
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="symbol" className="text-xs">Symbol</Label>
                   <Input
