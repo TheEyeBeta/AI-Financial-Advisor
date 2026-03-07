@@ -8,10 +8,11 @@ import time
 from typing import Any, Dict, List, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from ..services.audit import audit_log
+from ..services.auth import AuthenticatedUser, require_auth
 from ..services.rate_limit import rate_limiter
 
 logger = logging.getLogger(__name__)
@@ -131,9 +132,12 @@ class QuantitativeAnalysisRequest(BaseModel):
 def _build_headers() -> Dict[str, str]:
     openai_api_key = os.getenv(OPENAI_API_KEY_ENV)
     if not openai_api_key:
+        logger.error("OPENAI_API_KEY is not configured")
         raise HTTPException(
             status_code=500,
-            detail=f"{OPENAI_API_KEY_ENV} is not configured on the server.",
+            # SECURITY: Do not name the missing env var in the HTTP response —
+            # it leaks configuration intelligence to callers.
+            detail="AI service is not configured.",
         )
     return {
         "Content-Type": "application/json",
@@ -145,9 +149,10 @@ def _build_perplexity_headers() -> Dict[str, str]:
     """Build headers for Perplexity API."""
     perplexity_api_key = os.getenv(PERPLEXITY_API_KEY_ENV)
     if not perplexity_api_key:
+        logger.error("PERPLEXITY_API_KEY is not configured")
         raise HTTPException(
             status_code=500,
-            detail=f"{PERPLEXITY_API_KEY_ENV} is not configured on the server.",
+            detail="Fallback AI service is not configured.",
         )
     return {
         "Content-Type": "application/json",
@@ -379,9 +384,12 @@ async def _call_perplexity(payload: Dict[str, Any]) -> Dict[str, Any]:
         ) from exc
 
     if response.status_code != 200:
+        # SECURITY: Do not echo provider response bodies — they may contain
+        # rate-limit quota info, account details, or other sensitive data.
+        logger.warning("Perplexity returned HTTP %d", response.status_code)
         raise HTTPException(
-            status_code=response.status_code,
-            detail=f"Perplexity error: {response.text}",
+            status_code=502,
+            detail="Fallback AI provider returned an error.",
         )
     return response.json()
 
@@ -420,7 +428,11 @@ async def _call_openai(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=402, detail="OpenAI quota exceeded. Perplexity fallback not configured.")
 
     if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        logger.warning("OpenAI Chat Completions returned HTTP %d", response.status_code)
+        raise HTTPException(
+            status_code=502,
+            detail="AI provider returned an error.",
+        )
 
     return response.json()
 
@@ -467,7 +479,11 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
         raise HTTPException(status_code=402, detail="OpenAI quota exceeded. Perplexity fallback not configured.")
 
     if response.status_code != 200:
-        raise HTTPException(status_code=response.status_code, detail=response.text)
+        logger.warning("OpenAI Responses API returned HTTP %d", response.status_code)
+        raise HTTPException(
+            status_code=502,
+            detail="AI provider returned an error.",
+        )
 
     return response.json()
 
@@ -512,7 +528,12 @@ async def chat_completion(
     request: ChatRequest,
     raw_request: Request,
     response: Response,
+    auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
+    # SECURITY: Use the auth_id from the verified JWT — never from the request body.
+    # This prevents user_id spoofing for rate-limit bypass or false audit attribution.
+    verified_user_id = auth_user.auth_id
+
     # Build message list
     messages: List[Dict[str, str]]
     if request.messages and len(request.messages) > 0:
@@ -528,11 +549,11 @@ async def chat_completion(
     total_text = " ".join(m.get("content", "") for m in messages)
     estimated_tokens = estimate_tokens(total_text) + effective_max_output_tokens
 
-    # Enforce rate limits
+    # Enforce rate limits using the VERIFIED user ID (not client-supplied)
     allowed, error_msg, rate_limit_info = rate_limiter.check_rate_limit(
         raw_request,
         "/api/chat",
-        user_id=request.user_id,
+        user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
     )
     if not allowed:
@@ -545,7 +566,7 @@ async def chat_completion(
             "chat_request",
             {
                 "client_id": client_id,
-                "user_id": request.user_id,
+                "user_id": verified_user_id,
                 "message_count": len(messages),
                 "estimated_tokens": estimated_tokens,
                 "max_output_tokens": effective_max_output_tokens,
@@ -569,7 +590,7 @@ async def chat_completion(
         )
         await audit_log(
             "chat_classification",
-            {"classification": classification, "reasoning_effort": reasoning_effort},
+            {"classification": classification, "reasoning_effort": reasoning_effort, "user_id": verified_user_id},
         )
 
         # Step 2: Build Responses API input
@@ -663,12 +684,12 @@ async def chat_completion(
         # Step 5: Record token usage (Responses API uses input_tokens/output_tokens)
         usage = data.get("usage", {})
         actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
-        rate_limiter.record_token_usage(raw_request, user_id=request.user_id, tokens_used=actual_tokens)
+        rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
         await audit_log(
             "chat_response",
             {
                 "client_id": client_id,
-                "user_id": request.user_id,
+                "user_id": verified_user_id,
                 "usage": usage,
                 "usage_attempts": usage_entries,
                 "actual_tokens": actual_tokens,
@@ -678,7 +699,7 @@ async def chat_completion(
 
         return {"response": final_answer}
     finally:
-        rate_limiter.release_request(raw_request, user_id=request.user_id)
+        rate_limiter.release_request(raw_request, user_id=verified_user_id)
 
 
 @router.post("/api/chat/title")
@@ -686,14 +707,18 @@ async def chat_title(
     request: ChatTitleRequest,
     raw_request: Request,
     response: Response,
+    auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
+    verified_user_id = auth_user.auth_id
+
     # Estimate tokens (title generation is lightweight)
     estimated_tokens = estimate_tokens(request.first_message, system_overhead=50) + 60
 
-    # Enforce rate limits
+    # Enforce rate limits using verified user ID
     allowed, error_msg, rate_limit_info = rate_limiter.check_rate_limit(
         raw_request,
         "/api/chat/title",
+        user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
     )
     if not allowed:
@@ -724,7 +749,7 @@ async def chat_title(
             data = await _call_openai(payload)
             usage = data.get("usage", {})
             actual_tokens = usage.get("total_tokens", 0)
-            rate_limiter.record_token_usage(raw_request, tokens_used=actual_tokens)
+            rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
             content = _extract_text_unified(data).strip().strip('"').strip("'")
         except Exception as exc:
             logger.warning("Title generation model call failed: %s", exc)
@@ -750,7 +775,7 @@ async def chat_title(
 
         return {"title": content}
     finally:
-        rate_limiter.release_request(raw_request)
+        rate_limiter.release_request(raw_request, user_id=verified_user_id)
 
 
 @router.post("/api/ai/analyze-quantitative")
@@ -758,15 +783,19 @@ async def analyze_quantitative_data(
     request: QuantitativeAnalysisRequest,
     raw_request: Request,
     response: Response,
+    auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
+    verified_user_id = auth_user.auth_id
+
     # Estimate tokens
     data_str = str(request.quantitative_data)
     estimated_tokens = estimate_tokens(data_str, system_overhead=150) + 500
 
-    # Enforce rate limits
+    # Enforce rate limits using verified user ID
     allowed, error_msg, rate_limit_info = rate_limiter.check_rate_limit(
         raw_request,
         "/api/ai/analyze-quantitative",
+        user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
     )
     if not allowed:
@@ -797,7 +826,7 @@ async def analyze_quantitative_data(
 
         usage = data.get("usage", {})
         actual_tokens = usage.get("total_tokens", 0)
-        rate_limiter.record_token_usage(raw_request, tokens_used=actual_tokens)
+        rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
 
         content = _extract_text_unified(data).strip()
         if not content:
@@ -810,4 +839,4 @@ async def analyze_quantitative_data(
 
         return {"response": content}
     finally:
-        rate_limiter.release_request(raw_request)
+        rate_limiter.release_request(raw_request, user_id=verified_user_id)

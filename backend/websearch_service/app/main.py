@@ -58,28 +58,37 @@ def create_app() -> FastAPI:
     )
     
     # CORS middleware
-    # In development, allow all origins. In production, use CORS_ORIGINS env var
-    cors_origins = os.getenv("CORS_ORIGINS", "*")
+    # SECURITY: In production, CORS_ORIGINS must be set to the exact frontend origin(s).
+    # Wildcard CORS in production would allow any website to make credentialled requests.
+    # If CORS_ORIGINS is not set in production, the app refuses to start.
     is_production = os.getenv("ENVIRONMENT") == "production"
-    
-    if cors_origins == "*" or not is_production:
-        # Development: allow all origins
-        # Note: When using ["*"], allow_credentials must be False
+    cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+
+    if is_production:
+        if not cors_origins_env or cors_origins_env == "*":
+            raise RuntimeError(
+                "FATAL: CORS_ORIGINS must be set to an explicit list of allowed origins in "
+                "production (e.g. 'https://yourdomain.com'). Wildcard '*' is not permitted."
+            )
+        allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+        allow_creds = True
+    else:
+        # Development: allow all origins (credentials disabled to avoid CORS + cookie issues)
         allowed_origins = ["*"]
         allow_creds = False
-    else:
-        # Production: use configured origins
-        allowed_origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
-        allow_creds = True
-    
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allowed_origins,
         allow_credentials=allow_creds,
-        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-        allow_headers=["*"],
-        expose_headers=["*"],
-        max_age=3600,  # Cache preflight requests for 1 hour
+        # SECURITY: Only allow the methods the API actually uses.
+        allow_methods=["GET", "POST", "OPTIONS"],
+        # SECURITY: Enumerate allowed headers instead of wildcard.
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+        expose_headers=["X-RateLimit-Limit-Minute", "X-RateLimit-Remaining-Minute", "X-RateLimit-Reset-Minute",
+                        "X-RateLimit-Limit-Hour", "X-RateLimit-Remaining-Hour", "X-RateLimit-Reset-Hour",
+                        "X-RateLimit-Limit-Day", "X-RateLimit-Remaining-Day", "X-RateLimit-Reset-Day"],
+        max_age=600,  # 10 minutes — shorter preflight cache reduces stale-config window
     )
     
     # Trusted host middleware (production only)
@@ -101,13 +110,18 @@ def create_app() -> FastAPI:
 
     @app.get("/health")
     async def health_check() -> dict[str, str | float]:
-        return {
+        # SECURITY: Do not expose version or environment in production health checks.
+        # These fields aid attackers in fingerprinting the deployment.
+        is_production = os.getenv("ENVIRONMENT") == "production"
+        response: dict[str, str | float] = {
             "status": "healthy",
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "uptime_seconds": round(time.time() - START_TIME, 2),
-            "version": os.getenv("APP_VERSION", "unknown"),
-            "environment": os.getenv("ENVIRONMENT", "development"),
         }
+        if not is_production:
+            response["uptime_seconds"] = round(time.time() - START_TIME, 2)
+            response["version"] = os.getenv("APP_VERSION", "unknown")
+            response["environment"] = os.getenv("ENVIRONMENT", "development")
+        return response
 
     @app.get("/health/live")
     async def liveness_check() -> dict[str, str]:
