@@ -1463,7 +1463,7 @@ export interface TopStocksResult {
 // The backend queries Supabase directly, scores all stocks server-side,
 // caches results for 10 min per horizon, and returns only the top-N ranked stocks.
 export const stockRankingApi = {
-  async getRanking(options: TopStocksOptions = {}): Promise<TopStocksResult> {
+  async getRanking(options: TopStocksOptions = {}, source?: string): Promise<TopStocksResult> {
     const { limit = 20, minScore = 0, horizon = 'balanced' } = options;
     const backendUrl = import.meta.env.VITE_PYTHON_API_URL;
     if (!backendUrl) {
@@ -1475,6 +1475,7 @@ export const stockRankingApi = {
       min_score: String(minScore),
       horizon,
     });
+    if (source) params.append('source', source);
 
     try {
       const res = await fetch(`${backendUrl}/api/stocks/ranking?${params}`);
@@ -2526,16 +2527,17 @@ export const pythonApi = {
   },
 
   // Example: Get live stock prices from Python backend
-  async getStockPrice(symbol: string): Promise<number> {
+  async getStockPrice(symbol: string, source?: string): Promise<number> {
     const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-    
+
     try {
-      const response = await fetch(`${pythonBackendUrl}/api/stock-price/${symbol}`);
-      
+      const params = source ? `?source=${source}` : '';
+      const response = await fetch(`${pythonBackendUrl}/api/stock-price/${symbol}${params}`);
+
       if (!response.ok) {
         throw new Error(`Failed to fetch price for ${symbol}`);
       }
-      
+
       const data = await response.json();
       return data.price;
     } catch (error) {
@@ -2657,14 +2659,15 @@ export const tradeEngineApi = {
 
   // Get full AI context (engine status, snapshots, signals, news)
   // Returns null if Trade Engine is not available (graceful fallback)
-  async getAIContext(includeNews: boolean = true, newsLimit: number = 10, signalsHours: number = 24): Promise<TradeEngineAIContext | null> {
+  async getAIContext(includeNews: boolean = true, newsLimit: number = 10, signalsHours: number = 24, source?: string): Promise<TradeEngineAIContext | null> {
     try {
       const params = new URLSearchParams({
         include_news: includeNews.toString(),
         news_limit: newsLimit.toString(),
         signals_hours: signalsHours.toString(),
       });
-      
+      if (source) params.append('source', source);
+
       const response = await fetch(`${this.baseUrl}/api/v1/ai/context?${params}`);
       if (!response.ok) {
         // Trade Engine not available - return null for graceful fallback
@@ -2681,7 +2684,7 @@ export const tradeEngineApi = {
 
   // Get recent trading signals
   // Returns empty array if Trade Engine is not available (graceful fallback)
-  async getSignals(ticker?: string, signalType?: string, hours: number = 24, limit: number = 50): Promise<TradeEngineSignal[]> {
+  async getSignals(ticker?: string, signalType?: string, hours: number = 24, limit: number = 50, source?: string): Promise<TradeEngineSignal[]> {
     try {
       const params = new URLSearchParams({
         hours: hours.toString(),
@@ -2689,7 +2692,8 @@ export const tradeEngineApi = {
       });
       if (ticker) params.append('ticker', ticker);
       if (signalType) params.append('signal_type', signalType);
-      
+      if (source) params.append('source', source);
+
       const response = await fetch(`${this.baseUrl}/api/v1/ai/signals?${params}`);
       if (!response.ok) {
         console.log('[TradeEngine] Signals endpoint not available');

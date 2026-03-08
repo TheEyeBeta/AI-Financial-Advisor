@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { User, Save, Loader2, Mail, Calendar, Shield, AlertTriangle, RefreshCw } from "lucide-react";
+import { User, Save, Loader2, Mail, Calendar, Shield, AlertTriangle, RefreshCw, Database, Zap, Globe } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { supabase } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { format } from "date-fns";
+import { useDataSource, type DataSource } from "@/hooks/use-data-source";
 
 // Helper function to format risk level for display
 const formatRiskLevel = (riskLevel: string | null | undefined): string => {
@@ -323,9 +324,100 @@ const Profile = () => {
             </form>
           </CardContent>
         </Card>
+
+        {/* Data Source Card */}
+        <DataSourceCard />
       </div>
     </AppLayout>
   );
 };
+
+function DataSourceCard() {
+  const { dataSource, setDataSource } = useDataSource();
+
+  const handleChange = (value: string) => {
+    setDataSource(value as DataSource);
+    toast({
+      title: "Data source updated",
+      description:
+        value === "supabase"
+          ? "Using Supabase (cloud) as your data source."
+          : value === "dataapi"
+            ? "Using The Eye DataAPI (live engine) as your data source."
+            : "Auto mode: tries DataAPI first, falls back to Supabase.",
+    });
+  };
+
+  return (
+    <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in duration-300" style={{ animationDelay: '150ms' }}>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Database className="h-4 w-4 text-muted-foreground" />
+          Data Source
+        </CardTitle>
+        <CardDescription className="text-xs">
+          Choose where market data, signals, and analytics come from
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Select value={dataSource} onValueChange={handleChange}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="supabase">
+              <span className="flex items-center gap-2">
+                <Globe className="h-3.5 w-3.5" />
+                Supabase (Cloud)
+              </span>
+            </SelectItem>
+            <SelectItem value="dataapi">
+              <span className="flex items-center gap-2">
+                <Zap className="h-3.5 w-3.5" />
+                The Eye DataAPI (Live)
+              </span>
+            </SelectItem>
+            <SelectItem value="auto">
+              <span className="flex items-center gap-2">
+                <RefreshCw className="h-3.5 w-3.5" />
+                Auto (DataAPI with fallback)
+              </span>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+
+        <div className="space-y-2">
+          {dataSource === "supabase" && (
+            <div className="p-3 rounded-md bg-muted border">
+              <p className="text-xs text-muted-foreground">
+                <span className="font-medium text-foreground">Supabase</span> serves
+                synced snapshots from the cloud database. This is the default and most
+                reliable option.
+              </p>
+            </div>
+          )}
+          {dataSource === "dataapi" && (
+            <div className="p-3 rounded-md bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800">
+              <p className="text-xs text-emerald-800 dark:text-emerald-200">
+                <span className="font-medium">The Eye DataAPI</span> provides live data
+                directly from the trade engine. Requires the DataAPI server to be running
+                and reachable.
+              </p>
+            </div>
+          )}
+          {dataSource === "auto" && (
+            <div className="p-3 rounded-md bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
+              <p className="text-xs text-blue-800 dark:text-blue-200">
+                <span className="font-medium">Auto mode</span> tries The Eye DataAPI
+                first for the freshest data, then falls back to Supabase if the server
+                is unreachable.
+              </p>
+            </div>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
 
 export default Profile;

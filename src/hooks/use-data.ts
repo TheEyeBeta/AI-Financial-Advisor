@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './use-auth';
+import { useDataSource, sourceParam } from './use-data-source';
 import {
   portfolioApi,
   positionsApi,
@@ -193,30 +194,30 @@ export function useCreateChat() {
 // Send a message in a chat
 export function useSendChatMessage() {
   const { userId, userProfile } = useAuth();
+  const { dataSource } = useDataSource();
   const queryClient = useQueryClient();
-  
+
   return useMutation({
-    mutationFn: async ({ chatId, message, isFirstMessage }: { 
-      chatId: string; 
-      message: string; 
+    mutationFn: async ({ chatId, message, isFirstMessage }: {
+      chatId: string;
+      message: string;
       isFirstMessage?: boolean;
     }) => {
       if (!userId) throw new Error('Not authenticated');
-      
+
       // Save user message
       await chatApi.addMessage(userId, chatId, 'user', message);
-      
+
       // Fetch conversation history for context
       const history = await chatApi.getMessages(chatId);
       const chatHistory = history.map(msg => ({
         role: msg.role as 'user' | 'assistant',
         content: msg.content
       }));
-      
-      // Always fetch LIVE data from The Eye Trade Engine (if available)
-      // This ensures the AI has access to market data for any query, including ticker symbols
-      // Falls back to Supabase data if Trade Engine is not available
-      const tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48);
+
+      // Fetch market data context using the user's preferred data source
+      const src = sourceParam(dataSource);
+      const tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48, src);
       
       if (tradeEngineContext) {
         console.log('[AI] Fetched live Trade Engine context:', {
@@ -533,11 +534,13 @@ export function useTradeEngineHealth() {
   });
 }
 
-// Top stocks ranking hook — supports investment horizon (short/long/balanced)
+// Top stocks ranking hook — supports investment horizon and data source toggle
 export function useTopStocks(limit = 20, minScore = 0, horizon: 'short' | 'long' | 'balanced' = 'balanced') {
+  const { dataSource } = useDataSource();
+  const src = sourceParam(dataSource);
   return useQuery({
-    queryKey: ['top-stocks', limit, minScore, horizon],
-    queryFn: () => stockRankingApi.getRanking({ limit, minScore, horizon }),
+    queryKey: ['top-stocks', limit, minScore, horizon, src],
+    queryFn: () => stockRankingApi.getRanking({ limit, minScore, horizon }, src),
     staleTime: 5 * 60 * 1000,
     refetchInterval: 10 * 60 * 1000,
     retry: 2,

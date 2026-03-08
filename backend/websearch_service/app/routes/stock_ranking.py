@@ -19,6 +19,7 @@ Env vars (either prefix accepted so Railway shared-vars work automatically):
 """
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
@@ -28,19 +29,19 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from ..services.dataapi_client import get_dataapi_client
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["stock-ranking"])
 
 # ── In-memory cache ───────────────────────────────────────────────────────────
 CACHE_TTL_SECONDS = 600  # 10 minutes
 
-# Separate cache per horizon so short/long/balanced don't clobber each other
-_cache: dict[str, dict[str, Any]] = {
-    "short": {"data": None, "ts": 0.0},
-    "long": {"data": None, "ts": 0.0},
-    "balanced": {"data": None, "ts": 0.0},
-}
-# Raw snapshots cache (shared — the raw DB data is the same for all horizons)
-_snapshots_cache: dict[str, Any] = {"data": None, "ts": 0.0}
+# Separate cache per horizon×source so different combos don't clobber each other
+_cache: dict[str, dict[str, Any]] = {}
+# Raw snapshots cache keyed by source (shared across horizons for same source)
+_snapshots_cache: dict[str, dict[str, Any]] = {}
 
 
 def _get_supabase_client():
@@ -956,6 +957,48 @@ def _revenue_quality(rev_growth: Optional[float]) -> float:
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
 
+async def _fetch_snapshots_from_dataapi() -> list[dict] | None:
+    """Try to fetch market snapshots from TheEyeBetaDataAPI. Returns None on failure."""
+    client = get_dataapi_client()
+    if not client.is_configured:
+        return None
+    try:
+        data = await client.get_quotes([])  # empty list = all tracked tickers
+        quotes = data.get("quotes", [])
+        if not quotes:
+            return None
+        # Map DataAPI quote fields to the snapshot shape expected by _compute_scores
+        snapshots: list[dict] = []
+        for q in quotes:
+            snapshots.append({
+                "ticker": q.get("ticker", ""),
+                "company_name": q.get("company_name"),
+                "last_price": q.get("last_price"),
+                "price_change_pct": q.get("price_change_pct"),
+                "volume": q.get("volume"),
+                "volume_ratio": q.get("volume_ratio"),
+                "rsi_14": q.get("rsi_14"),
+                "sma_50": q.get("sma_50"),
+                "sma_200": q.get("sma_200"),
+                "macd": q.get("macd"),
+                "macd_signal": q.get("macd_signal"),
+                "macd_histogram": q.get("macd_histogram"),
+                "pe_ratio": q.get("pe_ratio"),
+                "market_cap": q.get("market_cap"),
+                "signal_confidence": q.get("signal_confidence"),
+                "is_bullish": q.get("is_bullish"),
+                "price_vs_sma_50": q.get("price_vs_sma_50"),
+                "eps_growth": q.get("eps_growth"),
+                "revenue_growth": q.get("revenue_growth"),
+                "avg_volume_10d": q.get("avg_volume_10d"),
+                "updated_at": q.get("updated_at"),
+            })
+        return snapshots
+    except Exception as exc:
+        logger.warning("DataAPI fetch failed, will fall back to Supabase: %s", exc)
+        return None
+
+
 @router.get("/api/stocks/ranking", response_model=RankingResponse)
 async def get_stock_ranking(
     limit: int = Query(default=20, ge=1, le=100, description="Top N stocks to return"),
@@ -964,6 +1007,7 @@ async def get_stock_ranking(
         default="balanced",
         description="Investment horizon: 'short' (swing/days-weeks), 'long' (buy-and-hold/months-years), 'balanced' (default)",
     ),
+    source: str = Query(default="supabase", description="Data source: supabase (default), dataapi, or auto"),
 ) -> RankingResponse:
     """
     Return stocks ranked by composite score (0-100).
@@ -984,15 +1028,18 @@ async def get_stock_ranking(
     Includes rank_tier (Strong Buy → Sell) and conviction level (High/Medium/Low)
     based on dimensional agreement.
 
-    Results cached 10 min server-side per horizon.
+    Results cached 10 min server-side per horizon×source. Use `source=dataapi`
+    to fetch from TheEyeBetaDataAPI, or `source=auto` to try DataAPI first
+    with Supabase fallback.
     """
     if horizon not in ("short", "long", "balanced"):
         horizon = "balanced"
 
     now = time.time()
 
-    # ── Per-horizon scored cache ────────────────────────────────────────
-    hcache = _cache[horizon]
+    # ── Per-horizon×source scored cache ─────────────────────────────────
+    cache_key = f"{horizon}:{source}"
+    hcache = _cache.get(cache_key, {"data": None, "ts": 0.0})
     cache_age = now - hcache["ts"]
 
     if hcache["data"] is not None and cache_age < CACHE_TTL_SECONDS:
@@ -1012,11 +1059,21 @@ async def get_stock_ranking(
             cache_age_seconds=round(cache_age, 1),
         )
 
-    # ── Raw snapshots cache (shared across horizons) ────────────────────
-    snap_age = now - _snapshots_cache["ts"]
-    if _snapshots_cache["data"] is not None and snap_age < CACHE_TTL_SECONDS:
-        snapshots: list[dict] = _snapshots_cache["data"]
+    # ── Raw snapshots cache (shared across horizons, keyed by source) ──
+    snap_key = f"snap:{source}"
+    snap_cache = _snapshots_cache.get(snap_key, {"data": None, "ts": 0.0})
+    snap_age = now - snap_cache.get("ts", 0.0)
+    if snap_cache.get("data") is not None and snap_age < CACHE_TTL_SECONDS:
+        snapshots: list[dict] = snap_cache["data"]
     else:
+        snapshots = []
+
+        if source in ("dataapi", "auto"):
+            dataapi_snapshots = await _fetch_snapshots_from_dataapi()
+            if dataapi_snapshots:
+                snapshots = dataapi_snapshots
+
+        if not snapshots and source in ("supabase", "auto"):
         client = _get_supabase_client()
         try:
             result = (
@@ -1026,12 +1083,14 @@ async def get_stock_ranking(
                 .limit(500)
                 .execute()
             )
+            snapshots = result.data or []
         except Exception as exc:
-            raise HTTPException(status_code=502, detail=f"Supabase query failed: {exc}") from exc
+            if source == "supabase":
+                raise HTTPException(status_code=502, detail=f"Supabase query failed: {exc}") from exc
+            logger.warning("Supabase fallback also failed: %s", exc)
 
-        snapshots = result.data or []
-        _snapshots_cache["data"] = snapshots
-        _snapshots_cache["ts"] = time.time()
+        if snapshots:
+            _snapshots_cache[snap_key] = {"data": snapshots, "ts": time.time()}
 
     if not snapshots:
         return RankingResponse(
@@ -1045,8 +1104,7 @@ async def get_stock_ranking(
         )
 
     all_scores = _compute_scores(snapshots, horizon=horizon)
-    hcache["data"] = all_scores
-    hcache["ts"] = time.time()
+    _cache[cache_key] = {"data": all_scores, "ts": time.time()}
 
     filtered = sorted(
         [s for s in all_scores if s.composite_score >= min_score],
