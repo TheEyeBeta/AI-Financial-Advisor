@@ -90,27 +90,9 @@ export default function Admin() {
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
 
-  useEffect(() => {
-    loadAllData();
-  }, [loadAllData]);
-
-  useEffect(() => {
-    if (searchQuery) {
-      const filtered = users.filter(
-        (u) =>
-          u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          u.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          u.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredUsers(filtered);
-    } else {
-      setFilteredUsers(users);
-    }
-  }, [searchQuery, users]);
-
   const BACKEND_URL = import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8000";
 
-  const fetchSystemHealth = useCallback(async () => {
+  const fetchSystemHealth = async () => {
     setHealthLoading(true);
     try {
       const resp = await fetch(`${BACKEND_URL}/api/admin/system-health`);
@@ -123,9 +105,9 @@ export default function Admin() {
     } finally {
       setHealthLoading(false);
     }
-  }, [BACKEND_URL]);
+  };
 
-  const runQuery = useCallback(async (sql?: string) => {
+  const runQuery = async (sql?: string) => {
     const q = sql || queryInput.trim();
     if (!q) return;
     if (sql) setQueryInput(sql);
@@ -147,7 +129,21 @@ export default function Admin() {
     } finally {
       setQueryLoading(false);
     }
-  }, [BACKEND_URL, queryInput]);
+  };
+
+  useEffect(() => {
+    if (searchQuery) {
+      const filtered = users.filter(
+        (u) =>
+          u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          u.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          u.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+      setFilteredUsers(filtered);
+    } else {
+      setFilteredUsers(users);
+    }
+  }, [searchQuery, users]);
 
   const loadAllData = useCallback(async () => {
     setLoading(true);
@@ -159,7 +155,12 @@ export default function Admin() {
       fetchSystemHealth(),
     ]);
     setLoading(false);
-  }, [fetchSystemHealth]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    loadAllData();
+  }, [loadAllData]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
