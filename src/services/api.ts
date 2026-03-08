@@ -2406,10 +2406,17 @@ export const pythonApi = {
     // Use backend AI proxy (keys kept server-side)
     if (pythonBackendUrl) {
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const accessToken = session?.access_token;
+        if (!accessToken) {
+          throw new Error('Not authenticated. Please sign in to use the AI assistant.');
+        }
+
         const response = await fetch(`${pythonBackendUrl}/api/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
             messages,
@@ -2457,9 +2464,18 @@ export const pythonApi = {
     }
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+      const accessToken = session?.access_token;
+      if (!accessToken) {
+        return fallbackTitle(firstMessage);
+      }
+
       const response = await fetch(`${pythonBackendUrl}/api/chat/title`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+        },
         body: JSON.stringify({ first_message: firstMessage }),
       });
 
