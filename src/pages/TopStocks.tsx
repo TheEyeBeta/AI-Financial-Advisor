@@ -18,7 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { useTopStocks } from "@/hooks/use-data";
 import { cn } from "@/lib/utils";
-import type { StockScore } from "@/services/api";
+import type { StockScore, Horizon } from "@/services/api";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -90,6 +90,20 @@ function fmtCap(val: number | null): string {
   if (val >= 1e6) return `$${(val / 1e6).toFixed(0)}M`;
   return `$${val.toFixed(0)}`;
 }
+
+// ── Dimension weights per horizon (must match backend) ────────────────────────
+
+const HORIZON_WEIGHTS: Record<Horizon, { momentum: string; technical: string; fundamental: string; risk: string; quality: string; ml: string }> = {
+  short:    { momentum: "25%", technical: "28%", fundamental: "7%", risk: "10%", quality: "5%", ml: "25%" },
+  long:     { momentum: "7%",  technical: "8%",  fundamental: "35%", risk: "15%", quality: "22%", ml: "13%" },
+  balanced: { momentum: "15%", technical: "20%", fundamental: "25%", risk: "12%", quality: "10%", ml: "18%" },
+};
+
+const HORIZON_LABELS: Record<Horizon, { label: string; description: string }> = {
+  short:    { label: "Short-term", description: "Swing trading — days to weeks. Emphasises momentum, technicals & ML signals." },
+  long:     { label: "Long-term",  description: "Buy-and-hold — months to years. Emphasises fundamentals, quality & risk." },
+  balanced: { label: "Balanced",   description: "Medium-term position trading. Even blend across all dimensions." },
+};
 
 // ── Score Bar Component ───────────────────────────────────────────────────────
 
@@ -308,7 +322,7 @@ function BreakdownRow({ stock }: { stock: StockScore }) {
 
 // ── Stock Card ────────────────────────────────────────────────────────────────
 
-function StockCard({ stock, rank }: { stock: StockScore; rank: number }) {
+function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; horizon: Horizon }) {
   const [expanded, setExpanded] = useState(false);
   const pctColor =
     stock.price_change_pct === null
@@ -407,18 +421,20 @@ function StockCard({ stock, rank }: { stock: StockScore; rank: number }) {
           </div>
         </div>
 
-        {/* Dimension scores — 6 dimensions in 3×2 grid */}
+        {/* Dimension scores — 6 dimensions in 3×2 grid with horizon-aware weights */}
         <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
-          <ScoreBar label="Momentum" score={stock.momentum_score} weight="15%" />
-          <ScoreBar label="Technical" score={stock.technical_score} weight="20%" />
-          <ScoreBar label="Fundamental" score={stock.fundamental_score} weight="25%" />
-          <ScoreBar label="Risk-Adj." score={stock.risk_score} weight="12%" />
-          <ScoreBar label="Quality" score={stock.quality_score} weight="10%" />
-          <ScoreBar
-            label={stock.has_ml_data ? "ML Signal" : "ML Signal (—)"}
-            score={stock.ml_score ?? 50}
-            weight={stock.has_ml_data ? "18%" : "redistributed"}
-          />
+          {(() => { const hw = HORIZON_WEIGHTS[horizon]; return (<>
+            <ScoreBar label="Momentum" score={stock.momentum_score} weight={hw.momentum} />
+            <ScoreBar label="Technical" score={stock.technical_score} weight={hw.technical} />
+            <ScoreBar label="Fundamental" score={stock.fundamental_score} weight={hw.fundamental} />
+            <ScoreBar label="Risk-Adj." score={stock.risk_score} weight={hw.risk} />
+            <ScoreBar label="Quality" score={stock.quality_score} weight={hw.quality} />
+            <ScoreBar
+              label={stock.has_ml_data ? "ML Signal" : "ML Signal (—)"}
+              score={stock.ml_score ?? 50}
+              weight={stock.has_ml_data ? hw.ml : "redistributed"}
+            />
+          </>); })()}
         </div>
 
         {/* Expand/collapse breakdown */}
@@ -442,12 +458,14 @@ function StockCard({ stock, rank }: { stock: StockScore; rank: number }) {
 
 const LIMIT_OPTIONS = [20, 50, 100] as const;
 const MIN_SCORE_OPTIONS = [0, 40, 60] as const;
+const HORIZON_OPTIONS: Horizon[] = ["short", "balanced", "long"];
 
 const TopStocks = () => {
   const [limit, setLimit] = useState<number>(20);
   const [minScore, setMinScore] = useState<number>(0);
+  const [horizon, setHorizon] = useState<Horizon>("balanced");
 
-  const { data, isLoading, error, refetch, isRefetching } = useTopStocks(limit, minScore);
+  const { data, isLoading, error, refetch, isRefetching } = useTopStocks(limit, minScore, horizon);
 
   const stocks = data?.stocks ?? [];
   const hasStaleData = data?.hasStaleData ?? false;
@@ -509,6 +527,25 @@ const TopStocks = () => {
               ))}
             </div>
 
+            {/* Horizon toggle */}
+            <div className="flex rounded-lg border border-border/50 p-1 bg-muted/30">
+              {HORIZON_OPTIONS.map(h => (
+                <Button
+                  key={h}
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    "h-7 px-3 text-xs rounded-md transition-all",
+                    horizon === h && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                  )}
+                  onClick={() => setHorizon(h)}
+                  title={HORIZON_LABELS[h].description}
+                >
+                  {HORIZON_LABELS[h].label}
+                </Button>
+              ))}
+            </div>
+
             {/* Refresh */}
             <Button
               variant="outline"
@@ -552,10 +589,13 @@ const TopStocks = () => {
           )}
         </div>
 
-        {/* Scoring methodology note */}
-        <div className="text-[11px] text-muted-foreground/60 space-x-3 animate-in fade-in duration-300">
-          <span>6-dimension scoring (30+ metrics) normalized 0–100 across universe.</span>
-          <span>Not financial advice. Past signals do not guarantee future results.</span>
+        {/* Horizon description + methodology note */}
+        <div className="text-[11px] text-muted-foreground/60 space-y-1 animate-in fade-in duration-300">
+          <p className="text-muted-foreground/80">
+            <span className="font-medium text-foreground/70">{HORIZON_LABELS[horizon].label}:</span>{" "}
+            {HORIZON_LABELS[horizon].description}
+          </p>
+          <p>6-dimension scoring (30+ metrics) normalized 0–100 across universe. Not financial advice.</p>
         </div>
 
         {/* Content */}
@@ -608,7 +648,7 @@ const TopStocks = () => {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {stocks.map((stock, index) => (
-              <StockCard key={stock.ticker} stock={stock} rank={index + 1} />
+              <StockCard key={stock.ticker} stock={stock} rank={index + 1} horizon={horizon} />
             ))}
           </div>
         )}

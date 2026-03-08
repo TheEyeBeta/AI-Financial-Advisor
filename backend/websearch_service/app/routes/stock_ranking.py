@@ -33,7 +33,14 @@ router = APIRouter(tags=["stock-ranking"])
 # ── In-memory cache ───────────────────────────────────────────────────────────
 CACHE_TTL_SECONDS = 600  # 10 minutes
 
-_cache: dict[str, Any] = {"data": None, "ts": 0.0}
+# Separate cache per horizon so short/long/balanced don't clobber each other
+_cache: dict[str, dict[str, Any]] = {
+    "short": {"data": None, "ts": 0.0},
+    "long": {"data": None, "ts": 0.0},
+    "balanced": {"data": None, "ts": 0.0},
+}
+# Raw snapshots cache (shared — the raw DB data is the same for all horizons)
+_snapshots_cache: dict[str, Any] = {"data": None, "ts": 0.0}
 
 
 def _get_supabase_client():
@@ -127,6 +134,7 @@ class RankingResponse(BaseModel):
     has_stale_data: bool
     has_ml_data: bool
     total_scored: int
+    horizon: str  # "short" | "long" | "balanced"
     cached: bool
     cache_age_seconds: float
 
@@ -511,37 +519,138 @@ def _conviction(dimensions_bullish: int, composite: float) -> str:
     return "Low"
 
 
-# ── Dimension weights ───────────────────────────────────────────────────────
-# These mirror how professional portfolio managers weight signals:
-#  - Fundamentals dominate (valuation drives long-term returns)
-#  - Technical confirms entry timing
-#  - Momentum captures trend persistence
-#  - Risk filters out dangerous setups
-#  - Quality screens for business durability
-#  - ML adds algorithmic edge
+# ── Dimension weights by horizon ─────────────────────────────────────────────
+#
+# Short-term (swing / days–weeks):
+#   Technical + Momentum dominate — ride the trend, time entries precisely.
+#   Fundamentals barely matter on a 1-week trade. ML signals are inherently
+#   short-term so they get extra weight.
+#
+# Long-term (buy-and-hold / months–years):
+#   Fundamentals + Quality dominate — valuation is the #1 driver of long-term
+#   returns. Risk matters for drawdown control. Momentum and technicals are
+#   minor timing helpers at best.
+#
+# Balanced (default):
+#   Even blend suitable for medium-term position trading.
 
-WEIGHTS_WITH_ML = {
-    "momentum": 0.15,
-    "technical": 0.20,
-    "fundamental": 0.25,
-    "risk": 0.12,
-    "quality": 0.10,
-    "ml": 0.18,
+HORIZON_WEIGHTS: dict[str, dict[str, dict[str, float]]] = {
+    "short": {
+        "with_ml": {
+            "momentum": 0.25,
+            "technical": 0.28,
+            "fundamental": 0.07,
+            "risk": 0.10,
+            "quality": 0.05,
+            "ml": 0.25,
+        },
+        "without_ml": {
+            "momentum": 0.32,
+            "technical": 0.35,
+            "fundamental": 0.10,
+            "risk": 0.13,
+            "quality": 0.10,
+        },
+    },
+    "long": {
+        "with_ml": {
+            "momentum": 0.07,
+            "technical": 0.08,
+            "fundamental": 0.35,
+            "risk": 0.15,
+            "quality": 0.22,
+            "ml": 0.13,
+        },
+        "without_ml": {
+            "momentum": 0.08,
+            "technical": 0.10,
+            "fundamental": 0.40,
+            "risk": 0.17,
+            "quality": 0.25,
+        },
+    },
+    "balanced": {
+        "with_ml": {
+            "momentum": 0.15,
+            "technical": 0.20,
+            "fundamental": 0.25,
+            "risk": 0.12,
+            "quality": 0.10,
+            "ml": 0.18,
+        },
+        "without_ml": {
+            "momentum": 0.18,
+            "technical": 0.24,
+            "fundamental": 0.30,
+            "risk": 0.15,
+            "quality": 0.13,
+        },
+    },
 }
 
-WEIGHTS_WITHOUT_ML = {
-    "momentum": 0.18,
-    "technical": 0.24,
-    "fundamental": 0.30,
-    "risk": 0.15,
-    "quality": 0.13,
+# Sub-metric weight overrides per horizon — these adjust the *internal*
+# blending within each dimension so the dimension score itself is tuned
+# for the investment horizon, not just the final composite weighting.
+
+# Momentum sub-weights: short emphasises daily price action + volume,
+# long emphasises 200-day trend + 52-week position.
+MOMENTUM_SUB: dict[str, dict[str, float]] = {
+    "short": {
+        "pc": 0.25, "sma50": 0.12, "sma200": 0.05, "ema50": 0.10,
+        "vr": 0.20, "sma_align": 0.10, "ema_trend": 0.13, "pos52w": 0.05,
+    },
+    "long": {
+        "pc": 0.05, "sma50": 0.15, "sma200": 0.22, "ema50": 0.10,
+        "vr": 0.05, "sma_align": 0.15, "ema_trend": 0.10, "pos52w": 0.18,
+    },
+    "balanced": {
+        "pc": 0.15, "sma50": 0.18, "sma200": 0.15, "ema50": 0.12,
+        "vr": 0.12, "sma_align": 0.13, "ema_trend": 0.10, "pos52w": 0.05,
+    },
+}
+
+# Technical sub-weights: short gives more to RSI/Stochastic (quick reversal
+# signals), long gives more to ADX/golden cross (trend structure).
+TECHNICAL_SUB: dict[str, dict[str, float]] = {
+    "short": {
+        "rsi": 0.20, "macd": 0.10, "macd_hist": 0.12, "gc": 0.05,
+        "adx": 0.08, "stoch": 0.15, "wr": 0.10, "cci": 0.08, "bb": 0.12,
+    },
+    "long": {
+        "rsi": 0.12, "macd": 0.12, "macd_hist": 0.08, "gc": 0.18,
+        "adx": 0.18, "stoch": 0.05, "wr": 0.05, "cci": 0.07, "bb": 0.15,
+    },
+    "balanced": {
+        "rsi": 0.18, "macd": 0.12, "macd_hist": 0.10, "gc": 0.10,
+        "adx": 0.12, "stoch": 0.10, "wr": 0.08, "cci": 0.08, "bb": 0.12,
+    },
+}
+
+# Fundamental sub-weights: short barely cares, long leans heavily on
+# GARP (PEG), forward valuation, and growth persistence.
+FUNDAMENTAL_SUB: dict[str, dict[str, float]] = {
+    "short": {
+        "pe": 0.10, "fwd_pe": 0.08, "peg": 0.10, "pb": 0.08, "ps": 0.08,
+        "eps_g": 0.25, "rev_g": 0.18, "div": 0.03, "peg2": 0.10,
+    },
+    "long": {
+        "pe": 0.10, "fwd_pe": 0.12, "peg": 0.18, "pb": 0.08, "ps": 0.07,
+        "eps_g": 0.18, "rev_g": 0.12, "div": 0.08, "peg2": 0.07,
+    },
+    "balanced": {
+        "pe": 0.12, "fwd_pe": 0.10, "peg": 0.14, "pb": 0.08, "ps": 0.08,
+        "eps_g": 0.22, "rev_g": 0.16, "div": 0.05, "peg2": 0.05,
+    },
 }
 
 
 # ── Main scoring engine ─────────────────────────────────────────────────────
 
-def _compute_scores(snapshots: list[dict]) -> list[StockScore]:
+def _compute_scores(snapshots: list[dict], horizon: str = "balanced") -> list[StockScore]:
     stale_cutoff = time.time() - 86400  # 24 h
+    msub = MOMENTUM_SUB[horizon]
+    tsub = TECHNICAL_SUB[horizon]
+    fsub = FUNDAMENTAL_SUB[horizon]
 
     # ── Normalized maps (relative to universe) ──────────────────────────────
 
@@ -602,14 +711,14 @@ def _compute_scores(snapshots: list[dict]) -> list[StockScore]:
         pos_52w_score = (pos_52w * 100.0) if pos_52w is not None else 50.0
 
         momentum = (
-            _get(pc_map, t) * 0.15             # daily price change
-            + _get(sma50_map, t) * 0.18         # price vs SMA50
-            + _get(sma200_map, t) * 0.15        # price vs SMA200
-            + _get(ema50_map, t) * 0.12         # price vs EMA50
-            + _get(vr_map, t) * 0.12            # volume ratio (confirmation)
-            + _sma_alignment_score(s) * 0.13    # multi-SMA alignment
-            + _ema_trend_score(s) * 0.10        # price above EMA stack
-            + pos_52w_score * 0.05              # 52-week position
+            _get(pc_map, t) * msub["pc"]
+            + _get(sma50_map, t) * msub["sma50"]
+            + _get(sma200_map, t) * msub["sma200"]
+            + _get(ema50_map, t) * msub["ema50"]
+            + _get(vr_map, t) * msub["vr"]
+            + _sma_alignment_score(s) * msub["sma_align"]
+            + _ema_trend_score(s) * msub["ema_trend"]
+            + pos_52w_score * msub["pos52w"]
         )
 
         # ── 2. TECHNICAL SCORE (20%) ────────────────────────────────────────
@@ -624,15 +733,15 @@ def _compute_scores(snapshots: list[dict]) -> list[StockScore]:
         bb_pos = _bollinger_position(s)
 
         technical = (
-            _rsi_momentum_score(rsi14) * 0.18         # RSI sweet-spot
-            + _get(macd_map, t) * 0.12                 # MACD difference (universe)
-            + _macd_histogram_score(hist_val) * 0.10   # MACD histogram direction
-            + _get(gc_map, t) * 0.10                   # golden cross ratio
-            + _adx_trend_score(adx_val) * 0.12         # trend strength
-            + _stochastic_score(stoch_k, stoch_d) * 0.10  # stochastic
-            + _williams_r_score(wr) * 0.08             # Williams %R
-            + _cci_score(cci_val) * 0.08               # CCI
-            + _bollinger_momentum_score(bb_pos) * 0.12 # Bollinger position
+            _rsi_momentum_score(rsi14) * tsub["rsi"]
+            + _get(macd_map, t) * tsub["macd"]
+            + _macd_histogram_score(hist_val) * tsub["macd_hist"]
+            + _get(gc_map, t) * tsub["gc"]
+            + _adx_trend_score(adx_val) * tsub["adx"]
+            + _stochastic_score(stoch_k, stoch_d) * tsub["stoch"]
+            + _williams_r_score(wr) * tsub["wr"]
+            + _cci_score(cci_val) * tsub["cci"]
+            + _bollinger_momentum_score(bb_pos) * tsub["bb"]
         )
 
         # ── 3. FUNDAMENTAL SCORE (25%) ──────────────────────────────────────
@@ -640,15 +749,15 @@ def _compute_scores(snapshots: list[dict]) -> list[StockScore]:
         peg_val = _f(s.get("peg_ratio"))
 
         fundamental = (
-            _get(pe_map, t) * 0.12           # trailing P/E (lower=better)
-            + _get(fwd_pe_map, t) * 0.10     # forward P/E (lower=better)
-            + _peg_score(peg_val) * 0.14     # PEG ratio (GARP)
-            + _get(pb_map, t) * 0.08         # price/book (lower=better)
-            + _get(ps_map, t) * 0.08         # price/sales (lower=better)
-            + _get(eps_map, t) * 0.22        # EPS growth (higher=better)
-            + _get(rev_map, t) * 0.16        # revenue growth (higher=better)
-            + _get(div_map, t) * 0.05        # dividend yield (income)
-            + _peg_score(peg_val) * 0.05     # extra PEG weight (GARP emphasis)
+            _get(pe_map, t) * fsub["pe"]
+            + _get(fwd_pe_map, t) * fsub["fwd_pe"]
+            + _peg_score(peg_val) * fsub["peg"]
+            + _get(pb_map, t) * fsub["pb"]
+            + _get(ps_map, t) * fsub["ps"]
+            + _get(eps_map, t) * fsub["eps_g"]
+            + _get(rev_map, t) * fsub["rev_g"]
+            + _get(div_map, t) * fsub["div"]
+            + _peg_score(peg_val) * fsub["peg2"]
         )
 
         # ── 4. RISK-ADJUSTED SCORE (12%) ────────────────────────────────────
@@ -679,8 +788,9 @@ def _compute_scores(snapshots: list[dict]) -> list[StockScore]:
         has_ml = ml_raw is not None
 
         # ── COMPOSITE ───────────────────────────────────────────────────────
+        hw = HORIZON_WEIGHTS[horizon]
         if has_ml:
-            w = WEIGHTS_WITH_ML
+            w = hw["with_ml"]
             composite = (
                 momentum * w["momentum"]
                 + technical * w["technical"]
@@ -690,7 +800,7 @@ def _compute_scores(snapshots: list[dict]) -> list[StockScore]:
                 + ml_raw * w["ml"]  # type: ignore[operator]
             )
         else:
-            w = WEIGHTS_WITHOUT_ML
+            w = hw["without_ml"]
             composite = (
                 momentum * w["momentum"]
                 + technical * w["technical"]
@@ -850,29 +960,43 @@ def _revenue_quality(rev_growth: Optional[float]) -> float:
 async def get_stock_ranking(
     limit: int = Query(default=20, ge=1, le=100, description="Top N stocks to return"),
     min_score: float = Query(default=0.0, ge=0, le=100, description="Minimum composite score filter"),
+    horizon: str = Query(
+        default="balanced",
+        description="Investment horizon: 'short' (swing/days-weeks), 'long' (buy-and-hold/months-years), 'balanced' (default)",
+    ),
 ) -> RankingResponse:
     """
     Return stocks ranked by composite score (0-100).
 
-    Scoring dimensions (all min-max normalized across the universe):
-    - Momentum 15%: price change, SMA/EMA position, volume, 52w range, multi-SMA alignment
-    - Technical 20%: RSI, MACD, ADX, Stochastic, Williams %R, CCI, Bollinger Bands
-    - Fundamental 25%: P/E, forward P/E, PEG, P/B, P/S, EPS growth, revenue growth, dividends
-    - Risk-Adjusted 12%: RSI extremes, Bollinger width, 52w position safety, ADX trend clarity
-    - Quality 10%: market cap, earnings consistency, revenue quality, dividends
-    - ML Signal 18%: signal_confidence × is_bullish direction (redistributed if unavailable)
+    The `horizon` parameter shifts dimension weights and sub-metric emphasis:
+
+    **short** — Swing / day trading (days to weeks):
+      Momentum 25%, Technical 28%, Fundamental 7%, Risk 10%, Quality 5%, ML 25%
+      Sub-metrics emphasise daily price action, volume spikes, RSI/Stochastic.
+
+    **long** — Buy-and-hold (months to years):
+      Momentum 7%, Technical 8%, Fundamental 35%, Risk 15%, Quality 22%, ML 13%
+      Sub-metrics emphasise PEG/forward-PE, SMA200, 52-week position, earnings quality.
+
+    **balanced** (default) — Medium-term position trading:
+      Momentum 15%, Technical 20%, Fundamental 25%, Risk 12%, Quality 10%, ML 18%
 
     Includes rank_tier (Strong Buy → Sell) and conviction level (High/Medium/Low)
     based on dimensional agreement.
 
-    Results cached 10 min server-side.
+    Results cached 10 min server-side per horizon.
     """
-    now = time.time()
-    cache_age = now - _cache["ts"]
+    if horizon not in ("short", "long", "balanced"):
+        horizon = "balanced"
 
-    # Serve from cache if still fresh
-    if _cache["data"] is not None and cache_age < CACHE_TTL_SECONDS:
-        all_scores: list[StockScore] = _cache["data"]
+    now = time.time()
+
+    # ── Per-horizon scored cache ────────────────────────────────────────
+    hcache = _cache[horizon]
+    cache_age = now - hcache["ts"]
+
+    if hcache["data"] is not None and cache_age < CACHE_TTL_SECONDS:
+        all_scores: list[StockScore] = hcache["data"]
         filtered = sorted(
             [s for s in all_scores if s.composite_score >= min_score],
             key=lambda s: s.composite_score,
@@ -883,37 +1007,46 @@ async def get_stock_ranking(
             has_stale_data=any(not s.data_fresh for s in all_scores),
             has_ml_data=any(s.has_ml_data for s in all_scores),
             total_scored=len(all_scores),
+            horizon=horizon,
             cached=True,
             cache_age_seconds=round(cache_age, 1),
         )
 
-    # Cache miss — query Supabase
-    client = _get_supabase_client()
-    try:
-        result = (
-            client.table("stock_snapshots")
-            .select("*")
-            .order("updated_at", desc=True)
-            .limit(500)
-            .execute()
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Supabase query failed: {exc}") from exc
+    # ── Raw snapshots cache (shared across horizons) ────────────────────
+    snap_age = now - _snapshots_cache["ts"]
+    if _snapshots_cache["data"] is not None and snap_age < CACHE_TTL_SECONDS:
+        snapshots: list[dict] = _snapshots_cache["data"]
+    else:
+        client = _get_supabase_client()
+        try:
+            result = (
+                client.table("stock_snapshots")
+                .select("*")
+                .order("updated_at", desc=True)
+                .limit(500)
+                .execute()
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Supabase query failed: {exc}") from exc
 
-    snapshots: list[dict] = result.data or []
+        snapshots = result.data or []
+        _snapshots_cache["data"] = snapshots
+        _snapshots_cache["ts"] = time.time()
+
     if not snapshots:
         return RankingResponse(
             stocks=[],
             has_stale_data=False,
             has_ml_data=False,
             total_scored=0,
+            horizon=horizon,
             cached=False,
             cache_age_seconds=0.0,
         )
 
-    all_scores = _compute_scores(snapshots)
-    _cache["data"] = all_scores
-    _cache["ts"] = time.time()
+    all_scores = _compute_scores(snapshots, horizon=horizon)
+    hcache["data"] = all_scores
+    hcache["ts"] = time.time()
 
     filtered = sorted(
         [s for s in all_scores if s.composite_score >= min_score],
@@ -925,6 +1058,7 @@ async def get_stock_ranking(
         has_stale_data=any(not s.data_fresh for s in all_scores),
         has_ml_data=any(s.has_ml_data for s in all_scores),
         total_scored=len(all_scores),
+        horizon=horizon,
         cached=False,
         cache_age_seconds=0.0,
     )

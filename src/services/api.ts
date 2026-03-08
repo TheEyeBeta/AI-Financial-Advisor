@@ -1443,9 +1443,12 @@ export interface StockScore {
   data_fresh: boolean;
 }
 
+export type Horizon = 'short' | 'long' | 'balanced';
+
 export interface TopStocksOptions {
   limit?: number;
   minScore?: number;
+  horizon?: Horizon;
 }
 
 export interface TopStocksResult {
@@ -1453,14 +1456,15 @@ export interface TopStocksResult {
   hasStaleData: boolean;
   hasMlData: boolean;
   totalScored: number;
+  horizon: Horizon;
 }
 
 // Calls GET /api/stocks/ranking on the Python backend.
 // The backend queries Supabase directly, scores all stocks server-side,
-// caches results for 10 min, and returns only the top-N ranked stocks.
+// caches results for 10 min per horizon, and returns only the top-N ranked stocks.
 export const stockRankingApi = {
   async getRanking(options: TopStocksOptions = {}): Promise<TopStocksResult> {
-    const { limit = 20, minScore = 0 } = options;
+    const { limit = 20, minScore = 0, horizon = 'balanced' } = options;
     const backendUrl = import.meta.env.VITE_PYTHON_API_URL;
     if (!backendUrl) {
       throw new Error('VITE_PYTHON_API_URL is not configured');
@@ -1469,6 +1473,7 @@ export const stockRankingApi = {
     const params = new URLSearchParams({
       limit: String(limit),
       min_score: String(minScore),
+      horizon,
     });
 
     const res = await fetch(`${backendUrl}/api/stocks/ranking?${params}`);
@@ -1484,6 +1489,7 @@ export const stockRankingApi = {
       hasStaleData: data.has_stale_data,
       hasMlData: data.has_ml_data,
       totalScored: data.total_scored,
+      horizon: data.horizon,
     };
   },
 };
