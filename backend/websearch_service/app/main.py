@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 
+from .routes.admin import router as admin_router
 from .routes.ai_proxy import router as ai_proxy_router
 from .routes.search import check_search_provider, router as search_router
 from .routes.news import router as news_router
@@ -150,6 +151,7 @@ def create_app() -> FastAPI:
     app.include_router(news_router, prefix="")
     app.include_router(trade_engine_router, prefix="")
     app.include_router(stock_ranking_router, prefix="")
+    app.include_router(admin_router, prefix="")
 
     return app
 

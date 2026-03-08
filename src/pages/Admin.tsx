@@ -4,10 +4,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { 
-  Users, Shield, Database, MessageSquare, TrendingUp, 
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Users, Shield, Database, MessageSquare, TrendingUp,
   Activity, Search, Download, Trash2, RefreshCw,
-  BarChart3, UserCheck, UserX, Clock
+  BarChart3, UserCheck, UserX, Clock, Heart, Server,
+  Wifi, WifiOff, Loader2, Play, Terminal
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
@@ -78,6 +80,16 @@ export default function Admin() {
   const [tradingStats, setTradingStats] = useState<TradingStats>({ totalPositions: 0, totalTrades: 0, totalJournalEntries: 0 });
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
 
+  // System Health state
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [systemHealth, setSystemHealth] = useState<Record<string, any> | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [queryInput, setQueryInput] = useState("");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [queryResults, setQueryResults] = useState<Record<string, any> | null>(null);
+  const [queryLoading, setQueryLoading] = useState(false);
+  const [queryError, setQueryError] = useState<string | null>(null);
+
   useEffect(() => {
     loadAllData();
   }, [loadAllData]);
@@ -96,6 +108,47 @@ export default function Admin() {
     }
   }, [searchQuery, users]);
 
+  const BACKEND_URL = import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8000";
+
+  const fetchSystemHealth = useCallback(async () => {
+    setHealthLoading(true);
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/admin/system-health`);
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      setSystemHealth(data);
+    } catch (err) {
+      console.error("System health check failed:", err);
+      setSystemHealth({ overall: "error", error: String(err), services: {} });
+    } finally {
+      setHealthLoading(false);
+    }
+  }, [BACKEND_URL]);
+
+  const runQuery = useCallback(async (sql?: string) => {
+    const q = sql || queryInput.trim();
+    if (!q) return;
+    if (sql) setQueryInput(sql);
+    setQueryLoading(true);
+    setQueryError(null);
+    setQueryResults(null);
+    try {
+      const resp = await fetch(
+        `${BACKEND_URL}/api/admin/dataapi-query?q=${encodeURIComponent(q)}&limit=100`
+      );
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(body || `HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      setQueryResults(data);
+    } catch (err) {
+      setQueryError(String(err));
+    } finally {
+      setQueryLoading(false);
+    }
+  }, [BACKEND_URL, queryInput]);
+
   const loadAllData = useCallback(async () => {
     setLoading(true);
     await Promise.all([
@@ -103,9 +156,10 @@ export default function Admin() {
       fetchChatStats(),
       fetchTradingStats(),
       fetchRecentActivity(),
+      fetchSystemHealth(),
     ]);
     setLoading(false);
-  }, []);
+  }, [fetchSystemHealth]);
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -367,6 +421,10 @@ export default function Admin() {
             <TabsTrigger value="activity" className="gap-2">
               <Activity className="h-4 w-4" />
               Activity
+            </TabsTrigger>
+            <TabsTrigger value="system-health" className="gap-2">
+              <Heart className="h-4 w-4" />
+              System Health
             </TabsTrigger>
           </TabsList>
 
@@ -664,6 +722,412 @@ export default function Admin() {
                         <Clock className="h-4 w-4 text-muted-foreground" />
                       </div>
                     ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* System Health Tab */}
+          <TabsContent value="system-health" className="space-y-4">
+            {/* Connection Status Cards */}
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">System Health Monitor</h2>
+                <p className="text-sm text-muted-foreground">
+                  Connection status for Supabase, DataAPI, and Railway backend
+                </p>
+              </div>
+              <Button onClick={fetchSystemHealth} disabled={healthLoading} variant="outline" size="sm" className="gap-2">
+                <RefreshCw className={`h-4 w-4 ${healthLoading ? "animate-spin" : ""}`} />
+                Check Health
+              </Button>
+            </div>
+
+            {/* Overall Status Banner */}
+            {systemHealth && (
+              <div className={`rounded-lg border p-4 ${
+                systemHealth.overall === "healthy" ? "border-green-500/50 bg-green-500/5" :
+                systemHealth.overall === "degraded" ? "border-yellow-500/50 bg-yellow-500/5" :
+                "border-red-500/50 bg-red-500/5"
+              }`}>
+                <div className="flex items-center gap-3">
+                  {systemHealth.overall === "healthy" ? (
+                    <Wifi className="h-5 w-5 text-green-500" />
+                  ) : systemHealth.overall === "degraded" ? (
+                    <Wifi className="h-5 w-5 text-yellow-500" />
+                  ) : (
+                    <WifiOff className="h-5 w-5 text-red-500" />
+                  )}
+                  <div>
+                    <div className="font-semibold capitalize">
+                      System {systemHealth.overall}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Last checked: {systemHealth.timestamp ? new Date(systemHealth.timestamp).toLocaleString() : "Never"}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Service Status Cards */}
+            <div className="grid gap-4 md:grid-cols-3">
+              {/* Supabase */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Supabase</CardTitle>
+                  <Database className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  {healthLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Checking...
+                    </div>
+                  ) : systemHealth?.services?.supabase ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-3 w-3 rounded-full ${
+                          systemHealth.services.supabase.status === "connected" ? "bg-green-500" : "bg-red-500"
+                        }`} />
+                        <span className="font-medium capitalize">{systemHealth.services.supabase.status}</span>
+                      </div>
+                      {systemHealth.services.supabase.url && (
+                        <p className="text-xs text-muted-foreground truncate">{systemHealth.services.supabase.url}</p>
+                      )}
+                      {systemHealth.services.supabase.message && (
+                        <p className="text-xs text-red-400">{systemHealth.services.supabase.message}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Not checked yet</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* DataAPI */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">DataAPI Server</CardTitle>
+                  <Server className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  {healthLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Checking...
+                    </div>
+                  ) : systemHealth?.services?.dataapi ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-3 w-3 rounded-full ${
+                          systemHealth.services.dataapi.status === "connected" ? "bg-green-500" :
+                          systemHealth.services.dataapi.status === "not_configured" ? "bg-yellow-500" : "bg-red-500"
+                        }`} />
+                        <span className="font-medium capitalize">{systemHealth.services.dataapi.status}</span>
+                      </div>
+                      {systemHealth.services.dataapi.database !== undefined && (
+                        <p className="text-xs">
+                          Database: <Badge variant={systemHealth.services.dataapi.database ? "default" : "destructive"} className="text-xs">
+                            {systemHealth.services.dataapi.database ? "Connected" : "Disconnected"}
+                          </Badge>
+                        </p>
+                      )}
+                      {systemHealth.services.dataapi.url && (
+                        <p className="text-xs text-muted-foreground truncate">{systemHealth.services.dataapi.url}</p>
+                      )}
+                      {systemHealth.services.dataapi.message && (
+                        <p className="text-xs text-red-400">{systemHealth.services.dataapi.message}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Not checked yet</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Backend */}
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between pb-2">
+                  <CardTitle className="text-sm font-medium">Railway Backend</CardTitle>
+                  <Activity className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  {healthLoading ? (
+                    <div className="flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Checking...
+                    </div>
+                  ) : systemHealth?.services?.backend ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <div className={`h-3 w-3 rounded-full ${
+                          systemHealth.services.backend.status === "connected" ? "bg-green-500" : "bg-red-500"
+                        }`} />
+                        <span className="font-medium capitalize">{systemHealth.services.backend.status}</span>
+                      </div>
+                      {systemHealth.services.backend.uptime_seconds && (
+                        <p className="text-xs text-muted-foreground">
+                          Uptime: {Math.round(systemHealth.services.backend.uptime_seconds / 60)}m
+                        </p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Not checked yet</p>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* DataAPI Dashboard Data */}
+            {systemHealth?.dataapi_dashboard && !systemHealth.dataapi_dashboard.error && (
+              <div className="grid gap-4 md:grid-cols-2">
+                {/* Engine API Info */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">DataAPI Info</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
+                    {systemHealth.dataapi_dashboard.api && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Name</span>
+                          <span className="font-medium">{systemHealth.dataapi_dashboard.api.name}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Version</span>
+                          <span className="font-medium">{systemHealth.dataapi_dashboard.api.version}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Environment</span>
+                          <Badge variant="outline">{systemHealth.dataapi_dashboard.api.environment}</Badge>
+                        </div>
+                      </>
+                    )}
+                    {systemHealth.dataapi_dashboard.database && (
+                      <>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">DB Connected</span>
+                          <Badge variant={systemHealth.dataapi_dashboard.database.connected ? "default" : "destructive"}>
+                            {systemHealth.dataapi_dashboard.database.connected ? "Yes" : "No"}
+                          </Badge>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">DB URL</span>
+                          <span className="text-xs font-mono truncate max-w-[200px]">{systemHealth.dataapi_dashboard.database.url_masked}</span>
+                        </div>
+                      </>
+                    )}
+                    {systemHealth.dataapi_dashboard.active_tickers !== undefined && (
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Active Tickers</span>
+                        <span className="font-medium">{systemHealth.dataapi_dashboard.active_tickers}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Table Row Counts */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Engine Database Tables</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {systemHealth.dataapi_dashboard.tables?.length > 0 ? (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">Table</TableHead>
+                            <TableHead className="text-xs text-right">Rows</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {systemHealth.dataapi_dashboard.tables.map((t: { table: string; row_count: number }) => (
+                            <TableRow key={t.table}>
+                              <TableCell className="text-xs font-mono">{t.table}</TableCell>
+                              <TableCell className="text-xs text-right">
+                                {t.row_count >= 0 ? t.row_count.toLocaleString() : (
+                                  <span className="text-red-400">N/A</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">No table data</p>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Engine Workers */}
+                {systemHealth.dataapi_dashboard.engine_workers?.length > 0 && (
+                  <Card className="md:col-span-2">
+                    <CardHeader>
+                      <CardTitle className="text-sm">Engine Worker Heartbeats</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">Worker</TableHead>
+                            <TableHead className="text-xs">Status</TableHead>
+                            <TableHead className="text-xs">Last Heartbeat</TableHead>
+                            <TableHead className="text-xs">Ago</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {systemHealth.dataapi_dashboard.engine_workers.map(
+                            (w: { worker_name: string; status: string; last_heartbeat: string | null; seconds_ago: number | null }) => (
+                            <TableRow key={w.worker_name}>
+                              <TableCell className="text-xs font-mono">{w.worker_name}</TableCell>
+                              <TableCell>
+                                <Badge variant={w.status === "running" ? "default" : "secondary"} className="text-xs">
+                                  {w.status}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">{w.last_heartbeat || "—"}</TableCell>
+                              <TableCell className="text-xs">
+                                {w.seconds_ago !== null ? (
+                                  w.seconds_ago < 60 ? `${w.seconds_ago}s` : `${Math.round(w.seconds_ago / 60)}m`
+                                ) : "—"}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Service Clients */}
+                {systemHealth.dataapi_dashboard.service_clients?.length > 0 && (
+                  <Card className="md:col-span-2">
+                    <CardHeader>
+                      <CardTitle className="text-sm">Service Clients (IAM)</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">Client ID</TableHead>
+                            <TableHead className="text-xs">Name</TableHead>
+                            <TableHead className="text-xs">Active</TableHead>
+                            <TableHead className="text-xs">Scopes</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {systemHealth.dataapi_dashboard.service_clients.map(
+                            (c: { client_id: string; display_name: string | null; is_active: boolean; scope_count: number }) => (
+                            <TableRow key={c.client_id}>
+                              <TableCell className="text-xs font-mono">{c.client_id}</TableCell>
+                              <TableCell className="text-xs">{c.display_name || "—"}</TableCell>
+                              <TableCell>
+                                <Badge variant={c.is_active ? "default" : "destructive"} className="text-xs">
+                                  {c.is_active ? "Yes" : "No"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-xs">{c.scope_count}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
+            )}
+
+            {/* Database Query Console */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Terminal className="h-4 w-4" />
+                      Engine Database Query Console
+                    </CardTitle>
+                    <CardDescription>
+                      Run read-only SELECT queries against the engine database via DataAPI
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Preset Query Buttons */}
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT ticker, company_name, is_active FROM tickers ORDER BY ticker LIMIT 50")}>
+                    All Tickers
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT t.ticker, ls.last_price, ls.price_change_pct, ls.rsi_14, ls.updated_at FROM latest_snapshot ls JOIN tickers t ON t.ticker_id = ls.ticker_id ORDER BY ls.updated_at DESC LIMIT 25")}>
+                    Latest Prices
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT t.ticker, ls.latest_signal, ls.signal_confidence, ls.signal_strategy, ls.signal_ts FROM latest_snapshot ls JOIN tickers t ON t.ticker_id = ls.ticker_id WHERE ls.latest_signal IS NOT NULL ORDER BY ls.signal_ts DESC LIMIT 25")}>
+                    Latest Signals
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT * FROM paper_trades ORDER BY created_at DESC LIMIT 20")}>
+                    Recent Trades
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT * FROM portfolio_valuation ORDER BY valuation_date DESC LIMIT 5")}>
+                    Portfolio
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT * FROM market_news ORDER BY published_at DESC LIMIT 15")}>
+                    Market News
+                  </Button>
+                </div>
+
+                {/* Custom Query Input */}
+                <div className="space-y-2">
+                  <Textarea
+                    placeholder="SELECT * FROM tickers WHERE is_active = true LIMIT 10"
+                    value={queryInput}
+                    onChange={(e) => setQueryInput(e.target.value)}
+                    className="font-mono text-sm min-h-[80px]"
+                  />
+                  <div className="flex items-center gap-3">
+                    <Button onClick={() => runQuery()} disabled={queryLoading || !queryInput.trim()} size="sm" className="gap-2">
+                      {queryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                      Execute Query
+                    </Button>
+                    {queryResults && (
+                      <span className="text-xs text-muted-foreground">
+                        {queryResults.row_count} rows returned
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Query Error */}
+                {queryError && (
+                  <div className="rounded-lg border border-red-500/50 bg-red-500/5 p-3">
+                    <p className="text-sm text-red-400">{queryError}</p>
+                  </div>
+                )}
+
+                {/* Query Results Table */}
+                {queryResults?.rows?.length > 0 && (
+                  <div className="max-h-[400px] overflow-auto rounded-lg border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          {Object.keys(queryResults.rows[0]).map((col) => (
+                            <TableHead key={col} className="text-xs whitespace-nowrap">{col}</TableHead>
+                          ))}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {queryResults.rows.map((row: Record<string, string | null>, idx: number) => (
+                          <TableRow key={idx}>
+                            {Object.values(row).map((val, ci) => (
+                              <TableCell key={ci} className="text-xs max-w-[200px] truncate">
+                                {val !== null ? String(val) : <span className="text-muted-foreground">null</span>}
+                              </TableCell>
+                            ))}
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
                   </div>
                 )}
               </CardContent>
