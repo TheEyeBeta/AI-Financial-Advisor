@@ -87,8 +87,8 @@ def _verify_jwt_via_supabase_rest(token: str) -> dict:
     """
     import httpx
 
-    supabase_url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
-    supabase_anon_key = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY")
+    supabase_url = (os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL") or "").strip()
+    supabase_anon_key = (os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY") or "").strip()
 
     if not supabase_url or not supabase_anon_key:
         raise HTTPException(
@@ -96,11 +96,15 @@ def _verify_jwt_via_supabase_rest(token: str) -> dict:
             detail="Auth configuration missing: SUPABASE_URL and SUPABASE_ANON_KEY required.",
         )
 
+    # Strip the token to remove any trailing whitespace/newlines that would
+    # cause httpx to reject the header value as "Illegal header value".
+    clean_token = token.strip()
+
     try:
         resp = httpx.get(
             f"{supabase_url.rstrip('/')}/auth/v1/user",
             headers={
-                "Authorization": f"Bearer {token}",
+                "Authorization": f"Bearer {clean_token}",
                 "apikey": supabase_anon_key,
             },
             timeout=5.0,
