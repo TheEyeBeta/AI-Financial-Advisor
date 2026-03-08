@@ -1476,21 +1476,30 @@ export const stockRankingApi = {
       horizon,
     });
 
-    const res = await fetch(`${backendUrl}/api/stocks/ranking?${params}`);
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `Stock ranking API error: ${res.statusText}`);
-    }
+    try {
+      const res = await fetch(`${backendUrl}/api/stocks/ranking?${params}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || `Stock ranking API error: ${res.statusText}`);
+      }
 
-    // Backend returns snake_case; map to camelCase for the frontend
-    const data = await res.json();
-    return {
-      stocks: data.stocks,
-      hasStaleData: data.has_stale_data,
-      hasMlData: data.has_ml_data,
-      totalScored: data.total_scored,
-      horizon: data.horizon,
-    };
+      // Backend returns snake_case; map to camelCase for the frontend
+      const data = await res.json();
+      return {
+        stocks: data.stocks,
+        hasStaleData: data.has_stale_data,
+        hasMlData: data.has_ml_data,
+        totalScored: data.total_scored,
+        horizon: data.horizon,
+      };
+    } catch (error) {
+      // Network or CSP error — log and re-throw with a clearer message
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        console.warn('[StockRanking] Network/CSP error fetching stock ranking from:', `${backendUrl}/api/stocks/ranking`);
+        throw new Error('Unable to reach the stock ranking backend. The server may be down or blocked by Content Security Policy.');
+      }
+      throw error;
+    }
   },
 };
 
@@ -2574,8 +2583,13 @@ export const tradeEngineApi = {
       }
       return data;
     } catch (error) {
-      // Network error - return empty results gracefully
-      console.warn('Failed to fetch news from backend, using Supabase instead:', error);
+      // Network or CSP error — return empty results so the UI can fall back to Supabase
+      const isCspOrNetwork = error instanceof TypeError && error.message === 'Failed to fetch';
+      if (isCspOrNetwork) {
+        console.warn('[TradeEngine] News fetch blocked (CSP or network). Falling back to Supabase. Backend URL:', this.baseUrl);
+      } else {
+        console.warn('[TradeEngine] Failed to fetch news from backend, using Supabase instead:', error);
+      }
       return { items: [], next_cursor: null };
     }
   },
