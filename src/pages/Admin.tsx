@@ -92,11 +92,27 @@ export default function Admin() {
 
   const BACKEND_URL = import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8000";
 
+  /** Get the current Supabase access token for authenticated admin requests. */
+  const getAuthHeaders = async (): Promise<HeadersInit> => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error("Not authenticated — please sign in again");
+    }
+    return {
+      "Authorization": `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    };
+  };
+
   const fetchSystemHealth = async () => {
     setHealthLoading(true);
     try {
-      const resp = await fetch(`${BACKEND_URL}/api/admin/system-health`);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const headers = await getAuthHeaders();
+      const resp = await fetch(`${BACKEND_URL}/api/admin/system-health`, { headers });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(body || `HTTP ${resp.status}`);
+      }
       const data = await resp.json();
       setSystemHealth(data);
     } catch (err) {
@@ -115,8 +131,10 @@ export default function Admin() {
     setQueryError(null);
     setQueryResults(null);
     try {
+      const headers = await getAuthHeaders();
       const resp = await fetch(
-        `${BACKEND_URL}/api/admin/dataapi-query?q=${encodeURIComponent(q)}&limit=100`
+        `${BACKEND_URL}/api/admin/dataapi-query?q=${encodeURIComponent(q)}&limit=100`,
+        { headers }
       );
       if (!resp.ok) {
         const body = await resp.text();
