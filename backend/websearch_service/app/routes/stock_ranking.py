@@ -1074,20 +1074,20 @@ async def get_stock_ranking(
                 snapshots = dataapi_snapshots
 
         if not snapshots and source in ("supabase", "auto"):
-        client = _get_supabase_client()
-        try:
-            result = (
-                client.table("stock_snapshots")
-                .select("*")
-                .order("updated_at", desc=True)
-                .limit(500)
-                .execute()
-            )
-            snapshots = result.data or []
-        except Exception as exc:
-            if source == "supabase":
-                raise HTTPException(status_code=502, detail=f"Supabase query failed: {exc}") from exc
-            logger.warning("Supabase fallback also failed: %s", exc)
+            client = _get_supabase_client()
+            try:
+                result = (
+                    client.table("stock_snapshots")
+                    .select("*")
+                    .order("updated_at", desc=True)
+                    .limit(500)
+                    .execute()
+                )
+                snapshots = result.data or []
+            except Exception as exc:
+                if source == "supabase":
+                    raise HTTPException(status_code=502, detail=f"Supabase query failed: {exc}") from exc
+                logger.warning("Supabase fallback also failed: %s", exc)
 
         if snapshots:
             _snapshots_cache[snap_key] = {"data": snapshots, "ts": time.time()}
