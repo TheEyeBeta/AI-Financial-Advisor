@@ -533,11 +533,11 @@ export function useTradeEngineHealth() {
   });
 }
 
-// Top stocks ranking hook
-export function useTopStocks(limit = 20, minScore = 0) {
+// Top stocks ranking hook — supports investment horizon (short/long/balanced)
+export function useTopStocks(limit = 20, minScore = 0, horizon: 'short' | 'long' | 'balanced' = 'balanced') {
   return useQuery({
-    queryKey: ['top-stocks', limit, minScore],
-    queryFn: () => stockRankingApi.getRanking({ limit, minScore }),
+    queryKey: ['top-stocks', limit, minScore, horizon],
+    queryFn: () => stockRankingApi.getRanking({ limit, minScore, horizon }),
     staleTime: 5 * 60 * 1000,
     refetchInterval: 10 * 60 * 1000,
     retry: 2,

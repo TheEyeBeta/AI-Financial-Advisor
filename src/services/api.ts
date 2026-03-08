@@ -1395,28 +1395,60 @@ export interface StockScore {
   price_change_pct: number | null;
   updated_at: string | null;
   composite_score: number;
+  rank_tier: string;       // "Strong Buy" | "Buy" | "Hold" | "Underperform" | "Sell"
+  conviction: string;      // "High" | "Medium" | "Low"
   momentum_score: number;
   technical_score: number;
   fundamental_score: number;
+  risk_score: number;
+  quality_score: number;
   ml_score: number | null;
   has_ml_data: boolean;
+  dimensions_bullish: number;
   breakdown: {
+    // Technical
     rsi_14: number | null;
+    rsi_9: number | null;
     macd_above_signal: boolean | null;
+    macd_histogram: number | null;
     golden_cross: boolean | null;
+    adx: number | null;
+    stochastic_k: number | null;
+    stochastic_d: number | null;
+    williams_r: number | null;
+    cci: number | null;
+    bollinger_position: number | null;
+    // Momentum
     volume_ratio: number | null;
+    price_vs_sma_50: number | null;
+    price_vs_sma_200: number | null;
+    price_vs_ema_50: number | null;
+    fifty_two_week_position: number | null;
+    // Fundamental
     pe_ratio: number | null;
+    forward_pe: number | null;
+    peg_ratio: number | null;
+    price_to_book: number | null;
+    price_to_sales: number | null;
+    eps: number | null;
     eps_growth: number | null;
     revenue_growth: number | null;
+    dividend_yield: number | null;
+    market_cap: number | null;
+    // ML/Signals
     signal_confidence: number | null;
     is_bullish: boolean | null;
+    signal_strategy: string | null;
   };
   data_fresh: boolean;
 }
 
+export type Horizon = 'short' | 'long' | 'balanced';
+
 export interface TopStocksOptions {
   limit?: number;
   minScore?: number;
+  horizon?: Horizon;
 }
 
 export interface TopStocksResult {
@@ -1424,14 +1456,15 @@ export interface TopStocksResult {
   hasStaleData: boolean;
   hasMlData: boolean;
   totalScored: number;
+  horizon: Horizon;
 }
 
 // Calls GET /api/stocks/ranking on the Python backend.
 // The backend queries Supabase directly, scores all stocks server-side,
-// caches results for 10 min, and returns only the top-N ranked stocks.
+// caches results for 10 min per horizon, and returns only the top-N ranked stocks.
 export const stockRankingApi = {
   async getRanking(options: TopStocksOptions = {}): Promise<TopStocksResult> {
-    const { limit = 20, minScore = 0 } = options;
+    const { limit = 20, minScore = 0, horizon = 'balanced' } = options;
     const backendUrl = import.meta.env.VITE_PYTHON_API_URL;
     if (!backendUrl) {
       throw new Error('VITE_PYTHON_API_URL is not configured');
@@ -1440,6 +1473,7 @@ export const stockRankingApi = {
     const params = new URLSearchParams({
       limit: String(limit),
       min_score: String(minScore),
+      horizon,
     });
 
     const res = await fetch(`${backendUrl}/api/stocks/ranking?${params}`);
@@ -1455,6 +1489,7 @@ export const stockRankingApi = {
       hasStaleData: data.has_stale_data,
       hasMlData: data.has_ml_data,
       totalScored: data.total_scored,
+      horizon: data.horizon,
     };
   },
 };
