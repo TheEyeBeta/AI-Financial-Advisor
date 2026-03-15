@@ -55,6 +55,7 @@ export function SupabaseConnectionTest() {
 
       // Test 3: Try to query a table
       const { error } = await supabase
+        .schema('trading')
         .from('portfolio_history')
         .select('count')
         .limit(1);

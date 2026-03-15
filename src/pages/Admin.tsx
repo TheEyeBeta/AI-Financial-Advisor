@@ -190,6 +190,7 @@ export default function Admin() {
   const fetchUsers = async () => {
     try {
       const { data, error } = await supabase
+        .schema("core")
         .from("users")
         .select("id, email, first_name, last_name, userType, is_verified, experience_level, risk_level, created_at")
         .order("created_at", { ascending: false });
@@ -207,9 +208,9 @@ export default function Admin() {
       const today = new Date().toISOString().split('T')[0];
       
       const [chatsResult, messagesResult, todayResult] = await Promise.all([
-        supabase.from("chats").select("id", { count: "exact", head: true }),
-        supabase.from("chat_messages").select("id", { count: "exact", head: true }),
-        supabase.from("chats").select("id", { count: "exact", head: true }).gte("updated_at", today),
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chat_messages").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }).gte("updated_at", today),
       ]);
 
       setChatStats({
@@ -225,9 +226,9 @@ export default function Admin() {
   const fetchTradingStats = async () => {
     try {
       const [positionsResult, tradesResult, journalResult] = await Promise.all([
-        supabase.from("open_positions").select("id", { count: "exact", head: true }),
-        supabase.from("trades").select("id", { count: "exact", head: true }),
-        supabase.from("trade_journal").select("id", { count: "exact", head: true }),
+        supabase.schema("trading").from("open_positions").select("id", { count: "exact", head: true }),
+        supabase.schema("trading").from("trades").select("id", { count: "exact", head: true }),
+        supabase.schema("trading").from("trade_journal").select("id", { count: "exact", head: true }),
       ]);
 
       setTradingStats({
@@ -244,6 +245,7 @@ export default function Admin() {
     try {
       // Get recent chat messages as activity
       const { data } = await supabase
+        .schema("ai")
         .from("chat_messages")
         .select("id, user_id, role, created_at")
         .order("created_at", { ascending: false })
@@ -268,6 +270,7 @@ export default function Admin() {
     const newType = currentType === 'Admin' ? 'User' : 'Admin';
     try {
       const { error } = await supabase
+        .schema("core")
         .from("users")
         .update({ userType: newType })
         .eq("id", userId);
@@ -293,6 +296,7 @@ export default function Admin() {
   const deleteUser = async (userId: string) => {
     try {
       const { error } = await supabase
+        .schema("core")
         .from("users")
         .delete()
         .eq("id", userId);

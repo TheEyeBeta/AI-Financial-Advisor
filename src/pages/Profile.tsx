@@ -73,6 +73,7 @@ const Profile = () => {
       }
 
       const { error } = await supabase
+        .schema("core")
         .from("users")
         .update(updates)
         .eq("id", userProfile.id);

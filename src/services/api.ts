@@ -243,6 +243,7 @@ function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType:
 export const portfolioApi = {
   async getHistory(userId: string): Promise<PortfolioHistory[]> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('portfolio_history')
       .select('*')
       .eq('user_id', userId)
@@ -254,6 +255,7 @@ export const portfolioApi = {
 
   async addHistoryEntry(userId: string, date: string, value: number): Promise<PortfolioHistory> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('portfolio_history')
       .insert({ user_id: userId, date, value })
       .select()
@@ -268,6 +270,7 @@ export const portfolioApi = {
 export const positionsApi = {
   async getAll(userId: string): Promise<OpenPosition[]> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('open_positions')
       .select('*')
       .eq('user_id', userId)
@@ -279,6 +282,7 @@ export const positionsApi = {
 
   async create(userId: string, position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<OpenPosition> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('open_positions')
       .insert({ ...position, user_id: userId })
       .select()
@@ -291,18 +295,20 @@ export const positionsApi = {
   async update(id: string, userId: string, updates: Partial<OpenPosition>): Promise<OpenPosition> {
     // First verify ownership
     const { data: position, error: fetchError } = await supabase
+      .schema('trading')
       .from('open_positions')
       .select('user_id')
       .eq('id', id)
       .eq('user_id', userId)
       .single();
-    
+
     if (fetchError || !position) {
       throw new Error('Position not found or access denied');
     }
-    
+
     // Update with user_id check for defense-in-depth
     const { data, error } = await supabase
+      .schema('trading')
       .from('open_positions')
       .update(updates)
       .eq('id', id)
@@ -317,18 +323,20 @@ export const positionsApi = {
   async delete(id: string, userId: string): Promise<void> {
     // First verify ownership
     const { data: position, error: fetchError } = await supabase
+      .schema('trading')
       .from('open_positions')
       .select('user_id')
       .eq('id', id)
       .eq('user_id', userId)
       .single();
-    
+
     if (fetchError || !position) {
       throw new Error('Position not found or access denied');
     }
-    
+
     // Delete with user_id check for defense-in-depth
     const { error } = await supabase
+      .schema('trading')
       .from('open_positions')
       .delete()
       .eq('id', id)
@@ -342,6 +350,7 @@ export const positionsApi = {
 export const tradesApi = {
   async getAll(userId: string): Promise<Trade[]> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('trades')
       .select('*')
       .eq('user_id', userId)
@@ -353,6 +362,7 @@ export const tradesApi = {
 
   async getClosed(userId: string): Promise<Trade[]> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('trades')
       .select('*')
       .eq('user_id', userId)
@@ -365,6 +375,7 @@ export const tradesApi = {
 
   async create(userId: string, trade: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<Trade> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('trades')
       .insert({ ...trade, user_id: userId })
       .select()
@@ -409,6 +420,7 @@ export const tradesApi = {
 export const journalApi = {
   async getAll(userId: string): Promise<TradeJournalEntry[]> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('trade_journal')
       .select('*')
       .eq('user_id', userId)
@@ -420,6 +432,7 @@ export const journalApi = {
 
   async create(userId: string, entry: Omit<TradeJournalEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'trade_id'> & { trade_id?: string | null }): Promise<TradeJournalEntry> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('trade_journal')
       .insert({ ...entry, user_id: userId })
       .select()
@@ -431,6 +444,7 @@ export const journalApi = {
 
   async update(id: string, updates: Partial<TradeJournalEntry>): Promise<TradeJournalEntry> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('trade_journal')
       .update(updates)
       .eq('id', id)
@@ -443,6 +457,7 @@ export const journalApi = {
 
   async delete(id: string): Promise<void> {
     const { error } = await supabase
+      .schema('trading')
       .from('trade_journal')
       .delete()
       .eq('id', id);
@@ -457,6 +472,7 @@ export const chatsApi = {
   // Get all chats for a user with message counts
   async getAll(userId: string): Promise<ChatWithMessages[]> {
     const { data: chats, error: chatsError } = await supabase
+      .schema('ai')
       .from('chats')
       .select('*')
       .eq('user_id', userId)
@@ -468,6 +484,7 @@ export const chatsApi = {
     // Get message counts and last messages for each chat
     const chatIds = chats.map(c => c.id);
     const { data: messages, error: messagesError } = await supabase
+      .schema('ai')
       .from('chat_messages')
       .select('*')
       .in('chat_id', chatIds)
@@ -494,6 +511,7 @@ export const chatsApi = {
   // Create a new chat
   async create(userId: string, title?: string): Promise<Chat> {
     const { data, error } = await supabase
+      .schema('ai')
       .from('chats')
       .insert({ user_id: userId, title: title || 'New Chat' })
       .select()
@@ -514,6 +532,7 @@ export const chatsApi = {
     }
     
     const { data, error } = await supabase
+      .schema('ai')
       .from('chats')
       .update({ title, updated_at: new Date().toISOString() })
       .eq('id', chatId)
@@ -527,6 +546,7 @@ export const chatsApi = {
   // Delete a chat (cascade deletes messages)
   async delete(chatId: string): Promise<void> {
     const { error } = await supabase
+      .schema('ai')
       .from('chats')
       .delete()
       .eq('id', chatId);
@@ -537,15 +557,17 @@ export const chatsApi = {
   // Get single chat with messages
   async getWithMessages(chatId: string): Promise<ChatWithMessages | null> {
     const { data: chat, error: chatError } = await supabase
+      .schema('ai')
       .from('chats')
       .select('*')
       .eq('id', chatId)
       .single();
-    
+
     if (chatError) throw chatError;
     if (!chat) return null;
 
     const { data: messages, error: messagesError } = await supabase
+      .schema('ai')
       .from('chat_messages')
       .select('*')
       .eq('chat_id', chatId)
@@ -566,6 +588,7 @@ export const chatApi = {
   // Get messages for a specific chat
   async getMessages(chatId: string): Promise<ChatMessage[]> {
     const { data, error } = await supabase
+      .schema('ai')
       .from('chat_messages')
       .select('*')
       .eq('chat_id', chatId)
@@ -578,6 +601,7 @@ export const chatApi = {
   // Legacy: Get all messages for a user (for backward compatibility)
   async getAllUserMessages(userId: string): Promise<ChatMessage[]> {
     const { data, error } = await supabase
+      .schema('ai')
       .from('chat_messages')
       .select('*')
       .eq('user_id', userId)
@@ -597,6 +621,7 @@ export const chatApi = {
     }
     
     const { data, error } = await supabase
+      .schema('ai')
       .from('chat_messages')
       .insert({ user_id: userId, chat_id: chatId, role, content })
       .select()
@@ -607,6 +632,7 @@ export const chatApi = {
     // Update chat's updated_at timestamp
     try {
       await supabase
+        .schema('ai')
         .from('chats')
         .update({ updated_at: new Date().toISOString() })
         .eq('id', chatId);
@@ -620,6 +646,7 @@ export const chatApi = {
 
   async clearMessages(chatId: string): Promise<void> {
     const { error } = await supabase
+      .schema('ai')
       .from('chat_messages')
       .delete()
       .eq('chat_id', chatId);
@@ -764,6 +791,7 @@ export const learningApi = {
 export const achievementsApi = {
   async getAll(userId: string): Promise<Achievement[]> {
     const { data, error } = await supabase
+      .schema('core')
       .from('achievements')
       .select('*')
       .eq('user_id', userId)
@@ -775,6 +803,7 @@ export const achievementsApi = {
 
   async unlock(userId: string, name: string, icon?: string): Promise<Achievement> {
     const { data, error } = await supabase
+      .schema('core')
       .from('achievements')
       .insert({ user_id: userId, name, icon })
       .select()
@@ -789,6 +818,7 @@ export const achievementsApi = {
 export const marketApi = {
   async getIndices(): Promise<MarketIndex[]> {
     const { data, error } = await supabase
+      .schema('market')
       .from('market_indices')
       .select('*')
       .order('symbol', { ascending: true });
@@ -799,6 +829,7 @@ export const marketApi = {
 
   async getTrendingStocks(): Promise<TrendingStock[]> {
     const { data, error } = await supabase
+      .schema('market')
       .from('trending_stocks')
       .select('*')
       .order('updated_at', { ascending: false })
@@ -911,6 +942,7 @@ export function scoreNewsImportance(article: {
 export const newsApi = {
   async getLatest(limit: number = 5): Promise<NewsArticle[]> {
     const { data, error } = await supabase
+      .schema('market')
       .from('news')
       .select('*')
       .order('published_at', { ascending: false })
@@ -928,6 +960,7 @@ export const newsApi = {
 
   async getAll(): Promise<NewsArticle[]> {
     const { data, error } = await supabase
+      .schema('market')
       .from('news')
       .select('*')
       .order('published_at', { ascending: false });
@@ -947,6 +980,7 @@ export const newsApi = {
     const since = new Date(Date.now() - hours * 3_600_000).toISOString();
 
     const { data, error } = await supabase
+      .schema('market')
       .from('news')
       .select('*')
       .gte('published_at', since)
@@ -1183,6 +1217,7 @@ export const stockSnapshotsApi = {
     console.log('[Cache] Initializing - loading first', stockCache.PRELOAD_COUNT, 'stocks...');
     
     const { data, error } = await supabase
+      .schema('market')
       .from('stock_snapshots')
       .select('*')
       .order('updated_at', { ascending: false })
@@ -1219,10 +1254,11 @@ export const stockSnapshotsApi = {
     // Cache miss - fetch from database
     console.log('[Cache] Miss for main list - fetching from database');
     let query = supabase
+      .schema('market')
       .from('stock_snapshots')
       .select('*')
       .order('updated_at', { ascending: false });
-    
+
     // Fetch at least PRELOAD_COUNT to populate cache, or more if requested
     const fetchLimit = Math.max(limit || 0, stockCache.PRELOAD_COUNT);
     query = query.limit(fetchLimit);
@@ -1247,6 +1283,7 @@ export const stockSnapshotsApi = {
     // Cache miss - fetch from database
     console.log('[Cache] Miss for ticker:', ticker, '- fetching from database');
     const { data, error } = await supabase
+      .schema('market')
       .from('stock_snapshots')
       .select('*')
       .eq('ticker', ticker.toUpperCase())
@@ -1273,6 +1310,7 @@ export const stockSnapshotsApi = {
     // Cache miss - fetch from database
     console.log('[Cache] Miss for company name:', companyName, '- fetching from database');
     const { data, error } = await supabase
+      .schema('market')
       .from('stock_snapshots')
       .select('*')
       .ilike('company_name', `%${companyName}%`)
@@ -1319,6 +1357,7 @@ export const stockSnapshotsApi = {
     // Fetch missing tickers from database
     console.log('[Cache] Fetching', tickersToFetch.length, 'missing tickers from database');
     const { data, error } = await supabase
+      .schema('market')
       .from('stock_snapshots')
       .select('*')
       .in('ticker', tickersToFetch)
@@ -1341,6 +1380,7 @@ export const stockSnapshotsApi = {
   async getWithSignals(limit?: number): Promise<StockSnapshot[]> {
     // This query is dynamic (filtered by signal), so we fetch fresh but cache results
     let query = supabase
+      .schema('market')
       .from('stock_snapshots')
       .select('*')
       .not('latest_signal', 'is', null)
@@ -1369,6 +1409,7 @@ export const stockSnapshotsApi = {
     cutoffTime.setHours(cutoffTime.getHours() - hours);
     
     let query = supabase
+      .schema('market')
       .from('stock_snapshots')
       .select('*')
       .gte('updated_at', cutoffTime.toISOString())
