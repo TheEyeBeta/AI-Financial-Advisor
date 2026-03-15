@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -368,13 +368,17 @@ export default function AcademyLesson() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const isDesktopXl = useIsDesktopXl();
 
+  const latestLoadReqRef = useRef(0);
+
   const loadLesson = useCallback(async () => {
     if (!user?.id || !slug) return;
+    const reqId = ++latestLoadReqRef.current;
     try {
       setLoading(true);
       setError(null);
 
       const foundLesson = await academyApi.getLessonBySlug(slug);
+      if (reqId !== latestLoadReqRef.current) return;
       if (!foundLesson) {
         navigate("/academy");
         return;
@@ -386,6 +390,8 @@ export default function AcademyLesson() {
         academyApi.getUserLessonProgress(user.id),
         academyApi.getTierEnrollments(user.id),
       ]);
+
+      if (reqId !== latestLoadReqRef.current) return;
 
       const foundTier = tiersData.find((t) => t.id === foundLesson.tier_id);
 
@@ -422,7 +428,12 @@ export default function AcademyLesson() {
         await academyApi
           .upsertLessonProgress(user.id, foundLesson.id, 'in_progress')
           .catch((err) => console.error('Failed to upsert lesson progress to in_progress:', err));
-        // Update local progress state
+      }
+
+      if (reqId !== latestLoadReqRef.current) return;
+
+      // Update local progress state
+      if (!existingProgress || existingProgress.status !== 'completed') {
         const updated = progressData.filter((p) => p.lesson_id !== foundLesson.id);
         updated.push({
           id: existingProgress?.id || '',
@@ -448,11 +459,14 @@ export default function AcademyLesson() {
       setAllLessons(allLessonsData);
       setEnrollments(enrollmentsData.map((e) => e.tier_id));
     } catch (err) {
+      if (reqId !== latestLoadReqRef.current) return;
       console.error("Error loading lesson:", err);
       setError("Failed to load lesson. Please try again.");
       toast({ title: "Error", description: "Failed to load lesson.", variant: "destructive" });
     } finally {
-      setLoading(false);
+      if (reqId === latestLoadReqRef.current) {
+        setLoading(false);
+      }
     }
   }, [user?.id, slug, navigate]);
 
@@ -571,7 +585,7 @@ export default function AcademyLesson() {
             <div className="flex items-center gap-3 lg:hidden">
               <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
                 <SheetTrigger asChild>
-                  <Button variant="outline" size="icon" className="h-8 w-8 flex-shrink-0">
+                  <Button variant="outline" size="icon" className="h-8 w-8 flex-shrink-0" aria-label="Open lesson menu">
                     <Menu className="h-4 w-4" />
                   </Button>
                 </SheetTrigger>
@@ -675,10 +689,11 @@ export default function AcademyLesson() {
       {!tutorOpen && (
         <Button
           className="fixed bottom-6 right-6 rounded-full shadow-lg gap-2 z-20"
+          aria-label="Ask AI Tutor"
           onClick={() => setTutorOpen(true)}
         >
           <Bot className="h-4 w-4" />
-          <span className="hidden sm:inline">Ask AI Tutor</span>
+          <span className="hidden sm:inline" aria-hidden="true">Ask AI Tutor</span>
         </Button>
       )}
 

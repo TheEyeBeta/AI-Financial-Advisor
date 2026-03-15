@@ -31,19 +31,25 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
   const [loadingSession, setLoadingSession] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const latestInitReqRef = useRef(0);
 
   const initSession = useCallback(async () => {
     if (!user?.id) return;
+    const reqId = ++latestInitReqRef.current;
     try {
       setLoadingSession(true);
       const sess = await academyApi.getChatSession(user.id, lesson.id);
-      setSession(sess);
       const msgs = await academyApi.getChatMessages(sess.id);
+      if (reqId !== latestInitReqRef.current) return;
+      setSession(sess);
       setMessages(msgs);
     } catch (err) {
+      if (reqId !== latestInitReqRef.current) return;
       console.error("Failed to init tutor session:", err);
     } finally {
-      setLoadingSession(false);
+      if (reqId === latestInitReqRef.current) {
+        setLoadingSession(false);
+      }
     }
   }, [user?.id, lesson.id]);
 
