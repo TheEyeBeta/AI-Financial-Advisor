@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,19 +47,16 @@ export default function AcademyLanding() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    loadData();
-  }, [user?.id]);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     if (!user?.id) return;
     try {
       setLoading(true);
       setError(null);
 
       // Ensure profile exists
-      await academyApi.upsertProfile(user.id).catch(() => null);
+      await academyApi.upsertProfile(user.id).catch((err) =>
+        console.error('Failed to upsert academy profile:', err),
+      );
 
       const [tiersData, lessonsData, progressData, enrollmentsData] = await Promise.all([
         academyApi.getTiers(),
@@ -77,8 +74,12 @@ export default function AcademyLanding() {
 
       // Beginner is always enrolled
       if (!enrolledTierIds.has(TIER_IDS.BEGINNER)) {
-        await academyApi.enrollInTier(user.id, TIER_IDS.BEGINNER, 'default').catch(() => null);
-        enrolledTierIds.add(TIER_IDS.BEGINNER);
+        await academyApi
+          .enrollInTier(user.id, TIER_IDS.BEGINNER, 'default')
+          .then(() => enrolledTierIds.add(TIER_IDS.BEGINNER))
+          .catch((err) =>
+            console.error(`Failed to enroll user ${user.id} in Beginner tier:`, err),
+          );
       }
 
       const completedLessonIds = new Set(
@@ -99,8 +100,10 @@ export default function AcademyLanding() {
       ) {
         await academyApi
           .enrollInTier(user.id, TIER_IDS.INTERMEDIATE, 'beginner_completion')
-          .catch(() => null);
-        enrolledTierIds.add(TIER_IDS.INTERMEDIATE);
+          .then(() => enrolledTierIds.add(TIER_IDS.INTERMEDIATE))
+          .catch((err) =>
+            console.error(`Failed to enroll user ${user.id} in Intermediate tier:`, err),
+          );
       }
 
       if (
@@ -109,8 +112,10 @@ export default function AcademyLanding() {
       ) {
         await academyApi
           .enrollInTier(user.id, TIER_IDS.ADVANCED, 'intermediate_completion')
-          .catch(() => null);
-        enrolledTierIds.add(TIER_IDS.ADVANCED);
+          .then(() => enrolledTierIds.add(TIER_IDS.ADVANCED))
+          .catch((err) =>
+            console.error(`Failed to enroll user ${user.id} in Advanced tier:`, err),
+          );
       }
 
       // Reload enrollments after potential auto-enrolls
@@ -123,7 +128,12 @@ export default function AcademyLanding() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    loadData();
+  }, [user?.id, loadData]);
 
   const enrolledTierIds = new Set(enrollments.map((e) => e.tier_id));
   const completedLessonIds = new Set(

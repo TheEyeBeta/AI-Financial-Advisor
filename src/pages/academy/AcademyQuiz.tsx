@@ -72,6 +72,8 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
     return !!answers[q.id];
   });
 
+  const AI_GRADER_TIMEOUT_MS = 15_000;
+
   async function callAIGrader(question: QuizQuestion, answer: string): Promise<{ score: number; rationale: string }> {
     try {
       const template = await academyApi.getPromptTemplate('short_answer_grader');
@@ -89,23 +91,32 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
       const accessToken = session?.access_token;
       if (!accessToken) return { score: 50, rationale: "Not authenticated." };
 
-      const response = await fetch(`${pythonBackendUrl}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: 'system', content: systemPrompt },
-            {
-              role: 'user',
-              content: `Grade this answer. Return ONLY a JSON object: {"score": <0-100>, "rationale": "<brief explanation>"}. Question: ${question.prompt_md}\nAnswer: ${answer}`,
-            },
-          ],
-          max_tokens: 300,
-        }),
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), AI_GRADER_TIMEOUT_MS);
+
+      let response: Response;
+      try {
+        response = await fetch(`${pythonBackendUrl}/api/chat`, {
+          method: 'POST',
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            messages: [
+              { role: 'system', content: systemPrompt },
+              {
+                role: 'user',
+                content: `Grade this answer. Return ONLY a JSON object: {"score": <0-100>, "rationale": "<brief explanation>"}. Question: ${question.prompt_md}\nAnswer: ${answer}`,
+              },
+            ],
+            max_tokens: 300,
+          }),
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) return { score: 50, rationale: "Grading unavailable." };
 
@@ -122,7 +133,10 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
         };
       }
       return { score: 50, rationale: content.slice(0, 200) };
-    } catch {
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return { score: 50, rationale: "Grading timed out." };
+      }
       return { score: 50, rationale: "Grading unavailable." };
     }
   }
@@ -133,14 +147,22 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
 
     try {
       const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
-      const questionResults: QuestionResult[] = [];
 
-      for (const question of questions) {
+      // Grade all question types; short-answer questions are sent to the AI in parallel
+      const shortAnswerQuestions = questions.filter((q) => q.question_type === 'short_answer');
+      const aiGradeResults = await Promise.all(
+        shortAnswerQuestions.map((q) => callAIGrader(q, textAnswers[q.id] || '')),
+      );
+      const aiResultsByQuestionId = new Map(
+        shortAnswerQuestions.map((q, i) => [q.id, aiGradeResults[i]]),
+      );
+
+      const questionResults: QuestionResult[] = questions.map((question) => {
         if (question.question_type === 'short_answer') {
           const freeText = textAnswers[question.id] || '';
-          const { score: aiScore, rationale } = await callAIGrader(question, freeText);
+          const { score: aiScore, rationale } = aiResultsByQuestionId.get(question.id)!;
           const scoreAwarded = Math.round((aiScore / 100) * question.points);
-          questionResults.push({
+          return {
             questionId: question.id,
             isCorrect: aiScore >= 70,
             scoreAwarded,
@@ -148,24 +170,23 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
             freeTextAnswer: freeText,
             aiRationale: rationale,
             feedback: null,
-          });
-        } else {
-          const selectedOptionId = answers[question.id];
-          const questionOptions = optionsByQuestion.get(question.id) || [];
-          const selectedOption = questionOptions.find((o) => o.id === selectedOptionId);
-          const isCorrect = selectedOption?.is_correct ?? false;
-          const feedback = selectedOption?.feedback_md || null;
-          questionResults.push({
-            questionId: question.id,
-            isCorrect,
-            scoreAwarded: isCorrect ? question.points : 0,
-            selectedOptionIds: selectedOptionId ? [selectedOptionId] : null,
-            freeTextAnswer: null,
-            aiRationale: null,
-            feedback,
-          });
+          };
         }
-      }
+        const selectedOptionId = answers[question.id];
+        const questionOptions = optionsByQuestion.get(question.id) || [];
+        const selectedOption = questionOptions.find((o) => o.id === selectedOptionId);
+        const isCorrect = selectedOption?.is_correct ?? false;
+        const feedback = selectedOption?.feedback_md || null;
+        return {
+          questionId: question.id,
+          isCorrect,
+          scoreAwarded: isCorrect ? question.points : 0,
+          selectedOptionIds: selectedOptionId ? [selectedOptionId] : null,
+          freeTextAnswer: null,
+          aiRationale: null,
+          feedback,
+        };
+      });
 
       const totalEarned = questionResults.reduce((sum, r) => sum + r.scoreAwarded, 0);
       const scorePercent = totalPoints > 0 ? Math.round((totalEarned / totalPoints) * 100) : 0;
@@ -216,7 +237,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
     setResults(null);
     setAttemptScore(null);
     setPassed(null);
-    setShowRetry(false);
+    setShowRetry(true); // keep showRetry true so the quiz form renders, not the summary
   }
 
   // Show previous attempt summary if exists and not currently taking quiz

@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { Bot, Send, Loader2, User, ChevronDown, X } from "lucide-react";
+import { Bot, Send, Loader2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
@@ -33,16 +32,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    if (!user?.id) return;
-    initSession();
-  }, [user?.id, lesson.id]);
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  async function initSession() {
+  const initSession = useCallback(async () => {
     if (!user?.id) return;
     try {
       setLoadingSession(true);
@@ -55,7 +45,16 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
     } finally {
       setLoadingSession(false);
     }
-  }
+  }, [user?.id, lesson.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    initSession();
+  }, [user?.id, lesson.id, initSession]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   function scrollToBottom() {
     if (scrollRef.current) {
@@ -121,24 +120,36 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
         const accessToken = authSession?.access_token;
 
         if (accessToken) {
-          const res = await fetch(`${pythonBackendUrl}/api/chat`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${accessToken}`,
-            },
-            body: JSON.stringify({
-              messages: [
-                { role: 'system', content: systemPrompt },
-                ...conversationHistory,
-              ],
-              max_tokens: 1000,
-            }),
-          });
-
-          if (res.ok) {
-            const data = await res.json();
-            aiResponse = data.response || aiResponse;
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 20_000);
+          try {
+            const res = await fetch(`${pythonBackendUrl}/api/chat`, {
+              method: 'POST',
+              signal: controller.signal,
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${accessToken}`,
+              },
+              body: JSON.stringify({
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  ...conversationHistory,
+                ],
+                max_tokens: 1000,
+              }),
+            });
+            if (res.ok) {
+              const data = await res.json();
+              aiResponse = data.response || aiResponse;
+            }
+          } catch (fetchErr) {
+            if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {
+              aiResponse = "The request timed out. Please try again.";
+            } else {
+              throw fetchErr;
+            }
+          } finally {
+            clearTimeout(timeoutId);
           }
         }
       }

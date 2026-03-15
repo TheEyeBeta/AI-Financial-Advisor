@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Lock,
@@ -14,10 +14,25 @@ import {
   Bot,
   ChevronDown,
   BookOpen,
-  Loader2,
   GraduationCap,
-  ChevronUp,
 } from "lucide-react";
+
+// ─── Responsive helper — true when viewport ≥ 1280 px (xl breakpoint) ────────
+
+function subscribe(cb: () => void) {
+  const mq = window.matchMedia('(min-width: 1280px)');
+  mq.addEventListener('change', cb);
+  return () => mq.removeEventListener('change', cb);
+}
+function getSnapshot() {
+  return window.matchMedia('(min-width: 1280px)').matches;
+}
+function getServerSnapshot() {
+  return false;
+}
+function useIsDesktopXl() {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
@@ -38,12 +53,27 @@ import { AcademyTutor } from "./AcademyTutor";
 
 // ─── Simple Markdown renderer (no external deps) ─────────────────────────────
 
+/** Escape HTML special characters before injecting markdown-generated HTML. */
+function escapeHtml(raw: string): string {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
 function renderInlineMarkdown(text: string): string {
-  return text
+  // Escape first so that any HTML already in the DB content is inert, then
+  // re-introduce only the specific safe HTML tags we intentionally create.
+  return escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code class="bg-muted/60 rounded px-1 py-0.5 text-sm font-mono">$1</code>')
-    .replace(/\[(.+?)\]\((.+?)\)/g, '<a href="$2" target="_blank" rel="noopener" class="text-primary underline">$1</a>');
+    .replace(
+      /\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary underline">$1</a>',
+    );
 }
 
 function MarkdownParagraph({ content }: { content: string }) {
@@ -334,13 +364,9 @@ export default function AcademyLesson() {
   const [error, setError] = useState<string | null>(null);
   const [tutorOpen, setTutorOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const isDesktopXl = useIsDesktopXl();
 
-  useEffect(() => {
-    if (!user?.id || !slug) return;
-    loadLesson();
-  }, [user?.id, slug]);
-
-  async function loadLesson() {
+  const loadLesson = useCallback(async () => {
     if (!user?.id || !slug) return;
     try {
       setLoading(true);
@@ -426,7 +452,12 @@ export default function AcademyLesson() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [user?.id, slug, navigate]);
+
+  useEffect(() => {
+    if (!user?.id || !slug) return;
+    loadLesson();
+  }, [user?.id, slug, loadLesson]);
 
   function handleQuizPassed(score: number) {
     if (!lesson) return;
@@ -647,20 +678,19 @@ export default function AcademyLesson() {
         </Button>
       )}
 
-      {/* Mobile Tutor Sheet (visible on xl:hidden) */}
-      <Sheet
-        open={tutorOpen}
-        onOpenChange={setTutorOpen}
-      >
-        <SheetContent side="right" className="w-full sm:w-96 p-0 xl:hidden flex flex-col">
-          <AcademyTutor
-            lesson={lesson}
-            tier={tier}
-            lessonContent={lessonContent}
-            onClose={() => setTutorOpen(false)}
-          />
-        </SheetContent>
-      </Sheet>
+      {/* Mobile Tutor Sheet — only mounted below xl breakpoint to prevent overlay on desktop */}
+      {!isDesktopXl && (
+        <Sheet open={tutorOpen} onOpenChange={setTutorOpen}>
+          <SheetContent side="right" className="w-full sm:w-96 p-0 flex flex-col">
+            <AcademyTutor
+              lesson={lesson}
+              tier={tier}
+              lessonContent={lessonContent}
+              onClose={() => setTutorOpen(false)}
+            />
+          </SheetContent>
+        </Sheet>
+      )}
     </AppLayout>
   );
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -57,12 +57,7 @@ export default function AcademyTier() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!user?.id || !tierSlug) return;
-    loadData();
-  }, [user?.id, tierSlug]);
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     if (!user?.id || !tierSlug) return;
     try {
       setLoading(true);
@@ -101,7 +96,12 @@ export default function AcademyTier() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [user?.id, tierSlug, navigate]);
+
+  useEffect(() => {
+    if (!user?.id || !tierSlug) return;
+    loadData();
+  }, [user?.id, tierSlug, loadData]);
 
   const progressMap = new Map(progress.map((p) => [p.lesson_id, p]));
 
