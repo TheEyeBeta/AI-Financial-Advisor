@@ -16,9 +16,8 @@ export async function getUserProfile(authId: string): Promise<UserProfile | null
     .eq('auth_id', authId)
     .single();
 
-  // If that fails, try old structure (id = auth.id)
+  // If no rows found (PGRST116), fall back to old structure where id = auth.id
   if (error && error.code === 'PGRST116') {
-    // Column doesn't exist, use old structure
     const { data: oldData, error: oldError } = await supabase
       .schema('core')
       .from('users')

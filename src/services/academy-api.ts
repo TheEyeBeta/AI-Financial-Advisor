@@ -362,6 +362,25 @@ export const academyApi = {
     return data || null;
   },
 
+  // ─── Lesson Prompt Links (predetermined questions / starter prompts) ────
+
+  async getLessonPromptTemplates(lesson_id: string): Promise<PromptTemplate[]> {
+    const { data, error } = await academy()
+      .from('lesson_prompt_links')
+      .select('prompt_template_id')
+      .eq('lesson_id', lesson_id);
+    if (error) throw error;
+    if (!data || data.length === 0) return [];
+
+    const templateIds = data.map((d: { prompt_template_id: string }) => d.prompt_template_id);
+    const { data: templates, error: tErr } = await academy()
+      .from('prompt_templates')
+      .select('*')
+      .in('id', templateIds);
+    if (tErr) throw tErr;
+    return (templates || []) as PromptTemplate[];
+  },
+
   // ─── Chat ─────────────────────────────────────────────────────────────────
 
   async getChatSession(user_id: string, lesson_id: string): Promise<ChatSession> {

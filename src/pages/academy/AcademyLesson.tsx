@@ -348,7 +348,7 @@ function LessonSidebar({
 
 export default function AcademyLesson() {
   const { slug } = useParams<{ slug: string }>();
-  const { user } = useAuth();
+  const { userId } = useAuth();
   const navigate = useNavigate();
 
   const [lesson, setLesson] = useState<Lesson | null>(null);
@@ -371,7 +371,7 @@ export default function AcademyLesson() {
   const latestLoadReqRef = useRef(0);
 
   const loadLesson = useCallback(async () => {
-    if (!user?.id || !slug) return;
+    if (!userId || !slug) return;
     const reqId = ++latestLoadReqRef.current;
     try {
       setLoading(true);
@@ -387,8 +387,8 @@ export default function AcademyLesson() {
       const [tiersData, allLessonsData, progressData, enrollmentsData] = await Promise.all([
         academyApi.getTiers(),
         academyApi.getAllLessons(),
-        academyApi.getUserLessonProgress(user.id),
-        academyApi.getTierEnrollments(user.id),
+        academyApi.getUserLessonProgress(userId),
+        academyApi.getTierEnrollments(userId),
       ]);
 
       if (reqId !== latestLoadReqRef.current) return;
@@ -419,14 +419,14 @@ export default function AcademyLesson() {
         if (questionsData.length > 0) {
           optionsData = await academyApi.getQuizOptions(questionsData.map((q) => q.id));
         }
-        bestAttemptData = await academyApi.getBestQuizAttempt(quizData.id, user.id);
+        bestAttemptData = await academyApi.getBestQuizAttempt(quizData.id, userId);
       }
 
       // Upsert progress to in_progress if not already completed
       const existingProgress = progressData.find((p) => p.lesson_id === foundLesson.id);
       if (!existingProgress || existingProgress.status !== 'completed') {
         await academyApi
-          .upsertLessonProgress(user.id, foundLesson.id, 'in_progress')
+          .upsertLessonProgress(userId, foundLesson.id, 'in_progress')
           .catch((err) => console.error('Failed to upsert lesson progress to in_progress:', err));
       }
 
@@ -437,7 +437,7 @@ export default function AcademyLesson() {
         const updated = progressData.filter((p) => p.lesson_id !== foundLesson.id);
         updated.push({
           id: existingProgress?.id || '',
-          user_id: user.id,
+          user_id: userId,
           lesson_id: foundLesson.id,
           status: 'in_progress',
           best_quiz_score: existingProgress?.best_quiz_score ?? null,
@@ -468,12 +468,12 @@ export default function AcademyLesson() {
         setLoading(false);
       }
     }
-  }, [user?.id, slug, navigate]);
+  }, [userId, slug, navigate]);
 
   useEffect(() => {
-    if (!user?.id || !slug) return;
+    if (!userId || !slug) return;
     loadLesson();
-  }, [user?.id, slug, loadLesson]);
+  }, [userId, slug, loadLesson]);
 
   function handleQuizPassed(score: number) {
     if (!lesson) return;
@@ -483,7 +483,7 @@ export default function AcademyLesson() {
       const updated = prev.filter((p) => p.lesson_id !== lesson.id);
       updated.push({
         id: existing?.id || '',
-        user_id: user?.id || '',
+        user_id: userId || '',
         lesson_id: lesson.id,
         status: 'completed',
         best_quiz_score: bestScore,

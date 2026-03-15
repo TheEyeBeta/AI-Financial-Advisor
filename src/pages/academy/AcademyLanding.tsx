@@ -37,7 +37,7 @@ const TIER_BADGE_COLORS: Record<string, string> = {
 };
 
 export default function AcademyLanding() {
-  const { user } = useAuth();
+  const { userId, userProfile } = useAuth();
   const navigate = useNavigate();
 
   const [tiers, setTiers] = useState<Tier[]>([]);
@@ -48,21 +48,25 @@ export default function AcademyLanding() {
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!userId) return;
     try {
       setLoading(true);
       setError(null);
 
-      // Ensure profile exists
-      await academyApi.upsertProfile(user.id).catch((err) =>
+      // Ensure profile exists — use core.users.id as the academy profile id,
+      // and pass the user's display name from core.users for chat identity.
+      const displayName = userProfile?.first_name && userProfile?.last_name
+        ? `${userProfile.first_name} ${userProfile.last_name}`
+        : userProfile?.first_name || null;
+      await academyApi.upsertProfile(userId, displayName ?? undefined).catch((err) =>
         console.error('Failed to upsert academy profile:', err),
       );
 
       const [tiersData, lessonsData, progressData, enrollmentsData] = await Promise.all([
         academyApi.getTiers(),
         academyApi.getAllLessons(),
-        academyApi.getUserLessonProgress(user.id),
-        academyApi.getTierEnrollments(user.id),
+        academyApi.getUserLessonProgress(userId),
+        academyApi.getTierEnrollments(userId),
       ]);
 
       setTiers(tiersData);
@@ -75,10 +79,10 @@ export default function AcademyLanding() {
       // Beginner is always enrolled
       if (!enrolledTierIds.has(TIER_IDS.BEGINNER)) {
         await academyApi
-          .enrollInTier(user.id, TIER_IDS.BEGINNER, 'default')
+          .enrollInTier(userId, TIER_IDS.BEGINNER, 'default')
           .then(() => enrolledTierIds.add(TIER_IDS.BEGINNER))
           .catch((err) =>
-            console.error(`Failed to enroll user ${user.id} in Beginner tier:`, err),
+            console.error(`Failed to enroll user ${userId} in Beginner tier:`, err),
           );
       }
 
@@ -99,10 +103,10 @@ export default function AcademyLanding() {
         !enrolledTierIds.has(TIER_IDS.INTERMEDIATE)
       ) {
         await academyApi
-          .enrollInTier(user.id, TIER_IDS.INTERMEDIATE, 'beginner_completion')
+          .enrollInTier(userId, TIER_IDS.INTERMEDIATE, 'beginner_completion')
           .then(() => enrolledTierIds.add(TIER_IDS.INTERMEDIATE))
           .catch((err) =>
-            console.error(`Failed to enroll user ${user.id} in Intermediate tier:`, err),
+            console.error(`Failed to enroll user ${userId} in Intermediate tier:`, err),
           );
       }
 
@@ -111,15 +115,15 @@ export default function AcademyLanding() {
         !enrolledTierIds.has(TIER_IDS.ADVANCED)
       ) {
         await academyApi
-          .enrollInTier(user.id, TIER_IDS.ADVANCED, 'intermediate_completion')
+          .enrollInTier(userId, TIER_IDS.ADVANCED, 'intermediate_completion')
           .then(() => enrolledTierIds.add(TIER_IDS.ADVANCED))
           .catch((err) =>
-            console.error(`Failed to enroll user ${user.id} in Advanced tier:`, err),
+            console.error(`Failed to enroll user ${userId} in Advanced tier:`, err),
           );
       }
 
       // Reload enrollments after potential auto-enrolls
-      const freshEnrollments = await academyApi.getTierEnrollments(user.id);
+      const freshEnrollments = await academyApi.getTierEnrollments(userId);
       setEnrollments(freshEnrollments);
     } catch (err) {
       console.error("Error loading academy data:", err);
@@ -128,12 +132,12 @@ export default function AcademyLanding() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [userId]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!userId) return;
     loadData();
-  }, [user?.id, loadData]);
+  }, [userId, loadData]);
 
   const enrolledTierIds = new Set(enrollments.map((e) => e.tier_id));
   const completedLessonIds = new Set(

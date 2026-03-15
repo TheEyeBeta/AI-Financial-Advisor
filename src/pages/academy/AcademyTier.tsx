@@ -48,7 +48,7 @@ const STATUS_CONFIG: Record<
 
 export default function AcademyTier() {
   const { tier: tierSlug } = useParams<{ tier: string }>();
-  const { user } = useAuth();
+  const { userId } = useAuth();
   const navigate = useNavigate();
 
   const [tier, setTier] = useState<Tier | null>(null);
@@ -58,7 +58,7 @@ export default function AcademyTier() {
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!user?.id || !tierSlug) return;
+    if (!userId || !tierSlug) return;
     try {
       setLoading(true);
       setError(null);
@@ -73,7 +73,7 @@ export default function AcademyTier() {
 
       // Check enrollment (Beginner is always accessible)
       if (foundTier.id !== TIER_IDS.BEGINNER) {
-        const enrollments = await academyApi.getTierEnrollments(user.id);
+        const enrollments = await academyApi.getTierEnrollments(userId);
         const isEnrolled = enrollments.some((e) => e.tier_id === foundTier.id);
         if (!isEnrolled) {
           navigate("/academy");
@@ -83,7 +83,7 @@ export default function AcademyTier() {
 
       const [lessonsData, progressData] = await Promise.all([
         academyApi.getLessonsByTier(foundTier.id),
-        academyApi.getUserLessonProgress(user.id),
+        academyApi.getUserLessonProgress(userId),
       ]);
 
       setTier(foundTier);
@@ -96,12 +96,12 @@ export default function AcademyTier() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id, tierSlug, navigate]);
+  }, [userId, tierSlug, navigate]);
 
   useEffect(() => {
-    if (!user?.id || !tierSlug) return;
+    if (!userId || !tierSlug) return;
     loadData();
-  }, [user?.id, tierSlug, loadData]);
+  }, [userId, tierSlug, loadData]);
 
   const progressMap = new Map(progress.map((p) => [p.lesson_id, p]));
 
