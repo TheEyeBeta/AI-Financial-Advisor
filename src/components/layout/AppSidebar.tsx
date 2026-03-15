@@ -19,6 +19,7 @@ const mainNavItems = [
   { title: "Chat History", url: "/chat-history", icon: History },
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Learning", url: "/learning", icon: GraduationCap },
+  { title: "Academy", url: "/academy", icon: GraduationCap },
   { title: "Paper Trading", url: "/paper-trading", icon: LineChart },
   { title: "Latest News", url: "/news", icon: Newspaper },
   { title: "Top Stocks", url: "/top-stocks", icon: Trophy },
