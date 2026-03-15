@@ -158,11 +158,20 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
         shortAnswerQuestions.map((q, i) => [q.id, aiGradeResults[i]]),
       );
 
+      // If any AI grade failed, abort before recording — don't persist artificial zeros
+      if (aiGradeResults.some((r) => r === null)) {
+        toast({
+          title: "AI grading unavailable",
+          description: "The grading service is temporarily unavailable. Your answers are saved — please try submitting again.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const questionResults: QuestionResult[] = questions.map((question) => {
         if (question.question_type === 'short_answer') {
           const freeText = textAnswers[question.id] || '';
           const gradeResult = aiResultsByQuestionId.get(question.id) ?? null;
-          // null grade (unavailable/failed) = 0 score, not correct
           const aiScore = gradeResult?.score ?? 0;
           const rationale = gradeResult?.rationale ?? null;
           const scoreAwarded = Math.round((aiScore / 100) * question.points);
@@ -512,7 +521,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
         {submitting ? (
           <>
             <Loader2 className="h-4 w-4 animate-spin" />
-            Grading...
+            {questions.some((q) => q.question_type === 'short_answer') ? 'AI Grading...' : 'Grading...'}
           </>
         ) : (
           "Submit Quiz"
