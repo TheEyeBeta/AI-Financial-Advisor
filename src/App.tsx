@@ -18,6 +18,9 @@ import Admin from "./pages/Admin";
 import AuthCallback from "./pages/AuthCallback";
 import ResetPassword from "./pages/ResetPassword";
 import NotFound from "./pages/NotFound";
+import AcademyLanding from "./pages/academy/AcademyLanding";
+import AcademyTier from "./pages/academy/AcademyTier";
+import AcademyLesson from "./pages/academy/AcademyLesson";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import { AuthProvider } from "@/context/AuthContext";
@@ -126,6 +129,30 @@ const App = () => {
               element={
                 <ProtectedRoute>
                   <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/academy"
+              element={
+                <ProtectedRoute>
+                  <AcademyLanding />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/academy/:tier"
+              element={
+                <ProtectedRoute>
+                  <AcademyTier />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/academy/lesson/:slug"
+              element={
+                <ProtectedRoute>
+                  <AcademyLesson />
                 </ProtectedRoute>
               }
             />
