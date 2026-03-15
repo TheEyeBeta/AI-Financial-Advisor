@@ -25,6 +25,8 @@ const Advisor = () => {
   // Track the message count before sending to identify the new AI response for streaming
   const prevMessageCountRef = useRef<number>(0);
   const [streamingResponseContent, setStreamingResponseContent] = useState<string | null>(null);
+  // Track when user explicitly wants a new chat (prevents auto-loading most recent chat)
+  const isNewChatRef = useRef<boolean>(false);
   
   // Handle initial message from navigation state (e.g., from learning topics)
   useEffect(() => {
@@ -58,7 +60,7 @@ const Advisor = () => {
 
   // On load, set the most recent chat as current (or null for new chat)
   useEffect(() => {
-    if (!chatsLoading && chats.length > 0 && !currentChatId && !chatFromUrl) {
+    if (!chatsLoading && chats.length > 0 && !currentChatId && !chatFromUrl && !isNewChatRef.current) {
       // Use the most recent chat
       setCurrentChatId(chats[0].id);
       setShowTopics(false);
@@ -94,6 +96,7 @@ const Advisor = () => {
       if (!chatId) {
         const newChat = await createChatMutation.mutateAsync('New Chat');
         chatId = newChat.id;
+        isNewChatRef.current = false;
         setCurrentChatId(chatId);
         isFirstMessage = true;
       } else if (currentChat?.messageCount === 0) {
@@ -124,16 +127,12 @@ const Advisor = () => {
     handleSendMessage(topic);
   };
 
-  const handleNewChat = async () => {
-    if (!userId) return;
-    
-    try {
-      const newChat = await createChatMutation.mutateAsync('New Chat');
-      setCurrentChatId(newChat.id);
-      setShowTopics(true);
-    } catch (error) {
-      console.error('Error creating new chat:', error);
-    }
+  const handleNewChat = () => {
+    isNewChatRef.current = true;
+    setCurrentChatId(null);
+    setShowTopics(true);
+    setPendingMessage(null);
+    setStreamingResponseContent(null);
   };
 
   // Convert database messages to component format
