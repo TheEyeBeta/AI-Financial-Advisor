@@ -255,6 +255,14 @@ export const academyApi = {
     if (error) throw error;
   },
 
+  async deleteQuizAttempt(attempt_id: string): Promise<void> {
+    const { error } = await academy()
+      .from('quiz_attempts')
+      .delete()
+      .eq('id', attempt_id);
+    if (error) throw error;
+  },
+
   // ─── Progress ─────────────────────────────────────────────────────────────
 
   async getUserLessonProgress(user_id: string): Promise<UserLessonProgress[]> {

@@ -192,7 +192,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
             </p>
           </div>
         </div>
-        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
+        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="Close tutor panel" onClick={onClose}>
           <X className="h-4 w-4" />
         </Button>
       </div>
@@ -275,12 +275,13 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            disabled={sending || loadingSession}
+            disabled={sending || loadingSession || session === null}
           />
           <Button
             size="icon"
             className="h-9 w-9 flex-shrink-0"
-            disabled={!input.trim() || sending || loadingSession}
+            aria-label="Send message"
+            disabled={!input.trim() || sending || loadingSession || session === null}
             onClick={sendMessage}
           >
             {sending ? (

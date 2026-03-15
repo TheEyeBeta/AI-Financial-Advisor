@@ -74,13 +74,11 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
 
   const AI_GRADER_TIMEOUT_MS = 15_000;
 
-  async function callAIGrader(question: QuizQuestion, answer: string): Promise<{ score: number; rationale: string }> {
+  async function callAIGrader(question: QuizQuestion, answer: string): Promise<{ score: number; rationale: string } | null> {
     try {
       const template = await academyApi.getPromptTemplate('short_answer_grader');
       const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
-      if (!pythonBackendUrl || !template) {
-        return { score: 50, rationale: "Auto-graded." };
-      }
+      if (!pythonBackendUrl || !template) return null;
 
       const systemPrompt = injectTemplateVars(template.template_text, {
         question: question.prompt_md,
@@ -89,7 +87,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
 
       const { data: { session } } = await supabase.auth.getSession();
       const accessToken = session?.access_token;
-      if (!accessToken) return { score: 50, rationale: "Not authenticated." };
+      if (!accessToken) return null;
 
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), AI_GRADER_TIMEOUT_MS);
@@ -118,26 +116,29 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
         clearTimeout(timeoutId);
       }
 
-      if (!response.ok) return { score: 50, rationale: "Grading unavailable." };
+      if (!response.ok) return null;
 
       const data = await response.json();
       const content: string = data.response || '';
 
       // Parse JSON from response
       const jsonMatch = content.match(/\{[\s\S]*?\}/);
-      if (jsonMatch) {
+      if (!jsonMatch) return null;
+
+      try {
         const parsed = JSON.parse(jsonMatch[0]);
         return {
           score: Math.max(0, Math.min(100, Number(parsed.score) || 0)),
           rationale: String(parsed.rationale || 'Graded by AI.'),
         };
+      } catch {
+        return null;
       }
-      return { score: 50, rationale: content.slice(0, 200) };
     } catch (err) {
       if (err instanceof DOMException && err.name === 'AbortError') {
-        return { score: 50, rationale: "Grading timed out." };
+        return null;
       }
-      return { score: 50, rationale: "Grading unavailable." };
+      return null;
     }
   }
 
@@ -160,11 +161,14 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
       const questionResults: QuestionResult[] = questions.map((question) => {
         if (question.question_type === 'short_answer') {
           const freeText = textAnswers[question.id] || '';
-          const { score: aiScore, rationale } = aiResultsByQuestionId.get(question.id)!;
+          const gradeResult = aiResultsByQuestionId.get(question.id) ?? null;
+          // null grade (unavailable/failed) = 0 score, not correct
+          const aiScore = gradeResult?.score ?? 0;
+          const rationale = gradeResult?.rationale ?? null;
           const scoreAwarded = Math.round((aiScore / 100) * question.points);
           return {
             questionId: question.id,
-            isCorrect: aiScore >= 70,
+            isCorrect: gradeResult !== null && aiScore >= 70,
             scoreAwarded,
             selectedOptionIds: null,
             freeTextAnswer: freeText,
@@ -192,7 +196,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
       const scorePercent = totalPoints > 0 ? Math.round((totalEarned / totalPoints) * 100) : 0;
       const hasPassed = scorePercent >= quiz.pass_score;
 
-      // Create attempt
+      // Create attempt — if subsequent steps fail, clean up to avoid orphaned attempts
       const attempt = await academyApi.createQuizAttempt({
         quiz_id: quiz.id,
         user_id: user.id,
@@ -201,23 +205,31 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
         ai_feedback_md: null,
       });
 
-      // Create answers
-      await academyApi.createQuizAnswers(
-        questionResults.map((r) => ({
-          attempt_id: attempt.id,
-          question_id: r.questionId,
-          selected_option_ids: r.selectedOptionIds,
-          free_text_answer: r.freeTextAnswer,
-          is_correct: r.isCorrect,
-          score_awarded: r.scoreAwarded,
-          ai_rationale_md: r.aiRationale,
-        })),
-      );
+      try {
+        // Create answers
+        await academyApi.createQuizAnswers(
+          questionResults.map((r) => ({
+            attempt_id: attempt.id,
+            question_id: r.questionId,
+            selected_option_ids: r.selectedOptionIds,
+            free_text_answer: r.freeTextAnswer,
+            is_correct: r.isCorrect,
+            score_awarded: r.scoreAwarded,
+            ai_rationale_md: r.aiRationale,
+          })),
+        );
 
-      // Update progress if passed
-      if (hasPassed) {
-        await academyApi.updateProgressOnPass(user.id, lessonId, scorePercent);
-        onPassed(scorePercent);
+        // Update progress if passed
+        if (hasPassed) {
+          await academyApi.updateProgressOnPass(user.id, lessonId, scorePercent);
+          onPassed(scorePercent);
+        }
+      } catch (postErr) {
+        // Compensating cleanup — delete the orphaned attempt so the user can retry
+        await academyApi.deleteQuizAttempt(attempt.id).catch((cleanupErr) =>
+          console.error('Failed to clean up partial quiz attempt:', cleanupErr),
+        );
+        throw postErr;
       }
 
       setResults(questionResults);

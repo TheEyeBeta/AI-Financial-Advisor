@@ -20,8 +20,8 @@ import {
 } from "@/services/academy-api";
 
 const TIER_UNLOCK_CONDITIONS: Record<string, string> = {
-  [TIER_IDS.INTERMEDIATE]: "Complete 8 or more Beginner lessons",
-  [TIER_IDS.ADVANCED]: "Complete 8 or more Intermediate lessons",
+  [TIER_IDS.INTERMEDIATE]: `Complete ${UNLOCK_THRESHOLDS.INTERMEDIATE} or more Beginner lessons`,
+  [TIER_IDS.ADVANCED]: `Complete ${UNLOCK_THRESHOLDS.ADVANCED} or more Intermediate lessons`,
 };
 
 const TIER_COLORS: Record<string, string> = {
@@ -211,16 +211,27 @@ export default function AcademyLanding() {
             const progressPct = lessonCount > 0 ? Math.round((completedCount / lessonCount) * 100) : 0;
             const unlockCondition = TIER_UNLOCK_CONDITIONS[tier.id];
 
+            const tierTextColor = TIER_COLORS[tier.id]?.split(' ')[0] ?? 'text-foreground';
+
             return (
               <Card
                 key={tier.id}
+                role={unlocked ? "button" : undefined}
+                tabIndex={unlocked ? 0 : undefined}
+                aria-disabled={!unlocked}
                 className={cn(
                   "border transition-all duration-200",
                   unlocked
-                    ? "bg-card/50 border-border/50 hover:border-border cursor-pointer hover:shadow-md"
+                    ? "bg-card/50 border-border/50 hover:border-border cursor-pointer hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     : "bg-muted/20 border-border/30 opacity-70",
                 )}
                 onClick={() => unlocked && navigate(`/academy/${tier.slug}`)}
+                onKeyDown={(e) => {
+                  if (unlocked && (e.key === 'Enter' || e.key === ' ')) {
+                    e.preventDefault();
+                    navigate(`/academy/${tier.slug}`);
+                  }
+                }}
               >
                 <CardContent className="p-5 space-y-4">
                   {/* Tier header */}
@@ -235,7 +246,7 @@ export default function AcademyLanding() {
                       <h2 className="text-base font-semibold text-foreground">{tier.name}</h2>
                     </div>
                     {unlocked ? (
-                      <ChevronRight className={cn("h-5 w-5 mt-0.5", TIER_COLORS[tier.id].split(' ')[0])} />
+                      <ChevronRight className={cn("h-5 w-5 mt-0.5", tierTextColor)} />
                     ) : (
                       <Lock className="h-5 w-5 mt-0.5 text-muted-foreground/40" />
                     )}

@@ -196,11 +196,19 @@ export default function AcademyTier() {
               return (
                 <Card
                   key={lesson.id}
+                  role="button"
+                  tabIndex={0}
                   className={cn(
-                    "border border-border/50 bg-card/50 backdrop-blur-sm cursor-pointer transition-all duration-200 hover:border-border hover:shadow-md",
+                    "border border-border/50 bg-card/50 backdrop-blur-sm cursor-pointer transition-all duration-200 hover:border-border hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     status === 'completed' && "border-success/20 bg-success/5",
                   )}
                   onClick={() => navigate(`/academy/lesson/${lesson.slug}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      navigate(`/academy/lesson/${lesson.slug}`);
+                    }
+                  }}
                 >
                   <CardContent className="p-5">
                     <div className="flex items-start justify-between mb-3">

@@ -4,7 +4,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Lock,
@@ -111,7 +111,9 @@ function MarkdownParagraph({ content }: { content: string }) {
             </ol>
           );
         }
-        const html = renderInlineMarkdown(para.replace(/\n/g, '<br/>'));
+        // Apply inline markdown first (which escapes HTML), then turn remaining
+        // newlines into <br/> tags so soft-breaks render correctly.
+        const html = renderInlineMarkdown(para).replace(/\n/g, '<br/>');
         return (
           <p
             key={i}
@@ -654,9 +656,9 @@ export default function AcademyLesson() {
           </div>
         </main>
 
-        {/* ─── AI Tutor Panel (desktop) ─── */}
-        {tutorOpen && (
-          <aside className="hidden xl:flex w-80 2xl:w-96 flex-col flex-shrink-0">
+        {/* ─── AI Tutor Panel (desktop only — gated by isDesktopXl to avoid duplicate mount) ─── */}
+        {tutorOpen && isDesktopXl && (
+          <aside className="xl:flex w-80 2xl:w-96 flex-col flex-shrink-0">
             <AcademyTutor
               lesson={lesson}
               tier={tier}
