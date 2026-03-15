@@ -76,6 +76,7 @@ const Onboarding = () => {
     try {
       // Update user profile with onboarding answers
       const { error } = await supabase
+        .schema("core")
         .from("users")
         .update({
           marital_status: answers.maritalStatus,

@@ -10,6 +10,7 @@ type UserProfile = Database['public']['Tables']['users']['Row'];
 export async function getUserProfile(authId: string): Promise<UserProfile | null> {
   // Try new structure first (auth_id column exists)
   const { data, error } = await supabase
+    .schema('core')
     .from('users')
     .select('*')
     .eq('auth_id', authId)
@@ -19,6 +20,7 @@ export async function getUserProfile(authId: string): Promise<UserProfile | null
   if (error && error.code === 'PGRST116') {
     // Column doesn't exist, use old structure
     const { data: oldData, error: oldError } = await supabase
+      .schema('core')
       .from('users')
       .select('*')
       .eq('id', authId)
