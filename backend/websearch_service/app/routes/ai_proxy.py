@@ -718,6 +718,7 @@ class ChatRequest(BaseModel):
     user_id: Optional[str] = None
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=2000, ge=1, le=16000)
+    experience_level: Optional[str] = None
 
 
 class ChatTitleRequest(BaseModel):
@@ -1227,13 +1228,22 @@ async def chat_completion(
         # Returns "" until Meridian Phase 1 is built — no breaking change
         meridian_context = await build_iris_context(verified_user_id)
 
+        # Map frontend experience level to IRIS tier bands
+        tier_map = {
+            "beginner": "TIER 1 — FOUNDATION",
+            "intermediate": "TIER 2 — DEVELOPING",
+            "advanced": "TIER 3 — INSTITUTIONAL",
+        }
+        tier_label = tier_map.get((request.experience_level or "beginner").lower(), "TIER 1 — FOUNDATION")
+        tier_injection = f"USER TIER: {tier_label}. Calibrate your entire response to this tier.\n\n"
+
         # Step 2: Build Responses API input
-        # Order: Meridian context → IRIS prompt → any existing frontend system message
+        # Order: Meridian context → Tier injection → IRIS prompt → any existing frontend system message
         existing_system = " ".join(m["content"] for m in messages if m.get("role") == "system")
         combined_system = (
-            f"{meridian_context}{FINANCIAL_ADVISOR_SYSTEM_PROMPT}\n\n---\n\n{existing_system}"
+            f"{meridian_context}{tier_injection}{FINANCIAL_ADVISOR_SYSTEM_PROMPT}\n\n---\n\n{existing_system}"
             if existing_system
-            else f"{meridian_context}{FINANCIAL_ADVISOR_SYSTEM_PROMPT}"
+            else f"{meridian_context}{tier_injection}{FINANCIAL_ADVISOR_SYSTEM_PROMPT}"
         )
         conversation_turns = [m for m in messages if m.get("role") != "system"]
         input_messages = [{"role": "system", "content": combined_system}, *conversation_turns]

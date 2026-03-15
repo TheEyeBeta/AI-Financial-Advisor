@@ -2424,6 +2424,7 @@ export const pythonApi = {
             user_id: userId,
             temperature: OPENAI_CHAT_TEMPERATURE,
             max_tokens: OPENAI_MAX_TOKENS,
+            experience_level: experienceLevel ?? null,
           }),
         });
 
