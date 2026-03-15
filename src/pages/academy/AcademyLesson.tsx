@@ -421,7 +421,7 @@ export default function AcademyLesson() {
       if (!existingProgress || existingProgress.status !== 'completed') {
         await academyApi
           .upsertLessonProgress(user.id, foundLesson.id, 'in_progress')
-          .catch(() => null);
+          .catch((err) => console.error('Failed to upsert lesson progress to in_progress:', err));
         // Update local progress state
         const updated = progressData.filter((p) => p.lesson_id !== foundLesson.id);
         updated.push({

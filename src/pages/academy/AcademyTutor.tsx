@@ -82,6 +82,12 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
     if (!input.trim() || sending || !user?.id || !session) return;
 
     const userText = input.trim();
+    // Snapshot history before any state updates so the slice window is accurate
+    const historySnapshot = messages
+      .filter((m) => m.role === 'user' || m.role === 'assistant')
+      .slice(-10)
+      .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content_md }));
+
     setInput('');
     setSending(true);
 
@@ -101,15 +107,10 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
       const savedUserMsg = await academyApi.saveChatMessage(session.id, 'user', 'user', userText);
       setMessages((prev) => prev.map((m) => (m.id === tempUserMsg.id ? savedUserMsg : m)));
 
-      // Build conversation for AI
+      // Build conversation for AI using the pre-send snapshot + new message
       const systemPrompt = await buildSystemPrompt();
 
-      const conversationHistory = messages
-        .filter((m) => m.role === 'user' || m.role === 'assistant')
-        .slice(-10) // last 10 messages for context
-        .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content_md }));
-
-      conversationHistory.push({ role: 'user', content: userText });
+      const conversationHistory = [...historySnapshot, { role: 'user' as const, content: userText }];
 
       // Call AI backend
       const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
