@@ -464,14 +464,16 @@ export default function AcademyLesson() {
   function handleQuizPassed(score: number) {
     if (!lesson) return;
     setProgress((prev) => {
+      const existing = prev.find((p) => p.lesson_id === lesson.id);
+      const bestScore = Math.max(score, existing?.best_quiz_score ?? 0);
       const updated = prev.filter((p) => p.lesson_id !== lesson.id);
       updated.push({
-        id: '',
+        id: existing?.id || '',
         user_id: user?.id || '',
         lesson_id: lesson.id,
         status: 'completed',
-        best_quiz_score: score,
-        completed_at: new Date().toISOString(),
+        best_quiz_score: bestScore,
+        completed_at: existing?.completed_at ?? new Date().toISOString(),
       });
       return updated;
     });
