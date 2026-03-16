@@ -23,8 +23,40 @@ FROM core.users u
 WHERE cm.user_id = u.auth_id
   AND cm.user_id != u.id;
 
--- Step 3: Ensure academy.profiles exist for all core.users
--- The academy profile id should be core.users.id (not auth.users.id)
+-- Step 3: Fix old academy.profiles that used auth.id instead of core.users.id
+-- This MUST run before the bulk INSERT in Step 4 so the legacy cleanup loop
+-- can detect profiles keyed by auth_id before they're shadowed by new rows.
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN
+    SELECT p.id AS old_profile_id, u.id AS new_profile_id, p.display_name
+    FROM academy.profiles p
+    JOIN core.users u ON p.id = u.auth_id
+    WHERE p.id != u.id
+  LOOP
+    -- Create or update a profile with the correct core.users.id,
+    -- preserving the display_name from the legacy profile.
+    INSERT INTO academy.profiles (id, display_name)
+    VALUES (r.new_profile_id, r.display_name)
+    ON CONFLICT (id) DO UPDATE SET
+      display_name = COALESCE(academy.profiles.display_name, EXCLUDED.display_name);
+
+    -- Update all academy FK references from old (auth_id) to new (core.users.id)
+    UPDATE academy.chat_sessions SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
+    UPDATE academy.quiz_attempts SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
+    UPDATE academy.user_lesson_progress SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
+    UPDATE academy.user_tier_enrollments SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
+
+    -- Remove the legacy profile keyed by auth_id
+    DELETE FROM academy.profiles WHERE id = r.old_profile_id;
+  END LOOP;
+END $$;
+
+-- Step 4: Ensure academy.profiles exist for all core.users
+-- Now that legacy profiles are cleaned up, safe to bulk-insert missing ones.
+-- The academy profile id should be core.users.id (not auth.users.id).
 INSERT INTO academy.profiles (id, display_name)
 SELECT
   u.id,
@@ -43,8 +75,9 @@ ON CONFLICT (id) DO UPDATE SET
   display_name = EXCLUDED.display_name
 WHERE academy.profiles.display_name IS NULL;
 
--- Step 4: Fix academy tables — update user_id from auth.id to core.users.id
--- This handles the case where academy records were created with auth.users.id
+-- Step 5: Fix academy tables — update any remaining user_id from auth.id to core.users.id
+-- This handles records that weren't covered by the Step 3 profile cleanup loop
+-- (e.g., records where the old profile was already deleted but FKs still point to auth_id).
 
 UPDATE academy.chat_sessions cs
 SET user_id = u.id
@@ -69,35 +102,6 @@ SET user_id = u.id
 FROM core.users u
 WHERE ute.user_id = u.auth_id
   AND ute.user_id != u.id;
-
--- Step 5: Also fix old academy.profiles that used auth.id instead of core.users.id
--- First, insert correct profiles, then update references and remove old ones
-DO $$
-DECLARE
-  r RECORD;
-BEGIN
-  FOR r IN
-    SELECT p.id AS old_profile_id, u.id AS new_profile_id, p.display_name
-    FROM academy.profiles p
-    JOIN core.users u ON p.id = u.auth_id
-    WHERE p.id != u.id
-      AND NOT EXISTS (SELECT 1 FROM academy.profiles p2 WHERE p2.id = u.id)
-  LOOP
-    -- Create a profile with the correct core.users.id
-    INSERT INTO academy.profiles (id, display_name)
-    VALUES (r.new_profile_id, r.display_name)
-    ON CONFLICT (id) DO NOTHING;
-
-    -- Update all academy references from old to new
-    UPDATE academy.chat_sessions SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
-    UPDATE academy.quiz_attempts SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
-    UPDATE academy.user_lesson_progress SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
-    UPDATE academy.user_tier_enrollments SET user_id = r.new_profile_id WHERE user_id = r.old_profile_id;
-
-    -- Remove old profile
-    DELETE FROM academy.profiles WHERE id = r.old_profile_id;
-  END LOOP;
-END $$;
 
 -- Step 6: Fix trading tables if needed
 UPDATE trading.open_positions op

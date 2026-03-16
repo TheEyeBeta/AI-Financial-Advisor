@@ -36,7 +36,16 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
   const latestInitReqRef = useRef(0);
 
   const initSession = useCallback(async () => {
-    if (!userId) return;
+    if (!userId) {
+      // Reset state when user is not authenticated to avoid stale data
+      // and a stuck loading indicator.
+      ++latestInitReqRef.current; // invalidate any in-flight requests
+      setLoadingSession(false);
+      setSession(null);
+      setMessages([]);
+      setStarterPrompts([]);
+      return;
+    }
     const reqId = ++latestInitReqRef.current;
     try {
       setLoadingSession(true);
@@ -60,7 +69,6 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
   }, [userId, lesson.id]);
 
   useEffect(() => {
-    if (!userId) return;
     initSession();
   }, [userId, lesson.id, initSession]);
 

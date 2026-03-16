@@ -55,12 +55,21 @@ export default function AcademyLanding() {
 
       // Ensure profile exists — use core.users.id as the academy profile id,
       // and pass the user's display name from core.users for chat identity.
+      // Only upsert with a name when we actually have one; skip when displayName
+      // is falsy to avoid clobbering an existing academy display_name with null.
       const displayName = userProfile?.first_name && userProfile?.last_name
         ? `${userProfile.first_name} ${userProfile.last_name}`
         : userProfile?.first_name || null;
-      await academyApi.upsertProfile(userId, displayName ?? undefined).catch((err) =>
-        console.error('Failed to upsert academy profile:', err),
-      );
+      if (displayName) {
+        await academyApi.upsertProfile(userId, displayName).catch((err) =>
+          console.error('Failed to upsert academy profile:', err),
+        );
+      } else {
+        // Still ensure the profile row exists, just don't overwrite display_name
+        await academyApi.upsertProfile(userId).catch((err) =>
+          console.error('Failed to upsert academy profile:', err),
+        );
+      }
 
       const [tiersData, lessonsData, progressData, enrollmentsData] = await Promise.all([
         academyApi.getTiers(),
@@ -132,7 +141,7 @@ export default function AcademyLanding() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, userProfile?.first_name, userProfile?.last_name]);
 
   useEffect(() => {
     if (!userId) return;

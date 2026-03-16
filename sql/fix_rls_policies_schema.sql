@@ -34,8 +34,21 @@ DROP POLICY IF EXISTS "Users can update profiles" ON core.users;
 CREATE POLICY "Users can update profiles"
 ON core.users FOR UPDATE
 USING (
-  auth_id = auth.uid()
-  OR public.is_current_user_admin()
+  -- Who can target a row for update:
+  auth_id = auth.uid()              -- own row
+  OR public.is_current_user_admin() -- or admin targets any row
+)
+WITH CHECK (
+  -- What values are allowed to be written:
+  (
+    -- Regular users updating their own row: userType must remain unchanged.
+    auth_id = auth.uid()
+    AND NOT public.is_current_user_admin()
+    AND "userType" = (SELECT "userType" FROM core.users WHERE auth_id = auth.uid())
+  )
+  OR
+  -- Admins may change any column on any row.
+  public.is_current_user_admin()
 );
 
 DROP POLICY IF EXISTS "Admins can delete users" ON core.users;
@@ -46,10 +59,11 @@ USING (
   AND auth_id != auth.uid()
 );
 
+-- No INSERT policy for authenticated/anon roles on core.users.
+-- The handle_new_user() SECURITY DEFINER trigger handles all legitimate inserts.
+-- The service_role key (used by backend/migrations) bypasses RLS entirely.
+-- This matches the hardening done in harden_rls_policies.sql (FIX 2).
 DROP POLICY IF EXISTS "Service role can insert user profiles" ON core.users;
-CREATE POLICY "Service role can insert user profiles"
-ON core.users FOR INSERT
-WITH CHECK (true);
 
 -- ─── ai.chats RLS ───────────────────────────────────────────────────────────
 
