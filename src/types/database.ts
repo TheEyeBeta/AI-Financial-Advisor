@@ -2,7 +2,7 @@
 //
 // Schema map:
 //   core    — users, user_profiles, achievements, learning_topics
-//   trading — portfolio_history, open_positions, trades, trade_journal, eye_snapshots
+//   trading — portfolio_history, open_positions, trades, trade_journal
 //   ai      — chats, chat_messages, iris_context_cache
 //   market  — stock_snapshots, market_indices, trending_stocks, news, news_articles
 //   academy — (see academy-api.ts)
@@ -279,71 +279,6 @@ export interface Database {
           strategy?: string | null;
           notes?: string | null;
           tags?: string[] | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-      };
-      eye_snapshots: {
-        Row: {
-          id: string;
-          user_id: string;
-          snapshot_name: string | null;
-          snapshot_date: string;
-          portfolio_value: number | null;
-          total_positions: number | null;
-          total_trades: number | null;
-          win_rate: number | null;
-          total_pnl: number | null;
-          realized_pnl: number | null;
-          unrealized_pnl: number | null;
-          profit_factor: number | null;
-          avg_profit: number | null;
-          avg_loss: number | null;
-          is_latest: boolean;
-          is_active: boolean;
-          raw_data: Record<string, unknown> | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          snapshot_name?: string | null;
-          snapshot_date?: string;
-          portfolio_value?: number | null;
-          total_positions?: number | null;
-          total_trades?: number | null;
-          win_rate?: number | null;
-          total_pnl?: number | null;
-          realized_pnl?: number | null;
-          unrealized_pnl?: number | null;
-          profit_factor?: number | null;
-          avg_profit?: number | null;
-          avg_loss?: number | null;
-          is_latest?: boolean;
-          is_active?: boolean;
-          raw_data?: Record<string, unknown> | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          snapshot_name?: string | null;
-          snapshot_date?: string;
-          portfolio_value?: number | null;
-          total_positions?: number | null;
-          total_trades?: number | null;
-          win_rate?: number | null;
-          total_pnl?: number | null;
-          realized_pnl?: number | null;
-          unrealized_pnl?: number | null;
-          profit_factor?: number | null;
-          avg_profit?: number | null;
-          avg_loss?: number | null;
-          is_latest?: boolean;
-          is_active?: boolean;
-          raw_data?: Record<string, unknown> | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -722,7 +657,6 @@ export type PortfolioHistory = Database['trading']['Tables']['portfolio_history'
 export type OpenPosition = Database['trading']['Tables']['open_positions']['Row'];
 export type Trade = Database['trading']['Tables']['trades']['Row'];
 export type TradeJournalEntry = Database['trading']['Tables']['trade_journal']['Row'];
-export type EyeSnapshot = Database['trading']['Tables']['eye_snapshots']['Row'];
 export type Chat = Database['ai']['Tables']['chats']['Row'];
 export type ChatMessage = Database['ai']['Tables']['chat_messages']['Row'];
 export type Achievement = Database['core']['Tables']['achievements']['Row'];
