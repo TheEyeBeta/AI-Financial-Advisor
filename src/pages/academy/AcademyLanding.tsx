@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -47,29 +47,34 @@ export default function AcademyLanding() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Sync academy profile display name separately so name changes don't
+  // trigger a full data reload of tiers/lessons/progress/enrollments.
+  const firstNameRef = useRef(userProfile?.first_name);
+  const lastNameRef = useRef(userProfile?.last_name);
+  firstNameRef.current = userProfile?.first_name;
+  lastNameRef.current = userProfile?.last_name;
+
+  useEffect(() => {
+    if (!userId) return;
+    const displayName = firstNameRef.current && lastNameRef.current
+      ? `${firstNameRef.current} ${lastNameRef.current}`
+      : firstNameRef.current || null;
+    if (displayName) {
+      academyApi.upsertProfile(userId, displayName).catch((err) =>
+        console.error('Failed to upsert academy profile:', err),
+      );
+    } else {
+      academyApi.upsertProfile(userId).catch((err) =>
+        console.error('Failed to upsert academy profile:', err),
+      );
+    }
+  }, [userId, userProfile?.first_name, userProfile?.last_name]);
+
   const loadData = useCallback(async () => {
     if (!userId) return;
     try {
       setLoading(true);
       setError(null);
-
-      // Ensure profile exists — use core.users.id as the academy profile id,
-      // and pass the user's display name from core.users for chat identity.
-      // Only upsert with a name when we actually have one; skip when displayName
-      // is falsy to avoid clobbering an existing academy display_name with null.
-      const displayName = userProfile?.first_name && userProfile?.last_name
-        ? `${userProfile.first_name} ${userProfile.last_name}`
-        : userProfile?.first_name || null;
-      if (displayName) {
-        await academyApi.upsertProfile(userId, displayName).catch((err) =>
-          console.error('Failed to upsert academy profile:', err),
-        );
-      } else {
-        // Still ensure the profile row exists, just don't overwrite display_name
-        await academyApi.upsertProfile(userId).catch((err) =>
-          console.error('Failed to upsert academy profile:', err),
-        );
-      }
 
       const [tiersData, lessonsData, progressData, enrollmentsData] = await Promise.all([
         academyApi.getTiers(),
@@ -141,7 +146,7 @@ export default function AcademyLanding() {
     } finally {
       setLoading(false);
     }
-  }, [userId, userProfile?.first_name, userProfile?.last_name]);
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) return;

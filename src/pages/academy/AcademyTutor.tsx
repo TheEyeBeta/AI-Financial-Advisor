@@ -61,6 +61,9 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
     } catch (err) {
       if (reqId !== latestInitReqRef.current) return;
       console.error("Failed to init tutor session:", err);
+      setSession(null);
+      setMessages([]);
+      setStarterPrompts([]);
     } finally {
       if (reqId === latestInitReqRef.current) {
         setLoadingSession(false);
