@@ -16,7 +16,8 @@ RETURNS boolean AS $$
     WHERE auth_id = auth.uid()
       AND "userType" = 'Admin'
   );
-$$ LANGUAGE sql SECURITY DEFINER STABLE;
+$$ LANGUAGE sql SECURITY DEFINER STABLE
+SET search_path = pg_catalog;
 
 -- ─── core.users RLS ──────────────────────────────────────────────────────────
 

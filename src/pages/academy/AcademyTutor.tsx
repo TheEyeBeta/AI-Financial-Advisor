@@ -243,7 +243,11 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
                     key={pt.id}
                     className="block w-full text-left text-xs px-3 py-2 rounded-lg border border-border/40 hover:border-primary/30 hover:bg-primary/5 transition-colors text-muted-foreground/70 hover:text-foreground"
                     onClick={() => {
-                      setInput(pt.template_text);
+                      setInput(injectTemplateVars(pt.template_text, {
+                        lesson_title: lesson.title,
+                        tier_name: tier.name,
+                        lesson_content: lessonContent.slice(0, 3000),
+                      }));
                       textareaRef.current?.focus();
                     }}
                   >
