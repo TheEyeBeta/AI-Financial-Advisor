@@ -344,9 +344,13 @@ export const academyApi = {
   // ─── Profiles ─────────────────────────────────────────────────────────────
 
   async upsertProfile(user_id: string, display_name?: string): Promise<void> {
+    const payload: { id: string; display_name?: string } = { id: user_id };
+    if (display_name !== undefined) {
+      payload.display_name = display_name;
+    }
     const { error } = await academy()
       .from('profiles')
-      .upsert({ id: user_id, display_name: display_name || null }, { onConflict: 'id' });
+      .upsert(payload, { onConflict: 'id' });
     if (error) throw error;
   },
 

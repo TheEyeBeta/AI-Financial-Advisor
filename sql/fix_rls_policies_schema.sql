@@ -82,7 +82,8 @@ WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 DROP POLICY IF EXISTS "Users can update own chats" ON ai.chats;
 CREATE POLICY "Users can update own chats"
 ON ai.chats FOR UPDATE
-USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()))
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 DROP POLICY IF EXISTS "Users can delete own chats" ON ai.chats;
 CREATE POLICY "Users can delete own chats"
