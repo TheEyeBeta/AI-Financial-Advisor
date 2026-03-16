@@ -13,6 +13,7 @@ import {
   type ChatSession,
   type Lesson,
   type Tier,
+  type PromptTemplate,
 } from "@/services/academy-api";
 
 interface AcademyTutorProps {
@@ -23,40 +24,56 @@ interface AcademyTutorProps {
 }
 
 export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTutorProps) {
-  const { user } = useAuth();
+  const { userId } = useAuth();
   const [session, setSession] = useState<ChatSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [loadingSession, setLoadingSession] = useState(true);
+  const [starterPrompts, setStarterPrompts] = useState<PromptTemplate[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const latestInitReqRef = useRef(0);
 
   const initSession = useCallback(async () => {
-    if (!user?.id) return;
+    if (!userId) {
+      // Reset state when user is not authenticated to avoid stale data
+      // and a stuck loading indicator.
+      ++latestInitReqRef.current; // invalidate any in-flight requests
+      setLoadingSession(false);
+      setSession(null);
+      setMessages([]);
+      setStarterPrompts([]);
+      return;
+    }
     const reqId = ++latestInitReqRef.current;
     try {
       setLoadingSession(true);
-      const sess = await academyApi.getChatSession(user.id, lesson.id);
+      const [sess, prompts] = await Promise.all([
+        academyApi.getChatSession(userId, lesson.id),
+        academyApi.getLessonPromptTemplates(lesson.id).catch(() => [] as PromptTemplate[]),
+      ]);
       const msgs = await academyApi.getChatMessages(sess.id);
       if (reqId !== latestInitReqRef.current) return;
       setSession(sess);
       setMessages(msgs);
+      setStarterPrompts(prompts);
     } catch (err) {
       if (reqId !== latestInitReqRef.current) return;
       console.error("Failed to init tutor session:", err);
+      setSession(null);
+      setMessages([]);
+      setStarterPrompts([]);
     } finally {
       if (reqId === latestInitReqRef.current) {
         setLoadingSession(false);
       }
     }
-  }, [user?.id, lesson.id]);
+  }, [userId, lesson.id]);
 
   useEffect(() => {
-    if (!user?.id) return;
     initSession();
-  }, [user?.id, lesson.id, initSession]);
+  }, [userId, lesson.id, initSession]);
 
   useEffect(() => {
     scrollToBottom();
@@ -85,7 +102,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
   }
 
   async function sendMessage() {
-    if (!input.trim() || sending || !user?.id || !session) return;
+    if (!input.trim() || sending || !userId || !session) return;
 
     const userText = input.trim();
     // Snapshot history before any state updates so the slice window is accurate
@@ -219,6 +236,29 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
             <p className="text-xs text-muted-foreground/40 mt-1">
               I can explain concepts, give examples, and help you understand.
             </p>
+            {starterPrompts.length > 0 && (
+              <div className="mt-4 space-y-1.5">
+                <p className="text-xs text-muted-foreground/50 uppercase tracking-wide font-medium">
+                  Try asking
+                </p>
+                {starterPrompts.map((pt) => (
+                  <button
+                    key={pt.id}
+                    className="block w-full text-left text-xs px-3 py-2 rounded-lg border border-border/40 hover:border-primary/30 hover:bg-primary/5 transition-colors text-muted-foreground/70 hover:text-foreground"
+                    onClick={() => {
+                      setInput(injectTemplateVars(pt.template_text, {
+                        lesson_title: lesson.title,
+                        tier_name: tier.name,
+                        lesson_content: lessonContent.slice(0, 3000),
+                      }));
+                      textareaRef.current?.focus();
+                    }}
+                  >
+                    {pt.key.replace(/_/g, ' ')}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           messages.map((msg) => (

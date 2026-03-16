@@ -344,9 +344,13 @@ export const academyApi = {
   // ─── Profiles ─────────────────────────────────────────────────────────────
 
   async upsertProfile(user_id: string, display_name?: string): Promise<void> {
+    const payload: { id: string; display_name?: string } = { id: user_id };
+    if (display_name !== undefined) {
+      payload.display_name = display_name;
+    }
     const { error } = await academy()
       .from('profiles')
-      .upsert({ id: user_id, display_name: display_name || null }, { onConflict: 'id' });
+      .upsert(payload, { onConflict: 'id' });
     if (error) throw error;
   },
 
@@ -360,6 +364,25 @@ export const academyApi = {
       .maybeSingle();
     if (error) throw error;
     return data || null;
+  },
+
+  // ─── Lesson Prompt Links (predetermined questions / starter prompts) ────
+
+  async getLessonPromptTemplates(lesson_id: string): Promise<PromptTemplate[]> {
+    const { data, error } = await academy()
+      .from('lesson_prompt_links')
+      .select('prompt_template_id')
+      .eq('lesson_id', lesson_id);
+    if (error) throw error;
+    if (!data || data.length === 0) return [];
+
+    const templateIds = data.map((d: { prompt_template_id: string }) => d.prompt_template_id);
+    const { data: templates, error: tErr } = await academy()
+      .from('prompt_templates')
+      .select('*')
+      .in('id', templateIds);
+    if (tErr) throw tErr;
+    return (templates || []) as PromptTemplate[];
   },
 
   // ─── Chat ─────────────────────────────────────────────────────────────────
