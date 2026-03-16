@@ -659,6 +659,7 @@ export const chatApi = {
 export const learningApi = {
   async getTopics(userId: string): Promise<LearningTopic[]> {
     const { data, error } = await supabase
+      .schema('core')
       .from('learning_topics')
       .select('*')
       .eq('user_id', userId)
@@ -670,6 +671,7 @@ export const learningApi = {
 
   async updateProgress(userId: string, topicName: string, progress: number, completed?: boolean): Promise<LearningTopic> {
     const { data, error } = await supabase
+      .schema('core')
       .from('learning_topics')
       .upsert({
         user_id: userId,
@@ -732,6 +734,7 @@ export const learningApi = {
 
     // Get existing topics to avoid duplicates
     const { data: existingTopics, error: fetchError } = await supabase
+      .schema('core')
       .from('learning_topics')
       .select('topic_name')
       .eq('user_id', userId);
@@ -755,6 +758,7 @@ export const learningApi = {
     // If no new topics to insert, return existing ones
     if (topicsToInsert.length === 0) {
       const { data: allTopics, error: selectError } = await supabase
+        .schema('core')
         .from('learning_topics')
         .select('*')
         .eq('user_id', userId)
@@ -766,6 +770,7 @@ export const learningApi = {
 
     // Insert only new topics (no upsert needed since we filtered duplicates)
     const { error } = await supabase
+      .schema('core')
       .from('learning_topics')
       .insert(topicsToInsert)
       .select();
@@ -777,6 +782,7 @@ export const learningApi = {
 
     // Return all topics (existing + newly inserted)
     const { data: allTopics, error: selectError } = await supabase
+      .schema('core')
       .from('learning_topics')
       .select('*')
       .eq('user_id', userId)
@@ -864,6 +870,7 @@ function mapLegacyNewsArticle(article: LegacyNewsArticle): NewsArticle {
 
 async function fetchLegacyNews(limit?: number): Promise<NewsArticle[]> {
   const query = supabase
+    .schema('market')
     .from('news_articles')
     .select('*')
     .order('published_at', { ascending: false });
@@ -1005,6 +1012,7 @@ export const eyeApi = {
   // Get the latest active snapshot for a user
   async getLatestSnapshot(userId: string): Promise<EyeSnapshot | null> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .select('*')
       .eq('user_id', userId)
@@ -1021,6 +1029,7 @@ export const eyeApi = {
   // Get all snapshots for a user
   async getAllSnapshots(userId: string): Promise<EyeSnapshot[]> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .select('*')
       .eq('user_id', userId)
@@ -1039,6 +1048,7 @@ export const eyeApi = {
     }
   ): Promise<EyeSnapshot> {
     const { data, error } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .insert({
         ...snapshot,
@@ -1056,18 +1066,20 @@ export const eyeApi = {
   async updateSnapshot(id: string, userId: string, updates: Partial<EyeSnapshot>): Promise<EyeSnapshot> {
     // First verify ownership
     const { data: snapshot, error: fetchError } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .select('user_id')
       .eq('id', id)
       .eq('user_id', userId)
       .single();
-    
+
     if (fetchError || !snapshot) {
       throw new Error('Snapshot not found or access denied');
     }
-    
+
     // Update with user_id check for defense-in-depth
     const { data, error } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
@@ -1083,18 +1095,20 @@ export const eyeApi = {
   async deleteSnapshot(id: string, userId: string): Promise<void> {
     // First verify ownership
     const { data: snapshot, error: fetchError } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .select('user_id')
       .eq('id', id)
       .eq('user_id', userId)
       .single();
-    
+
     if (fetchError || !snapshot) {
       throw new Error('Snapshot not found or access denied');
     }
-    
+
     // Delete with user_id check for defense-in-depth
     const { error } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .delete()
       .eq('id', id)
@@ -1106,6 +1120,7 @@ export const eyeApi = {
   // Deactivate all snapshots for a user (disconnect The Eye)
   async deactivateAll(userId: string): Promise<void> {
     const { error } = await supabase
+      .schema('trading')
       .from('eye_snapshots')
       .update({ is_active: false, is_latest: false })
       .eq('user_id', userId);

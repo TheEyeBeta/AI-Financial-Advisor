@@ -1,7 +1,7 @@
 import { supabase } from './supabase';
 import type { Database } from '@/types/database';
 
-type UserProfile = Database['public']['Tables']['users']['Row'];
+type UserProfile = Database['core']['Tables']['users']['Row'];
 
 /**
  * Get user profile from auth user ID
