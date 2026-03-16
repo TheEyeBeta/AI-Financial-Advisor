@@ -13,14 +13,12 @@ import {
   marketApi,
   newsApi,
   pythonApi,
-  eyeApi,
   tradeEngineApi,
   stockRankingApi,
 } from '@/services/api';
 import type {
   OpenPosition,
   TradeJournalEntry,
-  EyeSnapshot,
 } from '@/types/database';
 
 // Portfolio hooks
@@ -394,87 +392,6 @@ export function useRecentNews(hours: number = 12, limit: number = 150) {
   });
 }
 
-// The Eye API hooks
-export function useEyeSnapshot() {
-  const { userId } = useAuth();
-  
-  return useQuery({
-    queryKey: ['eye-snapshot', userId],
-    queryFn: () => eyeApi.getLatestSnapshot(userId!),
-    enabled: !!userId,
-  });
-}
-
-export function useEyeSnapshots() {
-  const { userId } = useAuth();
-  
-  return useQuery({
-    queryKey: ['eye-snapshots', userId],
-    queryFn: () => eyeApi.getAllSnapshots(userId!),
-    enabled: !!userId,
-  });
-}
-
-export function useCreateEyeSnapshot() {
-  const { userId } = useAuth();
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: (snapshot: Omit<EyeSnapshot, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
-      snapshot_name?: string | null;
-      is_latest?: boolean;
-    }) => eyeApi.createSnapshot(userId!, snapshot),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
-    },
-  });
-}
-
-export function useUpdateEyeSnapshot() {
-  const { userId } = useAuth();
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: ({ id, updates }: { id: string; updates: Partial<EyeSnapshot> }) => {
-      if (!userId) throw new Error('Not authenticated');
-      return eyeApi.updateSnapshot(id, userId, updates);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
-    },
-  });
-}
-
-export function useDeleteEyeSnapshot() {
-  const { userId } = useAuth();
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: (id: string) => {
-      if (!userId) throw new Error('Not authenticated');
-      return eyeApi.deleteSnapshot(id, userId);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
-    },
-  });
-}
-
-export function useDisconnectEye() {
-  const { userId } = useAuth();
-  const queryClient = useQueryClient();
-  
-  return useMutation({
-    mutationFn: () => eyeApi.deactivateAll(userId!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshot', userId] });
-      queryClient.invalidateQueries({ queryKey: ['eye-snapshots', userId] });
-    },
-  });
-}
 
 // ============================================================
 // Trade Engine API Hooks - Direct connection to TheEyeBetaLocal

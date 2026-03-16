@@ -13,7 +13,6 @@ import type {
   TrendingStock,
   NewsArticle,
   LegacyNewsArticle,
-  EyeSnapshot,
   StockSnapshot,
 } from '@/types/database';
 
@@ -659,6 +658,7 @@ export const chatApi = {
 export const learningApi = {
   async getTopics(userId: string): Promise<LearningTopic[]> {
     const { data, error } = await supabase
+      .schema('core')
       .from('learning_topics')
       .select('*')
       .eq('user_id', userId)
@@ -670,6 +670,7 @@ export const learningApi = {
 
   async updateProgress(userId: string, topicName: string, progress: number, completed?: boolean): Promise<LearningTopic> {
     const { data, error } = await supabase
+      .schema('core')
       .from('learning_topics')
       .upsert({
         user_id: userId,
@@ -732,6 +733,7 @@ export const learningApi = {
 
     // Get existing topics to avoid duplicates
     const { data: existingTopics, error: fetchError } = await supabase
+      .schema('core')
       .from('learning_topics')
       .select('topic_name')
       .eq('user_id', userId);
@@ -755,6 +757,7 @@ export const learningApi = {
     // If no new topics to insert, return existing ones
     if (topicsToInsert.length === 0) {
       const { data: allTopics, error: selectError } = await supabase
+        .schema('core')
         .from('learning_topics')
         .select('*')
         .eq('user_id', userId)
@@ -766,6 +769,7 @@ export const learningApi = {
 
     // Insert only new topics (no upsert needed since we filtered duplicates)
     const { error } = await supabase
+      .schema('core')
       .from('learning_topics')
       .insert(topicsToInsert)
       .select();
@@ -777,6 +781,7 @@ export const learningApi = {
 
     // Return all topics (existing + newly inserted)
     const { data: allTopics, error: selectError } = await supabase
+      .schema('core')
       .from('learning_topics')
       .select('*')
       .eq('user_id', userId)
@@ -864,6 +869,7 @@ function mapLegacyNewsArticle(article: LegacyNewsArticle): NewsArticle {
 
 async function fetchLegacyNews(limit?: number): Promise<NewsArticle[]> {
   const query = supabase
+    .schema('market')
     .from('news_articles')
     .select('*')
     .order('published_at', { ascending: false });
@@ -1000,119 +1006,6 @@ export const newsApi = {
   },
 };
 
-// The Eye Trade Engine API - for storing and retrieving snapshots from The Eye
-export const eyeApi = {
-  // Get the latest active snapshot for a user
-  async getLatestSnapshot(userId: string): Promise<EyeSnapshot | null> {
-    const { data, error } = await supabase
-      .from('eye_snapshots')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_latest', true)
-      .eq('is_active', true)
-      .order('snapshot_date', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  // Get all snapshots for a user
-  async getAllSnapshots(userId: string): Promise<EyeSnapshot[]> {
-    const { data, error } = await supabase
-      .from('eye_snapshots')
-      .select('*')
-      .eq('user_id', userId)
-      .order('snapshot_date', { ascending: false });
-    
-    if (error) throw error;
-    return data || [];
-  },
-
-  // Create a new snapshot from The Eye data
-  async createSnapshot(
-    userId: string,
-    snapshot: Omit<EyeSnapshot, 'id' | 'user_id' | 'created_at' | 'updated_at'> & {
-      snapshot_name?: string | null;
-      is_latest?: boolean;
-    }
-  ): Promise<EyeSnapshot> {
-    const { data, error } = await supabase
-      .from('eye_snapshots')
-      .insert({
-        ...snapshot,
-        user_id: userId,
-        is_latest: snapshot.is_latest ?? true, // Default to latest
-      })
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  // Update a snapshot
-  async updateSnapshot(id: string, userId: string, updates: Partial<EyeSnapshot>): Promise<EyeSnapshot> {
-    // First verify ownership
-    const { data: snapshot, error: fetchError } = await supabase
-      .from('eye_snapshots')
-      .select('user_id')
-      .eq('id', id)
-      .eq('user_id', userId)
-      .single();
-    
-    if (fetchError || !snapshot) {
-      throw new Error('Snapshot not found or access denied');
-    }
-    
-    // Update with user_id check for defense-in-depth
-    const { data, error } = await supabase
-      .from('eye_snapshots')
-      .update({ ...updates, updated_at: new Date().toISOString() })
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
-  },
-
-  // Delete a snapshot
-  async deleteSnapshot(id: string, userId: string): Promise<void> {
-    // First verify ownership
-    const { data: snapshot, error: fetchError } = await supabase
-      .from('eye_snapshots')
-      .select('user_id')
-      .eq('id', id)
-      .eq('user_id', userId)
-      .single();
-    
-    if (fetchError || !snapshot) {
-      throw new Error('Snapshot not found or access denied');
-    }
-    
-    // Delete with user_id check for defense-in-depth
-    const { error } = await supabase
-      .from('eye_snapshots')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', userId);
-    
-    if (error) throw error;
-  },
-
-  // Deactivate all snapshots for a user (disconnect The Eye)
-  async deactivateAll(userId: string): Promise<void> {
-    const { error } = await supabase
-      .from('eye_snapshots')
-      .update({ is_active: false, is_latest: false })
-      .eq('user_id', userId);
-    
-    if (error) throw error;
-  },
-};
 
 // === STOCK SNAPSHOT CACHE ===
 // In-memory cache to reduce database queries
@@ -1548,44 +1441,6 @@ export const stockRankingApi = {
 // Experience level type
 type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 
-// Helper: Sanitize Eye data to remove all PII (only keep pure numerical metrics)
-// Kept for future use when deep analysis is re-enabled
-function _sanitizeEyeData(eyeSnapshot: EyeSnapshot): Record<string, number | undefined> {
-  return {
-    portfolio_value: eyeSnapshot.portfolio_value ?? undefined,
-    total_positions: eyeSnapshot.total_positions ?? undefined,
-    total_trades: eyeSnapshot.total_trades ?? undefined,
-    win_rate: eyeSnapshot.win_rate ?? undefined,
-    total_pnl: eyeSnapshot.total_pnl ?? undefined,
-    realized_pnl: eyeSnapshot.realized_pnl ?? undefined,
-    unrealized_pnl: eyeSnapshot.unrealized_pnl ?? undefined,
-    profit_factor: eyeSnapshot.profit_factor ?? undefined,
-    avg_profit: eyeSnapshot.avg_profit ?? undefined,
-    avg_loss: eyeSnapshot.avg_loss ?? undefined,
-    // Explicitly exclude: user_id, snapshot_name, snapshot_date, raw_data, id, created_at, updated_at
-  };
-}
-
-// Helper: Determine if question needs Deepseek quantitative analysis
-// Kept for future use when deep analysis is re-enabled
-function _needsDeepAnalysis(message: string, eyeSnapshot: EyeSnapshot | null): boolean {
-  if (!eyeSnapshot) return false;
-  
-  const complexAnalysisKeywords = [
-    'analyze', 'analysis', 'pattern', 'patterns', 'trend', 'trends', 
-    'correlation', 'statistical', 'statistics', 'performance analysis',
-    'risk assessment', 'efficiency', 'optimization', 'optimize',
-    'compare', 'comparison', 'benchmark', 'evaluate', 'evaluation'
-  ];
-  
-  const messageLower = message.toLowerCase();
-  const hasComplexKeywords = complexAnalysisKeywords.some(kw => 
-    messageLower.includes(kw)
-  );
-  
-  // Only use Deepseek for complex quantitative questions with data available
-  return hasComplexKeywords;
-}
 
 // Generate system prompt based on user's experience level
 // Note: experienceLevel can be null, which defaults to intermediate level
@@ -1716,7 +1571,6 @@ export const pythonApi = {
     userId: string, 
     experienceLevel?: ExperienceLevel,
     chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
-    _eyeSnapshot?: EyeSnapshot | null,  // Deprecated - using live data instead
     tradeEngineContext?: TradeEngineAIContext | null
   ): Promise<string> {
     // Input validation
