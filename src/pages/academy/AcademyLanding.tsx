@@ -47,13 +47,14 @@ export default function AcademyLanding() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Sync academy profile display name separately so name changes don't
-  // trigger a full data reload of tiers/lessons/progress/enrollments.
+  // Keep name fields in refs so loadData can read them without depending on them.
   const firstNameRef = useRef(userProfile?.first_name);
   const lastNameRef = useRef(userProfile?.last_name);
   firstNameRef.current = userProfile?.first_name;
   lastNameRef.current = userProfile?.last_name;
 
+  // Sync academy profile display name when name changes, without triggering
+  // a full data reload.
   useEffect(() => {
     if (!userId) return;
     const displayName = firstNameRef.current && lastNameRef.current
@@ -61,10 +62,6 @@ export default function AcademyLanding() {
       : firstNameRef.current || null;
     if (displayName) {
       academyApi.upsertProfile(userId, displayName).catch((err) =>
-        console.error('Failed to upsert academy profile:', err),
-      );
-    } else {
-      academyApi.upsertProfile(userId).catch((err) =>
         console.error('Failed to upsert academy profile:', err),
       );
     }
@@ -75,6 +72,16 @@ export default function AcademyLanding() {
     try {
       setLoading(true);
       setError(null);
+
+      // Ensure profile row exists before any enrollment operations.
+      // Reads name from refs to avoid adding name fields to deps.
+      const displayName = firstNameRef.current && lastNameRef.current
+        ? `${firstNameRef.current} ${lastNameRef.current}`
+        : firstNameRef.current || null;
+      await (displayName
+        ? academyApi.upsertProfile(userId, displayName)
+        : academyApi.upsertProfile(userId)
+      ).catch((err) => console.error('Failed to upsert academy profile:', err));
 
       const [tiersData, lessonsData, progressData, enrollmentsData] = await Promise.all([
         academyApi.getTiers(),
