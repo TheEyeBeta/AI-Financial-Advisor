@@ -6,15 +6,17 @@ import { analytics, AnalyticsEvents } from "@/services/analytics";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
-type UserProfile = Database["public"]["Tables"]["users"]["Row"];
+type AppUserProfile = Database["core"]["Tables"]["users"]["Row"];
 
 interface AuthContextValue {
   user: User | null;
-  userProfile: UserProfile | null;
+  userProfile: AppUserProfile | null;
   loading: boolean; // initial auth loading
   profileLoading: boolean; // background profile loading
   isAuthenticated: boolean;
-  userId: string | null; // public.users.id
+  authUserId: string | null; // auth.users.id (auth.uid())
+  appUserId: string | null; // core.users.id
+  userId: string | null; // deprecated alias for appUserId
   signIn: (email: string, password: string) => Promise<unknown>;
   signUp: (email: string, password: string) => Promise<unknown>;
   signOut: () => Promise<void>;
@@ -27,7 +29,7 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [authUser, setAuthUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [userProfile, setUserProfile] = useState<AppUserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileFetched, setProfileFetched] = useState<string | null>(null);
 
@@ -165,6 +167,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     profileLoading,
     isAuthenticated: !!authUser,
+    authUserId: authUser?.id ?? null,
+    appUserId: userProfile?.id ?? null,
     userId: userProfile?.id ?? null,
     signIn,
     signUp,

@@ -1,4 +1,4 @@
-import { Bot, LayoutDashboard, LineChart, TrendingUp, Shield, History, Newspaper, Trophy, GraduationCap, BookOpen } from "lucide-react";
+import { Bot, LayoutDashboard, LineChart, TrendingUp, Shield, History, Newspaper, Trophy, BookOpen } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -18,7 +18,6 @@ const mainNavItems = [
   { title: "AI Advisor", url: "/advisor", icon: Bot },
   { title: "Chat History", url: "/chat-history", icon: History },
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
-  { title: "Learning", url: "/learning", icon: GraduationCap },
   { title: "Academy", url: "/academy", icon: BookOpen },
   { title: "Paper Trading", url: "/paper-trading", icon: LineChart },
   { title: "Latest News", url: "/news", icon: Newspaper },

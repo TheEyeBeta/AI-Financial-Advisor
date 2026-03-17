@@ -48,7 +48,7 @@ const STATUS_CONFIG: Record<
 
 export default function AcademyTier() {
   const { tier: tierSlug } = useParams<{ tier: string }>();
-  const { userId } = useAuth();
+  const { authUserId } = useAuth();
   const navigate = useNavigate();
 
   const [tier, setTier] = useState<Tier | null>(null);
@@ -58,7 +58,7 @@ export default function AcademyTier() {
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    if (!userId || !tierSlug) return;
+    if (!authUserId || !tierSlug) return;
     try {
       setLoading(true);
       setError(null);
@@ -73,7 +73,7 @@ export default function AcademyTier() {
 
       // Check enrollment (Beginner is always accessible)
       if (foundTier.id !== TIER_IDS.BEGINNER) {
-        const enrollments = await academyApi.getTierEnrollments(userId);
+        const enrollments = await academyApi.getTierEnrollments(authUserId);
         const isEnrolled = enrollments.some((e) => e.tier_id === foundTier.id);
         if (!isEnrolled) {
           navigate("/academy");
@@ -83,7 +83,7 @@ export default function AcademyTier() {
 
       const [lessonsData, progressData] = await Promise.all([
         academyApi.getLessonsByTier(foundTier.id),
-        academyApi.getUserLessonProgress(userId),
+        academyApi.getUserLessonProgress(authUserId),
       ]);
 
       setTier(foundTier);
@@ -96,12 +96,12 @@ export default function AcademyTier() {
     } finally {
       setLoading(false);
     }
-  }, [userId, tierSlug, navigate]);
+  }, [authUserId, tierSlug, navigate]);
 
   useEffect(() => {
-    if (!userId || !tierSlug) return;
+    if (!authUserId || !tierSlug) return;
     loadData();
-  }, [userId, tierSlug, loadData]);
+  }, [authUserId, tierSlug, loadData]);
 
   const progressMap = new Map(progress.map((p) => [p.lesson_id, p]));
 

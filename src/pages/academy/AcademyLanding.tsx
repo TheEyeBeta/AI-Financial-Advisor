@@ -37,7 +37,7 @@ const TIER_BADGE_COLORS: Record<string, string> = {
 };
 
 export default function AcademyLanding() {
-  const { userId, userProfile } = useAuth();
+  const { authUserId, userProfile } = useAuth();
   const navigate = useNavigate();
 
   const [tiers, setTiers] = useState<Tier[]>([]);
@@ -56,19 +56,19 @@ export default function AcademyLanding() {
   // Sync academy profile display name when name changes, without triggering
   // a full data reload.
   useEffect(() => {
-    if (!userId) return;
+    if (!authUserId) return;
     const displayName = firstNameRef.current && lastNameRef.current
       ? `${firstNameRef.current} ${lastNameRef.current}`
       : firstNameRef.current || null;
     if (displayName) {
-      academyApi.upsertProfile(userId, displayName).catch((err) =>
+      academyApi.upsertProfile(authUserId, displayName).catch((err) =>
         console.error('Failed to upsert academy profile:', err),
       );
     }
-  }, [userId, userProfile?.first_name, userProfile?.last_name]);
+  }, [authUserId, userProfile?.first_name, userProfile?.last_name]);
 
   const loadData = useCallback(async () => {
-    if (!userId) return;
+    if (!authUserId) return;
     try {
       setLoading(true);
       setError(null);
@@ -79,15 +79,15 @@ export default function AcademyLanding() {
         ? `${firstNameRef.current} ${lastNameRef.current}`
         : firstNameRef.current || null;
       await (displayName
-        ? academyApi.upsertProfile(userId, displayName)
-        : academyApi.upsertProfile(userId)
+        ? academyApi.upsertProfile(authUserId, displayName)
+        : academyApi.upsertProfile(authUserId)
       ).catch((err) => console.error('Failed to upsert academy profile:', err));
 
       const [tiersData, lessonsData, progressData, enrollmentsData] = await Promise.all([
         academyApi.getTiers(),
         academyApi.getAllLessons(),
-        academyApi.getUserLessonProgress(userId),
-        academyApi.getTierEnrollments(userId),
+        academyApi.getUserLessonProgress(authUserId),
+        academyApi.getTierEnrollments(authUserId),
       ]);
 
       setTiers(tiersData);
@@ -100,10 +100,10 @@ export default function AcademyLanding() {
       // Beginner is always enrolled
       if (!enrolledTierIds.has(TIER_IDS.BEGINNER)) {
         await academyApi
-          .enrollInTier(userId, TIER_IDS.BEGINNER, 'default')
+          .enrollInTier(authUserId, TIER_IDS.BEGINNER, 'default')
           .then(() => enrolledTierIds.add(TIER_IDS.BEGINNER))
           .catch((err) =>
-            console.error(`Failed to enroll user ${userId} in Beginner tier:`, err),
+            console.error(`Failed to enroll user ${authUserId} in Beginner tier:`, err),
           );
       }
 
@@ -124,10 +124,10 @@ export default function AcademyLanding() {
         !enrolledTierIds.has(TIER_IDS.INTERMEDIATE)
       ) {
         await academyApi
-          .enrollInTier(userId, TIER_IDS.INTERMEDIATE, 'beginner_completion')
+          .enrollInTier(authUserId, TIER_IDS.INTERMEDIATE, 'beginner_completion')
           .then(() => enrolledTierIds.add(TIER_IDS.INTERMEDIATE))
           .catch((err) =>
-            console.error(`Failed to enroll user ${userId} in Intermediate tier:`, err),
+            console.error(`Failed to enroll user ${authUserId} in Intermediate tier:`, err),
           );
       }
 
@@ -136,15 +136,15 @@ export default function AcademyLanding() {
         !enrolledTierIds.has(TIER_IDS.ADVANCED)
       ) {
         await academyApi
-          .enrollInTier(userId, TIER_IDS.ADVANCED, 'intermediate_completion')
+          .enrollInTier(authUserId, TIER_IDS.ADVANCED, 'intermediate_completion')
           .then(() => enrolledTierIds.add(TIER_IDS.ADVANCED))
           .catch((err) =>
-            console.error(`Failed to enroll user ${userId} in Advanced tier:`, err),
+            console.error(`Failed to enroll user ${authUserId} in Advanced tier:`, err),
           );
       }
 
       // Reload enrollments after potential auto-enrolls
-      const freshEnrollments = await academyApi.getTierEnrollments(userId);
+      const freshEnrollments = await academyApi.getTierEnrollments(authUserId);
       setEnrollments(freshEnrollments);
     } catch (err) {
       console.error("Error loading academy data:", err);
@@ -153,12 +153,12 @@ export default function AcademyLanding() {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [authUserId]);
 
   useEffect(() => {
-    if (!userId) return;
+    if (!authUserId) return;
     loadData();
-  }, [userId, loadData]);
+  }, [authUserId, loadData]);
 
   const enrolledTierIds = new Set(enrollments.map((e) => e.tier_id));
   const completedLessonIds = new Set(
