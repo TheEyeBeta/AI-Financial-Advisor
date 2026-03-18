@@ -29,6 +29,32 @@ const MAX_CHAT_HISTORY_MESSAGES = 30;
 const OPENAI_MAX_TOKENS = 2000;
 const OPENAI_CHAT_TEMPERATURE = 0.7;
 
+const unavailableChatSchemas = new Set<ChatSchemaName>();
+
+function markChatSchemaAvailability(schema: ChatSchemaName, isAvailable: boolean): void {
+  if (isAvailable) {
+    unavailableChatSchemas.delete(schema);
+    return;
+  }
+
+  unavailableChatSchemas.add(schema);
+}
+
+function getCandidateChatSchemas(): ChatSchemaName[] {
+  const available = CHAT_SCHEMA_FALLBACKS.filter((schema) => !unavailableChatSchemas.has(schema));
+  const unavailable = CHAT_SCHEMA_FALLBACKS.filter((schema) => unavailableChatSchemas.has(schema));
+  return [...available, ...unavailable];
+}
+
+function getKnownAvailableChatSchemas(): ChatSchemaName[] {
+  const available = CHAT_SCHEMA_FALLBACKS.filter((schema) => !unavailableChatSchemas.has(schema));
+  return available.length > 0 ? available : CHAT_SCHEMA_FALLBACKS;
+}
+
+export function __resetChatSchemaAvailabilityForTests(): void {
+  unavailableChatSchemas.clear();
+}
+
 // Web Search Intent Detection
 // NOTE: Web search is ONLY for news and general knowledge
 // Quantitative data (prices, indicators, signals) comes from The Eye database
@@ -476,15 +502,24 @@ async function withChatSchemaFallback<T>(
 ): Promise<T> {
   let lastError: unknown;
 
-  for (let index = 0; index < CHAT_SCHEMA_FALLBACKS.length; index += 1) {
-    const schema = CHAT_SCHEMA_FALLBACKS[index];
+  const candidateSchemas = getCandidateChatSchemas();
+
+  for (let index = 0; index < candidateSchemas.length; index += 1) {
+    const schema = candidateSchemas[index];
 
     try {
-      return await operation(schema);
+      const result = await operation(schema);
+      markChatSchemaAvailability(schema, true);
+      return result;
     } catch (error) {
       lastError = error;
-      const isLastSchema = index === CHAT_SCHEMA_FALLBACKS.length - 1;
-      if (isLastSchema || !isMissingChatSchemaError(error)) {
+      const missingSchema = isMissingChatSchemaError(error);
+      if (missingSchema) {
+        markChatSchemaAvailability(schema, false);
+      }
+
+      const isLastSchema = index === candidateSchemas.length - 1;
+      if (isLastSchema || !missingSchema) {
         throw error;
       }
     }
@@ -501,7 +536,13 @@ async function fetchChatsForUserFromSchema(schema: ChatSchemaName, userId: strin
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
   
-  if (chatsError) throw chatsError;
+  if (chatsError) {
+    if (isMissingChatSchemaError(chatsError)) {
+      markChatSchemaAvailability(schema, false);
+    }
+    throw chatsError;
+  }
+  markChatSchemaAvailability(schema, true);
   if (!Array.isArray(chats) || chats.length === 0) return [];
 
   const chatIds = chats.map(c => c.id);
@@ -553,7 +594,13 @@ async function fetchMessagesForUserFromSchema(schema: ChatSchemaName, userId: st
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
   
-  if (error) throw error;
+  if (error) {
+    if (isMissingChatSchemaError(error)) {
+      markChatSchemaAvailability(schema, false);
+    }
+    throw error;
+  }
+  markChatSchemaAvailability(schema, true);
   return data || [];
 }
 
@@ -591,7 +638,7 @@ async function resolveUserChatSchema(userId: string): Promise<ChatSchemaName | n
 }
 
 async function resolveExistingChatSchema(chatId: string): Promise<ChatSchemaName | null> {
-  for (const schema of CHAT_SCHEMA_FALLBACKS) {
+  for (const schema of getKnownAvailableChatSchemas()) {
     const { data, error } = await supabase
       .schema(schema)
       .from('chats')
@@ -601,6 +648,7 @@ async function resolveExistingChatSchema(chatId: string): Promise<ChatSchemaName
 
     if (error) {
       if (isMissingChatSchemaError(error)) {
+        markChatSchemaAvailability(schema, false);
         continue;
       }
 
@@ -608,6 +656,7 @@ async function resolveExistingChatSchema(chatId: string): Promise<ChatSchemaName
     }
 
     if (data) {
+      markChatSchemaAvailability(schema, true);
       return schema;
     }
   }
@@ -620,19 +669,20 @@ async function resolveExistingChatSchema(chatId: string): Promise<ChatSchemaName
 export const chatsApi = {
   // Get all chats for a user with message counts
   async getAll(userId: string): Promise<ChatWithMessages[]> {
-    const chatsBySchema = await Promise.all(
-      CHAT_SCHEMA_FALLBACKS.map(async (schema) => {
-        try {
-          return await fetchChatsForUserFromSchema(schema, userId);
-        } catch (error) {
-          if (isMissingChatSchemaError(error)) {
-            return [];
-          }
+    const chatsBySchema: ChatWithMessages[][] = [];
 
-          throw error;
+    for (const schema of getKnownAvailableChatSchemas()) {
+      try {
+        const chats = await fetchChatsForUserFromSchema(schema, userId);
+        chatsBySchema.push(chats);
+      } catch (error) {
+        if (isMissingChatSchemaError(error)) {
+          continue;
         }
-      })
-    );
+
+        throw error;
+      }
+    }
 
     return mergeChats(chatsBySchema);
   },
@@ -750,19 +800,20 @@ export const chatApi = {
 
   // Legacy: Get all messages for a user (for backward compatibility)
   async getAllUserMessages(userId: string): Promise<ChatMessage[]> {
-    const messagesBySchema = await Promise.all(
-      CHAT_SCHEMA_FALLBACKS.map(async (schema) => {
-        try {
-          return await fetchMessagesForUserFromSchema(schema, userId);
-        } catch (error) {
-          if (isMissingChatSchemaError(error)) {
-            return [];
-          }
+    const messagesBySchema: ChatMessage[][] = [];
 
-          throw error;
+    for (const schema of getKnownAvailableChatSchemas()) {
+      try {
+        const messages = await fetchMessagesForUserFromSchema(schema, userId);
+        messagesBySchema.push(messages);
+      } catch (error) {
+        if (isMissingChatSchemaError(error)) {
+          continue;
         }
-      })
-    );
+
+        throw error;
+      }
+    }
 
     return mergeMessages(messagesBySchema);
   },
