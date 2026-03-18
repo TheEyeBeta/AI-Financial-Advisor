@@ -10,7 +10,7 @@ CREATE TABLE public.achievements (
   CONSTRAINT achievements_pkey PRIMARY KEY (id),
   CONSTRAINT achievements_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
-CREATE TABLE public.chat_messages (
+CREATE TABLE ai.chat_messages (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   user_id uuid NOT NULL,
   role text NOT NULL CHECK (role = ANY (ARRAY['user'::text, 'assistant'::text])),
@@ -18,17 +18,17 @@ CREATE TABLE public.chat_messages (
   created_at timestamp with time zone DEFAULT now(),
   chat_id uuid,
   CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
-  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
-  CONSTRAINT chat_messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES public.chats(id)
+  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id),
+  CONSTRAINT chat_messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES ai.chats(id)
 );
-CREATE TABLE public.chats (
+CREATE TABLE ai.chats (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   user_id uuid NOT NULL,
   title text DEFAULT 'New Chat'::text,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT chats_pkey PRIMARY KEY (id),
-  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.financial_plans (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

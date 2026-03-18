@@ -47,5 +47,7 @@ export const supabase = supabaseConfig.isConfigured
     })
   : createDummyClient();
 
+export const aiDb = supabase.schema('ai');
+
 // Re-export from user-helpers for backward compatibility
 export { getCurrentUserId, getCurrentUserProfile, getUserProfile } from './user-helpers';

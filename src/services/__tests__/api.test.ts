@@ -5,7 +5,6 @@ import {
   chatApi,
   portfolioApi,
   newsApi,
-  __resetChatSchemaAvailabilityForTests,
 } from '../api';
 
 // Mock supabase with a more robust mock
@@ -31,21 +30,27 @@ let mockChain = createChainableMock({ data: [], error: null });
 let mockChainsByTable: Record<string, ReturnType<typeof createChainableMock>> = {};
 let mockSchemaChainsBySchemaAndTable: Record<string, ReturnType<typeof createChainableMock>> = {};
 
-vi.mock('@/lib/supabase', () => ({
-  supabase: {
-    from: vi.fn((table: string) => mockChainsByTable[table] ?? mockChain),
-    schema: vi.fn((schema: string) => ({
-      from: vi.fn((table: string) => mockSchemaChainsBySchemaAndTable[`${schema}.${table}`] ?? mockChainsByTable[table] ?? mockChain),
-    })),
-  },
-  getCurrentUserId: vi.fn().mockResolvedValue('user-123'),
-}));
+vi.mock('@/lib/supabase', () => {
+  const schema = vi.fn((schemaName: string) => ({
+    from: vi.fn((table: string) => mockSchemaChainsBySchemaAndTable[`${schemaName}.${table}`] ?? mockChainsByTable[table] ?? mockChain),
+  }));
+
+  return {
+    supabase: {
+      from: vi.fn((table: string) => mockChainsByTable[table] ?? mockChain),
+      schema,
+    },
+    aiDb: {
+      from: vi.fn((table: string) => mockSchemaChainsBySchemaAndTable[`ai.${table}`] ?? mockChainsByTable[table] ?? mockChain),
+    },
+    getCurrentUserId: vi.fn().mockResolvedValue('user-123'),
+  };
+});
 
 beforeEach(() => {
   mockChain = createChainableMock({ data: [], error: null });
   mockChainsByTable = {};
   mockSchemaChainsBySchemaAndTable = {};
-  __resetChatSchemaAvailabilityForTests();
 });
 
 describe('tradesApi', () => {
@@ -291,8 +296,8 @@ describe('chatsApi', () => {
     });
   });
 
-  describe('schema fallback', () => {
-    it('merges chats from ai and public schemas and sorts by updated_at descending', async () => {
+  describe('ai schema access', () => {
+    it('loads chats and messages from ai.chats and ai.chat_messages only', async () => {
       const aiChats = createChainableMock({
         data: [
           {
@@ -305,214 +310,63 @@ describe('chatsApi', () => {
         ],
         error: null,
       });
-      const publicChats = createChainableMock({
+      const aiMessages = createChainableMock({
         data: [
           {
-            id: 'chat-public',
+            id: 'msg-ai',
             user_id: 'user-123',
-            title: 'Public Chat',
-            created_at: '2024-01-14T00:00:00Z',
-            updated_at: '2024-01-15T00:00:00Z',
+            chat_id: 'chat-ai',
+            role: 'assistant',
+            content: 'AI message',
+            created_at: '2024-01-17T00:00:00Z',
           },
         ],
         error: null,
       });
-      const aiMessages = createChainableMock({ data: [], error: null });
-      const publicMessages = createChainableMock({ data: [], error: null });
 
       mockSchemaChainsBySchemaAndTable['ai.chats'] = aiChats;
-      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
       mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = aiMessages;
-      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
 
       const result = await chatsApi.getAll('user-123');
 
-      expect(result.map((chat) => chat.id)).toEqual(['chat-ai', 'chat-public']);
+      expect(aiChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('chat-ai');
+      expect(result[0].lastMessage?.id).toBe('msg-ai');
+      expect(mockSchemaChainsBySchemaAndTable['public.chats']).toBeUndefined();
     });
 
-    it('falls back from ai.chats to public.chats when the ai schema is missing', async () => {
-      const missingAiSchema = createChainableMock({
-        data: null,
-        error: { code: 'PGRST205', message: 'Could not find the table ai.chats in the schema cache' },
-      });
-      const publicChats = createChainableMock({
+    it('returns all user messages from ai.chat_messages in ascending order', async () => {
+      const aiMessages = createChainableMock({
         data: [
           {
-            id: 'chat-123',
+            id: 'msg-100',
             user_id: 'user-123',
-            title: 'Recovered Chat',
+            chat_id: 'chat-ai',
+            role: 'user',
+            content: 'First',
             created_at: '2024-01-15T00:00:00Z',
-            updated_at: '2024-01-16T00:00:00Z',
           },
-        ],
-        error: null,
-      });
-      const publicMessages = createChainableMock({
-        data: [
           {
-            id: 'msg-123',
+            id: 'msg-200',
             user_id: 'user-123',
-            chat_id: 'chat-123',
+            chat_id: 'chat-ai',
             role: 'assistant',
-            content: 'Most recent message',
+            content: 'Second',
             created_at: '2024-01-16T00:00:00Z',
           },
-          {
-            id: 'msg-122',
-            user_id: 'user-123',
-            chat_id: 'chat-123',
-            role: 'user',
-            content: 'Older message',
-            created_at: '2024-01-15T00:00:00Z',
-          },
         ],
         error: null,
       });
 
-      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiSchema;
-      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
-      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
+      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = aiMessages;
 
-      const result = await chatsApi.getAll('user-123');
+      const result = await chatApi.getAllUserMessages('user-123');
 
-      expect(missingAiSchema.eq).toHaveBeenCalledWith('user_id', 'user-123');
-      expect(publicChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
-      expect(result).toHaveLength(1);
-      expect(result[0].messages[0].id).toBe('msg-122');
-      expect(result[0].messages[1].id).toBe('msg-123');
-      expect(result[0].lastMessage?.id).toBe('msg-123');
-      expect(result[0].messageCount).toBe(2);
+      expect(aiMessages.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(result.map((message) => message.id)).toEqual(['msg-100', 'msg-200']);
+      expect(mockSchemaChainsBySchemaAndTable['public.chat_messages']).toBeUndefined();
     });
-
-    it('remembers missing schemas to avoid repeated 404-producing requests', async () => {
-      const missingAiSchema = createChainableMock({
-        data: null,
-        error: { code: 'PGRST205', message: 'Could not find the table ai.chats in the schema cache' },
-      });
-      const publicChats = createChainableMock({
-        data: [
-          {
-            id: 'chat-123',
-            user_id: 'user-123',
-            title: 'Recovered Chat',
-            created_at: '2024-01-15T00:00:00Z',
-            updated_at: '2024-01-16T00:00:00Z',
-          },
-        ],
-        error: null,
-      });
-      const publicMessages = createChainableMock({ data: [], error: null });
-
-      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiSchema;
-      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
-      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
-
-      await chatsApi.getAll('user-123');
-      await chatsApi.getAll('user-123');
-
-      expect(missingAiSchema.eq).toHaveBeenCalledTimes(1);
-      expect(publicChats.eq).toHaveBeenCalledTimes(2);
-    });
-
-    it('falls back to public when ai.chats exists but is empty', async () => {
-      const emptyAiChats = createChainableMock({
-        data: [],
-        error: null,
-      });
-      const publicChats = createChainableMock({
-        data: [
-          {
-            id: 'chat-legacy',
-            user_id: 'user-123',
-            title: 'Legacy Chat',
-            created_at: '2024-01-15T00:00:00Z',
-            updated_at: '2024-01-16T00:00:00Z',
-          },
-        ],
-        error: null,
-      });
-      const publicMessages = createChainableMock({
-        data: [],
-        error: null,
-      });
-
-      mockSchemaChainsBySchemaAndTable['ai.chats'] = emptyAiChats;
-      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
-      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
-
-      const result = await chatsApi.getAll('user-123');
-
-      expect(emptyAiChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
-      expect(publicChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
-      expect(result[0].id).toBe('chat-legacy');
-    });
-
-    it('updates a legacy public chat title when ai does not contain the chat id', async () => {
-      const missingAiChat = createChainableMock({ data: null, error: null });
-      const publicChatChain = createChainableMock({
-        data: {
-          id: 'chat-legacy',
-          user_id: 'user-123',
-          title: 'Updated Legacy Title',
-          updated_at: '2024-01-16T00:00:00Z',
-        },
-        error: null,
-      });
-      publicChatChain.maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'chat-legacy' }, error: null });
-
-      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiChat;
-      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChatChain;
-
-      const result = await chatsApi.updateTitle('chat-legacy', 'Updated Legacy Title');
-
-      expect(missingAiChat.eq).toHaveBeenCalledWith('id', 'chat-legacy');
-      expect(publicChatChain.update).toHaveBeenCalledWith(
-        expect.objectContaining({ title: 'Updated Legacy Title' })
-      );
-      expect(result.title).toBe('Updated Legacy Title');
-    });
-  });
-});
-
-describe('chatApi legacy merge', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('merges all user messages from ai and public schemas in ascending created_at order', async () => {
-    const aiMessages = createChainableMock({
-      data: [
-        {
-          id: 'msg-200',
-          user_id: 'user-123',
-          chat_id: 'chat-ai',
-          role: 'assistant',
-          content: 'AI message',
-          created_at: '2024-01-16T00:00:00Z',
-        },
-      ],
-      error: null,
-    });
-    const publicMessages = createChainableMock({
-      data: [
-        {
-          id: 'msg-100',
-          user_id: 'user-123',
-          chat_id: 'chat-public',
-          role: 'user',
-          content: 'Public message',
-          created_at: '2024-01-15T00:00:00Z',
-        },
-      ],
-      error: null,
-    });
-
-    mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = aiMessages;
-    mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
-
-    const result = await chatApi.getAllUserMessages('user-123');
-
-    expect(result.map((message) => message.id)).toEqual(['msg-100', 'msg-200']);
   });
 });
 

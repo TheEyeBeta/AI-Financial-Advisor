@@ -1,6 +1,6 @@
-export type ChatSchemaName = 'ai' | 'public';
+export type ChatSchemaName = 'ai';
 
-export const CHAT_SCHEMA_FALLBACKS: ChatSchemaName[] = ['ai', 'public'];
+export const CHAT_SCHEMA_FALLBACKS: ChatSchemaName[] = ['ai'];
 
 export function isMissingChatSchemaError(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;

@@ -12,8 +12,7 @@ import {
   Wifi, WifiOff, Loader2, Play, Terminal
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { CHAT_SCHEMA_FALLBACKS, isMissingChatSchemaError, type ChatSchemaName } from "@/lib/chat-schema";
-import { supabase } from "@/lib/supabase";
+import { aiDb, supabase } from "@/lib/supabase";
 import { useState, useEffect, useCallback } from "react";
 import {
   Table,
@@ -93,54 +92,14 @@ export default function Admin() {
 
   const BACKEND_URL = import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8000";
 
-  const withAdminChatSchemaFallback = useCallback(async <T,>(
-    operation: (schema: ChatSchemaName) => Promise<T>
-  ): Promise<T> => {
-    let lastError: unknown;
-
-    for (let index = 0; index < CHAT_SCHEMA_FALLBACKS.length; index += 1) {
-      const schema = CHAT_SCHEMA_FALLBACKS[index];
-
-      try {
-        const result = await operation(schema);
-
-        if (schema === "ai") {
-          if (Array.isArray(result) && result.length === 0) {
-            continue;
-          }
-
-          if (
-            result &&
-            typeof result === "object" &&
-            "count" in result &&
-            typeof (result as { count?: number | null }).count === "number" &&
-            (result as { count?: number | null }).count === 0
-          ) {
-            continue;
-          }
-        }
-
-        return result;
-      } catch (error) {
-        lastError = error;
-        const isLastSchema = index === CHAT_SCHEMA_FALLBACKS.length - 1;
-        if (isLastSchema || !isMissingChatSchemaError(error)) {
-          throw error;
-        }
-      }
-    }
-
-    throw lastError;
-  }, []);
 
   const runChatCountQuery = useCallback(async (
-    schema: ChatSchemaName,
     table: "chats" | "chat_messages",
-    filter?: (query: ReturnType<typeof supabase.schema>) => unknown
+    filter?: (query: ReturnType<typeof aiDb.from>) => unknown
   ) => {
-    let query = supabase.schema(schema).from(table).select("id", { count: "exact", head: true });
+    let query = aiDb.from(table).select("id", { count: "exact", head: true });
     if (filter) {
-      query = filter(query as ReturnType<typeof supabase.schema>) as typeof query;
+      query = filter(query as ReturnType<typeof aiDb.from>) as typeof query;
     }
 
     const result = await query;
@@ -148,9 +107,8 @@ export default function Admin() {
     return result;
   }, []);
 
-  const runRecentActivityQuery = useCallback(async (schema: ChatSchemaName) => {
-    const result = await supabase
-      .schema(schema)
+  const runRecentActivityQuery = useCallback(async () => {
+    const result = await aiDb
       .from("chat_messages")
       .select("id, user_id, role, created_at")
       .order("created_at", { ascending: false })
@@ -275,13 +233,11 @@ export default function Admin() {
     try {
       const today = new Date().toISOString().split('T')[0];
 
-      const [chatsResult, messagesResult, todayResult] = await withAdminChatSchemaFallback(
-        (schema) => Promise.all([
-          runChatCountQuery(schema, "chats"),
-          runChatCountQuery(schema, "chat_messages"),
-          runChatCountQuery(schema, "chats", (query) => query.gte("updated_at", today)),
-        ])
-      );
+      const [chatsResult, messagesResult, todayResult] = await Promise.all([
+        runChatCountQuery("chats"),
+        runChatCountQuery("chat_messages"),
+        runChatCountQuery("chats", (query) => query.gte("updated_at", today)),
+      ]);
 
       setChatStats({
         totalChats: chatsResult.count || 0,
@@ -314,7 +270,7 @@ export default function Admin() {
   const fetchRecentActivity = async () => {
     try {
       // Get recent chat messages as activity
-      const { data } = await withAdminChatSchemaFallback(runRecentActivityQuery);
+      const { data } = await runRecentActivityQuery();
 
       if (data) {
         // Map to activity format

@@ -1,9 +1,4 @@
-import { supabase } from '@/lib/supabase';
-import {
-  CHAT_SCHEMA_FALLBACKS,
-  isMissingChatSchemaError,
-  type ChatSchemaName,
-} from '@/lib/chat-schema';
+import { aiDb, supabase } from '@/lib/supabase';
 import type { PostgrestFilterBuilder } from '@supabase/postgrest-js';
 import type {
   PortfolioHistory,
@@ -28,32 +23,6 @@ const MAX_TITLE_LENGTH = 200;
 const MAX_CHAT_HISTORY_MESSAGES = 30;
 const OPENAI_MAX_TOKENS = 2000;
 const OPENAI_CHAT_TEMPERATURE = 0.7;
-
-const unavailableChatSchemas = new Set<ChatSchemaName>();
-
-function markChatSchemaAvailability(schema: ChatSchemaName, isAvailable: boolean): void {
-  if (isAvailable) {
-    unavailableChatSchemas.delete(schema);
-    return;
-  }
-
-  unavailableChatSchemas.add(schema);
-}
-
-function getCandidateChatSchemas(): ChatSchemaName[] {
-  const available = CHAT_SCHEMA_FALLBACKS.filter((schema) => !unavailableChatSchemas.has(schema));
-  const unavailable = CHAT_SCHEMA_FALLBACKS.filter((schema) => unavailableChatSchemas.has(schema));
-  return [...available, ...unavailable];
-}
-
-function getKnownAvailableChatSchemas(): ChatSchemaName[] {
-  const available = CHAT_SCHEMA_FALLBACKS.filter((schema) => !unavailableChatSchemas.has(schema));
-  return available.length > 0 ? available : CHAT_SCHEMA_FALLBACKS;
-}
-
-export function __resetChatSchemaAvailabilityForTests(): void {
-  unavailableChatSchemas.clear();
-}
 
 // Web Search Intent Detection
 // NOTE: Web search is ONLY for news and general knowledge
@@ -497,62 +466,29 @@ export const journalApi = {
   },
 };
 
-async function withChatSchemaFallback<T>(
-  operation: (schema: ChatSchemaName) => Promise<T>
-): Promise<T> {
-  let lastError: unknown;
-
-  const candidateSchemas = getCandidateChatSchemas();
-
-  for (let index = 0; index < candidateSchemas.length; index += 1) {
-    const schema = candidateSchemas[index];
-
-    try {
-      const result = await operation(schema);
-      markChatSchemaAvailability(schema, true);
-      return result;
-    } catch (error) {
-      lastError = error;
-      const missingSchema = isMissingChatSchemaError(error);
-      if (missingSchema) {
-        markChatSchemaAvailability(schema, false);
-      }
-
-      const isLastSchema = index === candidateSchemas.length - 1;
-      if (isLastSchema || !missingSchema) {
-        throw error;
-      }
-    }
-  }
-
-  throw lastError;
+function fromAiChats() {
+  return aiDb.from('chats');
 }
 
-async function fetchChatsForUserFromSchema(schema: ChatSchemaName, userId: string): Promise<ChatWithMessages[]> {
-  const { data: chats, error: chatsError } = await supabase
-    .schema(schema)
-    .from('chats')
+function fromAiChatMessages() {
+  return aiDb.from('chat_messages');
+}
+
+async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
+  const { data: chats, error: chatsError } = await fromAiChats()
     .select('*')
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
-  
-  if (chatsError) {
-    if (isMissingChatSchemaError(chatsError)) {
-      markChatSchemaAvailability(schema, false);
-    }
-    throw chatsError;
-  }
-  markChatSchemaAvailability(schema, true);
+
+  if (chatsError) throw chatsError;
   if (!Array.isArray(chats) || chats.length === 0) return [];
 
   const chatIds = chats.map(c => c.id);
-  const { data: messages, error: messagesError } = await supabase
-    .schema(schema)
-    .from('chat_messages')
+  const { data: messages, error: messagesError } = await fromAiChatMessages()
     .select('*')
     .in('chat_id', chatIds)
     .order('created_at', { ascending: false });
-  
+
   if (messagesError) throw messagesError;
 
   const messagesByChat = (messages || []).reduce((acc, msg) => {
@@ -569,144 +505,34 @@ async function fetchChatsForUserFromSchema(schema: ChatSchemaName, userId: strin
   }));
 }
 
-function mergeChats(chatsBySchema: ChatWithMessages[][]): ChatWithMessages[] {
-  const merged = new Map<string, ChatWithMessages>();
-
-  for (const chats of chatsBySchema) {
-    for (const chat of chats) {
-      const existing = merged.get(chat.id);
-      if (!existing || new Date(chat.updated_at).getTime() > new Date(existing.updated_at).getTime()) {
-        merged.set(chat.id, chat);
-      }
-    }
-  }
-
-  return [...merged.values()].sort(
-    (left, right) => new Date(right.updated_at).getTime() - new Date(left.updated_at).getTime()
-  );
-}
-
-async function fetchMessagesForUserFromSchema(schema: ChatSchemaName, userId: string): Promise<ChatMessage[]> {
-  const { data, error } = await supabase
-    .schema(schema)
-    .from('chat_messages')
+async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
+  const { data, error } = await fromAiChatMessages()
     .select('*')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
-  
-  if (error) {
-    if (isMissingChatSchemaError(error)) {
-      markChatSchemaAvailability(schema, false);
-    }
-    throw error;
-  }
-  markChatSchemaAvailability(schema, true);
+
+  if (error) throw error;
   return data || [];
 }
 
-function mergeMessages(messagesBySchema: ChatMessage[][]): ChatMessage[] {
-  const merged = new Map<string, ChatMessage>();
-
-  for (const messages of messagesBySchema) {
-    for (const message of messages) {
-      merged.set(message.id, message);
-    }
-  }
-
-  return [...merged.values()].sort(
-    (left, right) => new Date(left.created_at).getTime() - new Date(right.created_at).getTime()
-  );
-}
-
-async function resolveUserChatSchema(userId: string): Promise<ChatSchemaName | null> {
-  for (const schema of ['public', 'ai'] satisfies ChatSchemaName[]) {
-    try {
-      const chats = await fetchChatsForUserFromSchema(schema, userId);
-      if (chats.length > 0) {
-        return schema;
-      }
-    } catch (error) {
-      if (isMissingChatSchemaError(error)) {
-        continue;
-      }
-
-      throw error;
-    }
-  }
-
-  return null;
-}
-
-async function resolveExistingChatSchema(chatId: string): Promise<ChatSchemaName | null> {
-  for (const schema of getKnownAvailableChatSchemas()) {
-    const { data, error } = await supabase
-      .schema(schema)
-      .from('chats')
-      .select('id')
-      .eq('id', chatId)
-      .maybeSingle();
-
-    if (error) {
-      if (isMissingChatSchemaError(error)) {
-        markChatSchemaAvailability(schema, false);
-        continue;
-      }
-
-      throw error;
-    }
-
-    if (data) {
-      markChatSchemaAvailability(schema, true);
-      return schema;
-    }
-  }
-
-  return null;
-}
 
 // Chat API
 // Chats API - for managing chat sessions
 export const chatsApi = {
   // Get all chats for a user with message counts
   async getAll(userId: string): Promise<ChatWithMessages[]> {
-    const chatsBySchema: ChatWithMessages[][] = [];
-
-    for (const schema of getKnownAvailableChatSchemas()) {
-      try {
-        const chats = await fetchChatsForUserFromSchema(schema, userId);
-        chatsBySchema.push(chats);
-      } catch (error) {
-        if (isMissingChatSchemaError(error)) {
-          continue;
-        }
-
-        throw error;
-      }
-    }
-
-    return mergeChats(chatsBySchema);
+    return fetchChatsForUser(userId);
   },
 
   // Create a new chat
   async create(userId: string, title?: string): Promise<Chat> {
-    const existingSchema = await resolveUserChatSchema(userId);
-    const insertChat = async (schema: ChatSchemaName) => {
-      const { data, error } = await supabase
-        .schema(schema)
-        .from('chats')
-        .insert({ user_id: userId, title: title || 'New Chat' })
-        .select()
-        .single();
-      
-      if (error) throw error;
-      return data;
-    };
+    const { data, error } = await fromAiChats()
+      .insert({ user_id: userId, title: title || 'New Chat' })
+      .select()
+      .single();
 
-    if (existingSchema) {
-      return insertChat(existingSchema);
-    }
-
-    return withChatSchemaFallback(insertChat);
+    if (error) throw error;
+    return data;
   },
 
   // Update chat title
@@ -719,10 +545,7 @@ export const chatsApi = {
       throw new Error(`Title too long. Maximum length is ${MAX_TITLE_LENGTH} characters.`);
     }
     
-    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
-    const { data, error } = await supabase
-      .schema(schema)
-      .from('chats')
+    const { data, error } = await fromAiChats()
       .update({ title, updated_at: new Date().toISOString() })
       .eq('id', chatId)
       .select()
@@ -734,10 +557,7 @@ export const chatsApi = {
 
   // Delete a chat (cascade deletes messages)
   async delete(chatId: string): Promise<void> {
-    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
-    const { error } = await supabase
-      .schema(schema)
-      .from('chats')
+    const { error } = await fromAiChats()
       .delete()
       .eq('id', chatId);
     
@@ -746,14 +566,7 @@ export const chatsApi = {
 
   // Get single chat with messages
   async getWithMessages(chatId: string): Promise<ChatWithMessages | null> {
-    const schema = await resolveExistingChatSchema(chatId);
-    if (!schema) {
-      return null;
-    }
-
-    const { data: chat, error: chatError } = await supabase
-      .schema(schema)
-      .from('chats')
+    const { data: chat, error: chatError } = await fromAiChats()
       .select('*')
       .eq('id', chatId)
       .single();
@@ -761,9 +574,7 @@ export const chatsApi = {
     if (chatError) throw chatError;
     if (!chat) return null;
 
-    const { data: messages, error: messagesError } = await supabase
-      .schema(schema)
-      .from('chat_messages')
+    const { data: messages, error: messagesError } = await fromAiChatMessages()
       .select('*')
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
@@ -782,14 +593,7 @@ export const chatsApi = {
 export const chatApi = {
   // Get messages for a specific chat
   async getMessages(chatId: string): Promise<ChatMessage[]> {
-    const schema = await resolveExistingChatSchema(chatId);
-    if (!schema) {
-      return [];
-    }
-
-    const { data, error } = await supabase
-      .schema(schema)
-      .from('chat_messages')
+    const { data, error } = await fromAiChatMessages()
       .select('*')
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
@@ -800,22 +604,7 @@ export const chatApi = {
 
   // Legacy: Get all messages for a user (for backward compatibility)
   async getAllUserMessages(userId: string): Promise<ChatMessage[]> {
-    const messagesBySchema: ChatMessage[][] = [];
-
-    for (const schema of getKnownAvailableChatSchemas()) {
-      try {
-        const messages = await fetchMessagesForUserFromSchema(schema, userId);
-        messagesBySchema.push(messages);
-      } catch (error) {
-        if (isMissingChatSchemaError(error)) {
-          continue;
-        }
-
-        throw error;
-      }
-    }
-
-    return mergeMessages(messagesBySchema);
+    return fetchMessagesForUser(userId);
   },
 
   async addMessage(userId: string, chatId: string, role: 'user' | 'assistant', content: string): Promise<ChatMessage> {
@@ -827,10 +616,7 @@ export const chatApi = {
       throw new Error(`Message too long. Maximum length is ${MAX_MESSAGE_LENGTH} characters.`);
     }
     
-    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
-    const { data, error } = await supabase
-      .schema(schema)
-      .from('chat_messages')
+    const { data, error } = await fromAiChatMessages()
       .insert({ user_id: userId, chat_id: chatId, role, content })
       .select()
       .single();
@@ -839,9 +625,7 @@ export const chatApi = {
 
     // Update chat's updated_at timestamp
     try {
-      await supabase
-        .schema(schema)
-        .from('chats')
+      await fromAiChats()
         .update({ updated_at: new Date().toISOString() })
         .eq('id', chatId);
     } catch (error) {
@@ -853,10 +637,7 @@ export const chatApi = {
   },
 
   async clearMessages(chatId: string): Promise<void> {
-    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
-    const { error } = await supabase
-      .schema(schema)
-      .from('chat_messages')
+    const { error } = await fromAiChatMessages()
       .delete()
       .eq('chat_id', chatId);
     
