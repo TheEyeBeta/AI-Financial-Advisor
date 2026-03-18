@@ -154,55 +154,6 @@ describe('tradesApi', () => {
     });
   });
 
-  describe('schema fallback', () => {
-    it('falls back from ai.chats to public.chats when the ai schema is missing', async () => {
-      const missingAiSchema = createChainableMock({
-        data: null,
-        error: { code: 'PGRST205', message: 'Could not find the table ai.chats in the schema cache' },
-      });
-      const publicChats = createChainableMock({
-        data: [
-          {
-            id: 'chat-123',
-            user_id: 'user-123',
-            title: 'Recovered Chat',
-            created_at: '2024-01-15T00:00:00Z',
-            updated_at: '2024-01-16T00:00:00Z',
-          },
-        ],
-        error: null,
-      });
-      const publicMessages = createChainableMock({
-        data: [
-          {
-            id: 'msg-123',
-            user_id: 'user-123',
-            chat_id: 'chat-123',
-            role: 'assistant',
-            content: 'Fallback works',
-            created_at: '2024-01-16T00:00:00Z',
-          },
-        ],
-        error: null,
-      });
-
-      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiSchema;
-      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
-      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
-
-      const result = await chatsApi.getAll('user-123');
-
-      expect(missingAiSchema.eq).toHaveBeenCalledWith('user_id', 'user-123');
-      expect(publicChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
-      expect(result).toEqual([
-        expect.objectContaining({
-          id: 'chat-123',
-          messageCount: 1,
-          lastMessage: expect.objectContaining({ id: 'msg-123' }),
-        }),
-      ]);
-    });
-  });
 });
 
 describe('chatApi', () => {
@@ -328,6 +279,120 @@ describe('chatsApi', () => {
         title: 'Custom Title',
       });
       expect(result).toEqual(mockChat);
+    });
+  });
+
+  describe('schema fallback', () => {
+    it('falls back from ai.chats to public.chats when the ai schema is missing', async () => {
+      const missingAiSchema = createChainableMock({
+        data: null,
+        error: { code: 'PGRST205', message: 'Could not find the table ai.chats in the schema cache' },
+      });
+      const publicChats = createChainableMock({
+        data: [
+          {
+            id: 'chat-123',
+            user_id: 'user-123',
+            title: 'Recovered Chat',
+            created_at: '2024-01-15T00:00:00Z',
+            updated_at: '2024-01-16T00:00:00Z',
+          },
+        ],
+        error: null,
+      });
+      const publicMessages = createChainableMock({
+        data: [
+          {
+            id: 'msg-123',
+            user_id: 'user-123',
+            chat_id: 'chat-123',
+            role: 'assistant',
+            content: 'Most recent message',
+            created_at: '2024-01-16T00:00:00Z',
+          },
+          {
+            id: 'msg-122',
+            user_id: 'user-123',
+            chat_id: 'chat-123',
+            role: 'user',
+            content: 'Older message',
+            created_at: '2024-01-15T00:00:00Z',
+          },
+        ],
+        error: null,
+      });
+
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiSchema;
+      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
+      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
+
+      const result = await chatsApi.getAll('user-123');
+
+      expect(missingAiSchema.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(publicChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(result).toHaveLength(1);
+      expect(result[0].messages[0].id).toBe('msg-122');
+      expect(result[0].messages[1].id).toBe('msg-123');
+      expect(result[0].lastMessage?.id).toBe('msg-123');
+      expect(result[0].messageCount).toBe(2);
+    });
+
+    it('falls back to public when ai.chats exists but is empty', async () => {
+      const emptyAiChats = createChainableMock({
+        data: [],
+        error: null,
+      });
+      const publicChats = createChainableMock({
+        data: [
+          {
+            id: 'chat-legacy',
+            user_id: 'user-123',
+            title: 'Legacy Chat',
+            created_at: '2024-01-15T00:00:00Z',
+            updated_at: '2024-01-16T00:00:00Z',
+          },
+        ],
+        error: null,
+      });
+      const publicMessages = createChainableMock({
+        data: [],
+        error: null,
+      });
+
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = emptyAiChats;
+      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
+      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
+
+      const result = await chatsApi.getAll('user-123');
+
+      expect(emptyAiChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(publicChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(result[0].id).toBe('chat-legacy');
+    });
+
+    it('updates a legacy public chat title when ai does not contain the chat id', async () => {
+      const missingAiChat = createChainableMock({ data: null, error: null });
+      const publicChatChain = createChainableMock({
+        data: {
+          id: 'chat-legacy',
+          user_id: 'user-123',
+          title: 'Updated Legacy Title',
+          updated_at: '2024-01-16T00:00:00Z',
+        },
+        error: null,
+      });
+      publicChatChain.maybeSingle = vi.fn().mockResolvedValue({ data: { id: 'chat-legacy' }, error: null });
+
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiChat;
+      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChatChain;
+
+      const result = await chatsApi.updateTitle('chat-legacy', 'Updated Legacy Title');
+
+      expect(missingAiChat.eq).toHaveBeenCalledWith('id', 'chat-legacy');
+      expect(publicChatChain.update).toHaveBeenCalledWith(
+        expect.objectContaining({ title: 'Updated Legacy Title' })
+      );
+      expect(result.title).toBe('Updated Legacy Title');
     });
   });
 });

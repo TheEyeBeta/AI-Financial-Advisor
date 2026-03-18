@@ -69,6 +69,29 @@ interface ActivityLog {
   timestamp: string;
 }
 
+type ChatSchemaName = "ai" | "public";
+
+const CHAT_SCHEMA_FALLBACKS: ChatSchemaName[] = ["ai", "public"];
+
+function isMissingChatSchemaError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+
+  const candidate = error as {
+    code?: string;
+    status?: number;
+    message?: string;
+    details?: string;
+  };
+  const message = `${candidate.message ?? ""} ${candidate.details ?? ""}`.toLowerCase();
+
+  return (
+    candidate.code === "PGRST205" ||
+    candidate.status === 404 ||
+    message.includes("could not find the table") ||
+    (message.includes("relation") && message.includes("does not exist"))
+  );
+}
+
 export default function Admin() {
   const { userProfile } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -91,6 +114,46 @@ export default function Admin() {
   const [queryError, setQueryError] = useState<string | null>(null);
 
   const BACKEND_URL = import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8000";
+
+  const withAdminChatSchemaFallback = useCallback(async <T,>(
+    operation: (schema: ChatSchemaName) => Promise<T>
+  ): Promise<T> => {
+    let lastError: unknown;
+
+    for (let index = 0; index < CHAT_SCHEMA_FALLBACKS.length; index += 1) {
+      const schema = CHAT_SCHEMA_FALLBACKS[index];
+
+      try {
+        const result = await operation(schema);
+
+        if (schema === "ai") {
+          if (Array.isArray(result) && result.length === 0) {
+            continue;
+          }
+
+          if (
+            result &&
+            typeof result === "object" &&
+            "count" in result &&
+            typeof (result as { count?: number | null }).count === "number" &&
+            (result as { count?: number | null }).count === 0
+          ) {
+            continue;
+          }
+        }
+
+        return result;
+      } catch (error) {
+        lastError = error;
+        const isLastSchema = index === CHAT_SCHEMA_FALLBACKS.length - 1;
+        if (isLastSchema || !isMissingChatSchemaError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError;
+  }, []);
 
   /** Get the current Supabase access token for authenticated admin requests. */
   const getAuthHeaders = async (): Promise<HeadersInit> => {
@@ -206,12 +269,14 @@ export default function Admin() {
   const fetchChatStats = async () => {
     try {
       const today = new Date().toISOString().split('T')[0];
-      
-      const [chatsResult, messagesResult, todayResult] = await Promise.all([
-        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }),
-        supabase.schema("ai").from("chat_messages").select("id", { count: "exact", head: true }),
-        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }).gte("updated_at", today),
-      ]);
+
+      const [chatsResult, messagesResult, todayResult] = await withAdminChatSchemaFallback(
+        (schema) => Promise.all([
+          supabase.schema(schema).from("chats").select("id", { count: "exact", head: true }),
+          supabase.schema(schema).from("chat_messages").select("id", { count: "exact", head: true }),
+          supabase.schema(schema).from("chats").select("id", { count: "exact", head: true }).gte("updated_at", today),
+        ])
+      );
 
       setChatStats({
         totalChats: chatsResult.count || 0,
@@ -244,12 +309,14 @@ export default function Admin() {
   const fetchRecentActivity = async () => {
     try {
       // Get recent chat messages as activity
-      const { data } = await supabase
-        .schema("ai")
-        .from("chat_messages")
-        .select("id, user_id, role, created_at")
-        .order("created_at", { ascending: false })
-        .limit(10);
+      const { data } = await withAdminChatSchemaFallback((schema) =>
+        supabase
+          .schema(schema)
+          .from("chat_messages")
+          .select("id, user_id, role, created_at")
+          .order("created_at", { ascending: false })
+          .limit(10)
+      );
 
       if (data) {
         // Map to activity format

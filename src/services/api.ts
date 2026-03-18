@@ -511,12 +511,37 @@ async function withChatSchemaFallback<T>(
   throw lastError;
 }
 
+async function resolveExistingChatSchema(chatId: string): Promise<ChatSchemaName | null> {
+  for (const schema of CHAT_SCHEMA_FALLBACKS) {
+    const { data, error } = await supabase
+      .schema(schema)
+      .from('chats')
+      .select('id')
+      .eq('id', chatId)
+      .maybeSingle();
+
+    if (error) {
+      if (isMissingChatSchemaError(error)) {
+        continue;
+      }
+
+      throw error;
+    }
+
+    if (data) {
+      return schema;
+    }
+  }
+
+  return null;
+}
+
 // Chat API
 // Chats API - for managing chat sessions
 export const chatsApi = {
   // Get all chats for a user with message counts
   async getAll(userId: string): Promise<ChatWithMessages[]> {
-    return withChatSchemaFallback(async (schema) => {
+    const fetchChatsForSchema = async (schema: ChatSchemaName): Promise<ChatWithMessages[]> => {
       const { data: chats, error: chatsError } = await supabase
         .schema(schema)
         .from('chats')
@@ -548,11 +573,19 @@ export const chatsApi = {
       return chats.map(chat => ({
         ...chat,
         // Explicit null check: ensure messages array exists and is not empty
-        messages: (messagesByChat[chat.id] || []).reverse(),
+        messages: [...(messagesByChat[chat.id] || [])].reverse(),
         messageCount: (messagesByChat[chat.id] || []).length,
-        lastMessage: messagesByChat[chat.id]?.[0],
+        lastMessage: (messagesByChat[chat.id] || [])[0],
       }));
-    });
+    };
+
+    const aiChats = await withChatSchemaFallback(async (schema) => fetchChatsForSchema(schema));
+    if (aiChats.length > 0) {
+      return aiChats;
+    }
+
+    const publicChats = await fetchChatsForSchema('public');
+    return publicChats;
   },
 
   // Create a new chat
@@ -580,9 +613,11 @@ export const chatsApi = {
       throw new Error(`Title too long. Maximum length is ${MAX_TITLE_LENGTH} characters.`);
     }
     
-    return withChatSchemaFallback(async (schema) => {
+    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
+
+    return withChatSchemaFallback(async (fallbackSchema) => {
       const { data, error } = await supabase
-        .schema(schema)
+        .schema(schema ?? fallbackSchema)
         .from('chats')
         .update({ title, updated_at: new Date().toISOString() })
         .eq('id', chatId)
@@ -596,7 +631,8 @@ export const chatsApi = {
 
   // Delete a chat (cascade deletes messages)
   async delete(chatId: string): Promise<void> {
-    await withChatSchemaFallback(async (schema) => {
+    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
+    await withChatSchemaFallback(async () => {
       const { error } = await supabase
         .schema(schema)
         .from('chats')
@@ -609,9 +645,14 @@ export const chatsApi = {
 
   // Get single chat with messages
   async getWithMessages(chatId: string): Promise<ChatWithMessages | null> {
-    return withChatSchemaFallback(async (schema) => {
+    const schema = await resolveExistingChatSchema(chatId);
+    if (!schema) {
+      return null;
+    }
+
+    return withChatSchemaFallback(async (fallbackSchema) => {
       const { data: chat, error: chatError } = await supabase
-        .schema(schema)
+        .schema(schema ?? fallbackSchema)
         .from('chats')
         .select('*')
         .eq('id', chatId)
@@ -621,7 +662,7 @@ export const chatsApi = {
       if (!chat) return null;
 
       const { data: messages, error: messagesError } = await supabase
-        .schema(schema)
+        .schema(schema ?? fallbackSchema)
         .from('chat_messages')
         .select('*')
         .eq('chat_id', chatId)
@@ -642,7 +683,12 @@ export const chatsApi = {
 export const chatApi = {
   // Get messages for a specific chat
   async getMessages(chatId: string): Promise<ChatMessage[]> {
-    return withChatSchemaFallback(async (schema) => {
+    const schema = await resolveExistingChatSchema(chatId);
+    if (!schema) {
+      return [];
+    }
+
+    return withChatSchemaFallback(async () => {
       const { data, error } = await supabase
         .schema(schema)
         .from('chat_messages')
@@ -679,7 +725,9 @@ export const chatApi = {
       throw new Error(`Message too long. Maximum length is ${MAX_MESSAGE_LENGTH} characters.`);
     }
     
-    return withChatSchemaFallback(async (schema) => {
+    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
+
+    return withChatSchemaFallback(async () => {
       const { data, error } = await supabase
         .schema(schema)
         .from('chat_messages')
@@ -706,7 +754,9 @@ export const chatApi = {
   },
 
   async clearMessages(chatId: string): Promise<void> {
-    await withChatSchemaFallback(async (schema) => {
+    const schema = await resolveExistingChatSchema(chatId) ?? 'ai';
+
+    await withChatSchemaFallback(async () => {
       const { error } = await supabase
         .schema(schema)
         .from('chat_messages')
