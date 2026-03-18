@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS public.users (
 -- Chats table (conversation sessions)
 CREATE TABLE IF NOT EXISTS ai.chats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     title TEXT DEFAULT 'New Chat',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS ai.chats (
 -- Chat Messages (AI Advisor conversations)
 CREATE TABLE IF NOT EXISTS ai.chat_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     chat_id UUID REFERENCES ai.chats(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
@@ -468,20 +468,20 @@ DROP POLICY IF EXISTS "Users can delete own chats" ON ai.chats;
 
 CREATE POLICY "Users can view own chats"
 ON ai.chats FOR SELECT
-USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can create own chats"
 ON ai.chats FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own chats"
 ON ai.chats FOR UPDATE
-USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()))
-WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()))
+WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can delete own chats"
 ON ai.chats FOR DELETE
-USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Chat Messages policies
 DROP POLICY IF EXISTS "Users can view own chat messages" ON ai.chat_messages;
@@ -490,15 +490,26 @@ DROP POLICY IF EXISTS "Users can delete own chat messages" ON ai.chat_messages;
 
 CREATE POLICY "Users can view own chat messages"
 ON ai.chat_messages FOR SELECT
-USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own chat messages"
 ON ai.chat_messages FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+WITH CHECK (
+    user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+    AND (
+        chat_id IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM ai.chats
+            WHERE ai.chats.id = chat_id
+              AND ai.chats.user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+        )
+    )
+);
 
 CREATE POLICY "Users can delete own chat messages"
 ON ai.chat_messages FOR DELETE
-USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Portfolio History policies
 DROP POLICY IF EXISTS "Users can view own portfolio history" ON public.portfolio_history;

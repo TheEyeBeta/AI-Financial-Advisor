@@ -12,7 +12,7 @@ import {
   Wifi, WifiOff, Loader2, Play, Terminal
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { aiDb, supabase } from "@/lib/supabase";
+import { supabase } from "@/lib/supabase";
 import { useState, useEffect, useCallback } from "react";
 import {
   Table,
@@ -91,33 +91,6 @@ export default function Admin() {
   const [queryError, setQueryError] = useState<string | null>(null);
 
   const BACKEND_URL = import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8000";
-
-
-  const runChatCountQuery = useCallback(async (
-    table: "chats" | "chat_messages",
-    filter?: (query: ReturnType<typeof aiDb.from>) => unknown
-  ) => {
-    let query = aiDb.from(table).select("id", { count: "exact", head: true });
-    if (filter) {
-      query = filter(query as ReturnType<typeof aiDb.from>) as typeof query;
-    }
-
-    const result = await query;
-    if (result.error) throw result.error;
-    return result;
-  }, []);
-
-  const runRecentActivityQuery = useCallback(async () => {
-    const result = await aiDb
-      .from("chat_messages")
-      .select("id, user_id, role, created_at")
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    if (result.error) throw result.error;
-    return result;
-  }, []);
-
   /** Get the current Supabase access token for authenticated admin requests. */
   const getAuthHeaders = async (): Promise<HeadersInit> => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -195,7 +168,6 @@ export default function Admin() {
       fetchUsers(),
       fetchChatStats(),
       fetchTradingStats(),
-      fetchRecentActivity(),
       fetchSystemHealth(),
     ]);
     setLoading(false);
@@ -231,19 +203,20 @@ export default function Admin() {
 
   const fetchChatStats = async () => {
     try {
-      const today = new Date().toISOString().split('T')[0];
+      const headers = await getAuthHeaders();
+      const resp = await fetch(`${BACKEND_URL}/api/admin/chat-dashboard`, { headers });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(body || `HTTP ${resp.status}`);
+      }
 
-      const [chatsResult, messagesResult, todayResult] = await Promise.all([
-        runChatCountQuery("chats"),
-        runChatCountQuery("chat_messages"),
-        runChatCountQuery("chats", (query) => query.gte("updated_at", today)),
-      ]);
-
+      const data = await resp.json();
       setChatStats({
-        totalChats: chatsResult.count || 0,
-        totalMessages: messagesResult.count || 0,
-        activeToday: todayResult.count || 0,
+        totalChats: data.totalChats || 0,
+        totalMessages: data.totalMessages || 0,
+        activeToday: data.activeToday || 0,
       });
+      setRecentActivity(data.recentActivity || []);
     } catch (error) {
       console.error("Error fetching chat stats:", error);
     }
@@ -264,26 +237,6 @@ export default function Admin() {
       });
     } catch (error) {
       console.error("Error fetching trading stats:", error);
-    }
-  };
-
-  const fetchRecentActivity = async () => {
-    try {
-      // Get recent chat messages as activity
-      const { data } = await runRecentActivityQuery();
-
-      if (data) {
-        // Map to activity format
-        const activities: ActivityLog[] = data.map((msg) => ({
-          id: msg.id,
-          user_email: "User",
-          action: msg.role === "user" ? "Sent message" : "Received AI response",
-          timestamp: msg.created_at,
-        }));
-        setRecentActivity(activities);
-      }
-    } catch (error) {
-      console.error("Error fetching activity:", error);
     }
   };
 

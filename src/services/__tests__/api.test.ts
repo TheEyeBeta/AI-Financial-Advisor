@@ -336,6 +336,18 @@ describe('chatsApi', () => {
       expect(mockSchemaChainsBySchemaAndTable['public.chats']).toBeUndefined();
     });
 
+    it('returns null when a chat does not exist', async () => {
+      const missingChat = createChainableMock({ data: null, error: null });
+      missingChat.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
+
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingChat;
+
+      const result = await chatsApi.getWithMessages('missing-chat');
+
+      expect(missingChat.eq).toHaveBeenCalledWith('id', 'missing-chat');
+      expect(result).toBeNull();
+    });
+
     it('returns all user messages from ai.chat_messages in ascending order', async () => {
       const aiMessages = createChainableMock({
         data: [

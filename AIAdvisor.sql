@@ -18,7 +18,7 @@ CREATE TABLE ai.chat_messages (
   created_at timestamp with time zone DEFAULT now(),
   chat_id uuid,
   CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
-  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id),
+  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
   CONSTRAINT chat_messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES ai.chats(id)
 );
 CREATE TABLE ai.chats (
@@ -28,7 +28,7 @@ CREATE TABLE ai.chats (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT chats_pkey PRIMARY KEY (id),
-  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
+  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
 );
 CREATE TABLE public.financial_plans (
   id uuid NOT NULL DEFAULT gen_random_uuid(),

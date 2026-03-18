@@ -569,7 +569,7 @@ export const chatsApi = {
     const { data: chat, error: chatError } = await fromAiChats()
       .select('*')
       .eq('id', chatId)
-      .single();
+      .maybeSingle();
 
     if (chatError) throw chatError;
     if (!chat) return null;
@@ -624,13 +624,13 @@ export const chatApi = {
     if (error) throw error;
 
     // Update chat's updated_at timestamp
-    try {
-      await fromAiChats()
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', chatId);
-    } catch (error) {
+    const { error: updateChatError } = await fromAiChats()
+      .update({ updated_at: new Date().toISOString() })
+      .eq('id', chatId);
+
+    if (updateChatError) {
       // Log error but don't fail the message creation
-      console.error('Failed to update chat timestamp:', error);
+      console.error('Failed to update chat timestamp', { chatId, error: updateChatError });
     }
     
     return data;
