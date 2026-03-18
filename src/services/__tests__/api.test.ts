@@ -22,12 +22,13 @@ const createChainableMock = (finalResult: { data: unknown; error: unknown }) => 
 
 let mockChain = createChainableMock({ data: [], error: null });
 let mockChainsByTable: Record<string, ReturnType<typeof createChainableMock>> = {};
+let mockSchemaChainsBySchemaAndTable: Record<string, ReturnType<typeof createChainableMock>> = {};
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     from: vi.fn((table: string) => mockChainsByTable[table] ?? mockChain),
-    schema: vi.fn(() => ({
-      from: vi.fn((table: string) => mockChainsByTable[table] ?? mockChain),
+    schema: vi.fn((schema: string) => ({
+      from: vi.fn((table: string) => mockSchemaChainsBySchemaAndTable[`${schema}.${table}`] ?? mockChainsByTable[table] ?? mockChain),
     })),
   },
   getCurrentUserId: vi.fn().mockResolvedValue('user-123'),
@@ -35,6 +36,7 @@ vi.mock('@/lib/supabase', () => ({
 
 beforeEach(() => {
   mockChainsByTable = {};
+  mockSchemaChainsBySchemaAndTable = {};
 });
 
 describe('tradesApi', () => {
@@ -149,6 +151,56 @@ describe('tradesApi', () => {
 
       expect(mockChain.insert).toHaveBeenCalledWith({ ...newTrade, user_id: 'user-123' });
       expect(result).toEqual(createdTrade);
+    });
+  });
+
+  describe('schema fallback', () => {
+    it('falls back from ai.chats to public.chats when the ai schema is missing', async () => {
+      const missingAiSchema = createChainableMock({
+        data: null,
+        error: { code: 'PGRST205', message: 'Could not find the table ai.chats in the schema cache' },
+      });
+      const publicChats = createChainableMock({
+        data: [
+          {
+            id: 'chat-123',
+            user_id: 'user-123',
+            title: 'Recovered Chat',
+            created_at: '2024-01-15T00:00:00Z',
+            updated_at: '2024-01-16T00:00:00Z',
+          },
+        ],
+        error: null,
+      });
+      const publicMessages = createChainableMock({
+        data: [
+          {
+            id: 'msg-123',
+            user_id: 'user-123',
+            chat_id: 'chat-123',
+            role: 'assistant',
+            content: 'Fallback works',
+            created_at: '2024-01-16T00:00:00Z',
+          },
+        ],
+        error: null,
+      });
+
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiSchema;
+      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
+      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
+
+      const result = await chatsApi.getAll('user-123');
+
+      expect(missingAiSchema.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(publicChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(result).toEqual([
+        expect.objectContaining({
+          id: 'chat-123',
+          messageCount: 1,
+          lastMessage: expect.objectContaining({ id: 'msg-123' }),
+        }),
+      ]);
     });
   });
 });

@@ -466,59 +466,108 @@ export const journalApi = {
   },
 };
 
+type ChatSchemaName = 'ai' | 'public';
+
+const CHAT_SCHEMA_FALLBACKS: ChatSchemaName[] = ['ai', 'public'];
+
+function isMissingChatSchemaError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as {
+    code?: string;
+    status?: number;
+    message?: string;
+    details?: string;
+  };
+  const message = `${candidate.message ?? ''} ${candidate.details ?? ''}`.toLowerCase();
+
+  return (
+    candidate.code === 'PGRST205' ||
+    candidate.status === 404 ||
+    message.includes('could not find the table') ||
+    (message.includes('relation') && message.includes('does not exist'))
+  );
+}
+
+async function withChatSchemaFallback<T>(
+  operation: (schema: ChatSchemaName) => Promise<T>
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let index = 0; index < CHAT_SCHEMA_FALLBACKS.length; index += 1) {
+    const schema = CHAT_SCHEMA_FALLBACKS[index];
+
+    try {
+      return await operation(schema);
+    } catch (error) {
+      lastError = error;
+      const isLastSchema = index === CHAT_SCHEMA_FALLBACKS.length - 1;
+      if (isLastSchema || !isMissingChatSchemaError(error)) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 // Chat API
 // Chats API - for managing chat sessions
 export const chatsApi = {
   // Get all chats for a user with message counts
   async getAll(userId: string): Promise<ChatWithMessages[]> {
-    const { data: chats, error: chatsError } = await supabase
-      .schema('ai')
-      .from('chats')
-      .select('*')
-      .eq('user_id', userId)
-      .order('updated_at', { ascending: false });
-    
-    if (chatsError) throw chatsError;
-    if (!chats || chats.length === 0) return [];
+    return withChatSchemaFallback(async (schema) => {
+      const { data: chats, error: chatsError } = await supabase
+        .schema(schema)
+        .from('chats')
+        .select('*')
+        .eq('user_id', userId)
+        .order('updated_at', { ascending: false });
+      
+      if (chatsError) throw chatsError;
+      if (!chats || chats.length === 0) return [];
 
-    // Get message counts and last messages for each chat
-    const chatIds = chats.map(c => c.id);
-    const { data: messages, error: messagesError } = await supabase
-      .schema('ai')
-      .from('chat_messages')
-      .select('*')
-      .in('chat_id', chatIds)
-      .order('created_at', { ascending: false });
-    
-    if (messagesError) throw messagesError;
+      // Get message counts and last messages for each chat
+      const chatIds = chats.map(c => c.id);
+      const { data: messages, error: messagesError } = await supabase
+        .schema(schema)
+        .from('chat_messages')
+        .select('*')
+        .in('chat_id', chatIds)
+        .order('created_at', { ascending: false });
+      
+      if (messagesError) throw messagesError;
 
-    // Group messages by chat_id
-    const messagesByChat = (messages || []).reduce((acc, msg) => {
-      if (!acc[msg.chat_id!]) acc[msg.chat_id!] = [];
-      acc[msg.chat_id!].push(msg);
-      return acc;
-    }, {} as Record<string, ChatMessage[]>);
+      // Group messages by chat_id
+      const messagesByChat = (messages || []).reduce((acc, msg) => {
+        if (!acc[msg.chat_id!]) acc[msg.chat_id!] = [];
+        acc[msg.chat_id!].push(msg);
+        return acc;
+      }, {} as Record<string, ChatMessage[]>);
 
-    return chats.map(chat => ({
-      ...chat,
-      // Explicit null check: ensure messages array exists and is not empty
-      messages: (messagesByChat[chat.id] || []).reverse(),
-      messageCount: (messagesByChat[chat.id] || []).length,
-      lastMessage: messagesByChat[chat.id]?.[0],
-    }));
+      return chats.map(chat => ({
+        ...chat,
+        // Explicit null check: ensure messages array exists and is not empty
+        messages: (messagesByChat[chat.id] || []).reverse(),
+        messageCount: (messagesByChat[chat.id] || []).length,
+        lastMessage: messagesByChat[chat.id]?.[0],
+      }));
+    });
   },
 
   // Create a new chat
   async create(userId: string, title?: string): Promise<Chat> {
-    const { data, error } = await supabase
-      .schema('ai')
-      .from('chats')
-      .insert({ user_id: userId, title: title || 'New Chat' })
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    return withChatSchemaFallback(async (schema) => {
+      const { data, error } = await supabase
+        .schema(schema)
+        .from('chats')
+        .insert({ user_id: userId, title: title || 'New Chat' })
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    });
   },
 
   // Update chat title
@@ -531,84 +580,94 @@ export const chatsApi = {
       throw new Error(`Title too long. Maximum length is ${MAX_TITLE_LENGTH} characters.`);
     }
     
-    const { data, error } = await supabase
-      .schema('ai')
-      .from('chats')
-      .update({ title, updated_at: new Date().toISOString() })
-      .eq('id', chatId)
-      .select()
-      .single();
-    
-    if (error) throw error;
-    return data;
+    return withChatSchemaFallback(async (schema) => {
+      const { data, error } = await supabase
+        .schema(schema)
+        .from('chats')
+        .update({ title, updated_at: new Date().toISOString() })
+        .eq('id', chatId)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      return data;
+    });
   },
 
   // Delete a chat (cascade deletes messages)
   async delete(chatId: string): Promise<void> {
-    const { error } = await supabase
-      .schema('ai')
-      .from('chats')
-      .delete()
-      .eq('id', chatId);
-    
-    if (error) throw error;
+    await withChatSchemaFallback(async (schema) => {
+      const { error } = await supabase
+        .schema(schema)
+        .from('chats')
+        .delete()
+        .eq('id', chatId);
+      
+      if (error) throw error;
+    });
   },
 
   // Get single chat with messages
   async getWithMessages(chatId: string): Promise<ChatWithMessages | null> {
-    const { data: chat, error: chatError } = await supabase
-      .schema('ai')
-      .from('chats')
-      .select('*')
-      .eq('id', chatId)
-      .single();
+    return withChatSchemaFallback(async (schema) => {
+      const { data: chat, error: chatError } = await supabase
+        .schema(schema)
+        .from('chats')
+        .select('*')
+        .eq('id', chatId)
+        .single();
 
-    if (chatError) throw chatError;
-    if (!chat) return null;
+      if (chatError) throw chatError;
+      if (!chat) return null;
 
-    const { data: messages, error: messagesError } = await supabase
-      .schema('ai')
-      .from('chat_messages')
-      .select('*')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
-    
-    if (messagesError) throw messagesError;
+      const { data: messages, error: messagesError } = await supabase
+        .schema(schema)
+        .from('chat_messages')
+        .select('*')
+        .eq('chat_id', chatId)
+        .order('created_at', { ascending: true });
+      
+      if (messagesError) throw messagesError;
 
-    return {
-      ...chat,
-      messages: messages || [],
-      messageCount: (messages || []).length,
-      lastMessage: messages?.[messages.length - 1],
-    };
+      return {
+        ...chat,
+        messages: messages || [],
+        messageCount: (messages || []).length,
+        lastMessage: messages?.[messages.length - 1],
+      };
+    });
   },
 };
 
 export const chatApi = {
   // Get messages for a specific chat
   async getMessages(chatId: string): Promise<ChatMessage[]> {
-    const { data, error } = await supabase
-      .schema('ai')
-      .from('chat_messages')
-      .select('*')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
-    
-    if (error) throw error;
-    return data || [];
+    return withChatSchemaFallback(async (schema) => {
+      const { data, error } = await supabase
+        .schema(schema)
+        .from('chat_messages')
+        .select('*')
+        .eq('chat_id', chatId)
+        .order('created_at', { ascending: true });
+      
+      if (error) throw error;
+      return data || [];
+    });
   },
 
   // Legacy: Get all messages for a user (for backward compatibility)
   async getAllUserMessages(userId: string): Promise<ChatMessage[]> {
-    const { data, error } = await supabase
-      .schema('ai')
-      .from('chat_messages')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true });
-    
-    if (error) throw error;
-    return data || [];
+    return withChatSchemaFallback(async (schema) => {
+      const { data, error } = await supabase
+        .schema(schema)
+        .from('chat_messages')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: true });
+      
+      if (error) throw error;
+      return data || [];
+    });
   },
 
   async addMessage(userId: string, chatId: string, role: 'user' | 'assistant', content: string): Promise<ChatMessage> {
@@ -620,38 +679,42 @@ export const chatApi = {
       throw new Error(`Message too long. Maximum length is ${MAX_MESSAGE_LENGTH} characters.`);
     }
     
-    const { data, error } = await supabase
-      .schema('ai')
-      .from('chat_messages')
-      .insert({ user_id: userId, chat_id: chatId, role, content })
-      .select()
-      .single();
-    
-    if (error) throw error;
+    return withChatSchemaFallback(async (schema) => {
+      const { data, error } = await supabase
+        .schema(schema)
+        .from('chat_messages')
+        .insert({ user_id: userId, chat_id: chatId, role, content })
+        .select()
+        .single();
+      
+      if (error) throw error;
 
-    // Update chat's updated_at timestamp
-    try {
-      await supabase
-        .schema('ai')
-        .from('chats')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', chatId);
-    } catch (error) {
-      // Log error but don't fail the message creation
-      console.error('Failed to update chat timestamp:', error);
-    }
-    
-    return data;
+      // Update chat's updated_at timestamp
+      try {
+        await supabase
+          .schema(schema)
+          .from('chats')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', chatId);
+      } catch (error) {
+        // Log error but don't fail the message creation
+        console.error('Failed to update chat timestamp:', error);
+      }
+      
+      return data;
+    });
   },
 
   async clearMessages(chatId: string): Promise<void> {
-    const { error } = await supabase
-      .schema('ai')
-      .from('chat_messages')
-      .delete()
-      .eq('chat_id', chatId);
-    
-    if (error) throw error;
+    await withChatSchemaFallback(async (schema) => {
+      const { error } = await supabase
+        .schema(schema)
+        .from('chat_messages')
+        .delete()
+        .eq('chat_id', chatId);
+      
+      if (error) throw error;
+    });
   },
 };
 
