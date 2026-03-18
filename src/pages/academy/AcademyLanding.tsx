@@ -36,6 +36,10 @@ const TIER_BADGE_COLORS: Record<string, string> = {
   [TIER_IDS.ADVANCED]: "bg-warning/10 text-warning border-warning/20",
 };
 
+function logTierEnrollmentError(tierName: string, operation: string, error: unknown) {
+  console.error(`Failed to ${operation} for Academy tier "${tierName}" for user [REDACTED].`, error);
+}
+
 export default function AcademyLanding() {
   const { authUserId, userProfile } = useAuth();
   const navigate = useNavigate();
@@ -102,9 +106,7 @@ export default function AcademyLanding() {
         await academyApi
           .enrollInTier(authUserId, TIER_IDS.BEGINNER, 'default')
           .then(() => enrolledTierIds.add(TIER_IDS.BEGINNER))
-          .catch((err) =>
-            console.error(`Failed to enroll user ${authUserId} in Beginner tier:`, err),
-          );
+          .catch((err) => logTierEnrollmentError('Beginner', 'enroll user', err));
       }
 
       const completedLessonIds = new Set(
@@ -126,9 +128,7 @@ export default function AcademyLanding() {
         await academyApi
           .enrollInTier(authUserId, TIER_IDS.INTERMEDIATE, 'beginner_completion')
           .then(() => enrolledTierIds.add(TIER_IDS.INTERMEDIATE))
-          .catch((err) =>
-            console.error(`Failed to enroll user ${authUserId} in Intermediate tier:`, err),
-          );
+          .catch((err) => logTierEnrollmentError('Intermediate', 'unlock and enroll user', err));
       }
 
       if (
@@ -138,9 +138,7 @@ export default function AcademyLanding() {
         await academyApi
           .enrollInTier(authUserId, TIER_IDS.ADVANCED, 'intermediate_completion')
           .then(() => enrolledTierIds.add(TIER_IDS.ADVANCED))
-          .catch((err) =>
-            console.error(`Failed to enroll user ${authUserId} in Advanced tier:`, err),
-          );
+          .catch((err) => logTierEnrollmentError('Advanced', 'unlock and enroll user', err));
       }
 
       // Reload enrollments after potential auto-enrolls

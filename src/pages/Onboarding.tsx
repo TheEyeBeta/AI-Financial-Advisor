@@ -22,7 +22,7 @@ interface OnboardingAnswers {
 }
 
 const Onboarding = () => {
-  const { user, userProfile, userId, refreshProfile } = useAuth();
+  const { authUserId, userProfile, userId, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -91,15 +91,17 @@ const Onboarding = () => {
 
       // Initialize Academy profile + baseline enrollment after onboarding
       try {
-        if (user?.id) {
-          const displayName = [userProfile.first_name, userProfile.last_name]
-            .filter(Boolean)
-            .join(' ')
-            .trim();
-
-          await academyApi.upsertProfile(user.id, displayName || undefined);
-          await academyApi.enrollInTier(user.id, TIER_IDS.BEGINNER, 'default');
+        if (!authUserId) {
+          throw new Error('Missing auth user id for Academy initialization');
         }
+
+        const displayName = [userProfile.first_name, userProfile.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
+        await academyApi.upsertProfile(authUserId, displayName || undefined);
+        await academyApi.enrollInTier(authUserId, TIER_IDS.BEGINNER, 'default');
       } catch (academyInitError) {
         // Don't fail onboarding if Academy initialization fails
         console.warn('Failed to initialize Academy profile:', academyInitError);

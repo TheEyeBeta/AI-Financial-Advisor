@@ -476,14 +476,14 @@ export default function AcademyLesson() {
   }, [authUserId, slug, loadLesson]);
 
   function handleQuizPassed(score: number) {
-    if (!lesson) return;
+    if (!lesson || !authUserId) return;
     setProgress((prev) => {
       const existing = prev.find((p) => p.lesson_id === lesson.id);
       const bestScore = Math.max(score, existing?.best_quiz_score ?? 0);
       const updated = prev.filter((p) => p.lesson_id !== lesson.id);
       updated.push({
         id: existing?.id || '',
-        user_id: authUserId || '',
+        user_id: existing?.user_id || authUserId,
         lesson_id: lesson.id,
         status: 'completed',
         best_quiz_score: bestScore,

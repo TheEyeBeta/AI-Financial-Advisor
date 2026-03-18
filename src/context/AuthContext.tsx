@@ -16,7 +16,8 @@ interface AuthContextValue {
   isAuthenticated: boolean;
   authUserId: string | null; // auth.users.id (auth.uid())
   appUserId: string | null; // core.users.id
-  userId: string | null; // deprecated alias for appUserId
+  /** @deprecated Use appUserId instead. */
+  userId: string | null;
   signIn: (email: string, password: string) => Promise<unknown>;
   signUp: (email: string, password: string) => Promise<unknown>;
   signOut: () => Promise<void>;
