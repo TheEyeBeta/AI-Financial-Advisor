@@ -44,6 +44,18 @@ _cache: dict[str, dict[str, Any]] = {}
 _snapshots_cache: dict[str, dict[str, Any]] = {}
 
 
+def _query_stock_snapshots(client, limit: int = 500):
+    """Query stock snapshots from the market schema."""
+    return (
+        client.schema("market")
+        .from_("stock_snapshots")
+        .select("*")
+        .order("updated_at", desc=True)
+        .limit(limit)
+        .execute()
+    )
+
+
 def _get_supabase_client():
     """Lazy-init Supabase client; prefers non-VITE_ prefixed vars."""
     url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
@@ -1076,13 +1088,7 @@ async def get_stock_ranking(
         if not snapshots and source in ("supabase", "auto"):
             client = _get_supabase_client()
             try:
-                result = (
-                    client.table("stock_snapshots")
-                    .select("*")
-                    .order("updated_at", desc=True)
-                    .limit(500)
-                    .execute()
-                )
+                result = _query_stock_snapshots(client, limit=500)
                 snapshots = result.data or []
             except Exception as exc:
                 if source == "supabase":

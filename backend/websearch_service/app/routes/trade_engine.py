@@ -375,6 +375,16 @@ async def get_engine_status(
     }
 
 
+def _query_stock_snapshots(client, columns: str = "*", limit: int | None = None, ticker: str | None = None):
+    """Query stock snapshots from the market schema."""
+    query = client.schema("market").from_("stock_snapshots").select(columns)
+    if ticker:
+        query = query.eq("ticker", ticker)
+    if limit is not None:
+        query = query.limit(limit)
+    return query.execute()
+
+
 def _get_supabase_client():
     """Lazy-init Supabase client using either prefixed or plain env vars."""
     url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
@@ -428,12 +438,11 @@ async def get_stock_price(
     sb_client = _get_supabase_client()
     if sb_client:
         try:
-            result = (
-                sb_client.table("stock_snapshots")
-                .select("ticker,last_price,price_change_pct,updated_at")
-                .eq("ticker", ticker)
-                .limit(1)
-                .execute()
+            result = _query_stock_snapshots(
+                sb_client,
+                columns="ticker,last_price,price_change_pct,updated_at",
+                limit=1,
+                ticker=ticker,
             )
             if result.data:
                 row = result.data[0]

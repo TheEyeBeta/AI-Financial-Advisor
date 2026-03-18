@@ -26,6 +26,9 @@ let mockChainsByTable: Record<string, ReturnType<typeof createChainableMock>> = 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     from: vi.fn((table: string) => mockChainsByTable[table] ?? mockChain),
+    schema: vi.fn(() => ({
+      from: vi.fn((table: string) => mockChainsByTable[table] ?? mockChain),
+    })),
   },
   getCurrentUserId: vi.fn().mockResolvedValue('user-123'),
 }));

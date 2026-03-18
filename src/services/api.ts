@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase';
+import type { PostgrestFilterBuilder } from '@supabase/postgrest-js';
 import type {
   PortfolioHistory,
   OpenPosition,
@@ -1098,6 +1099,19 @@ const stockCache = {
   },
 };
 
+type StockSnapshotQuery = PostgrestFilterBuilder<
+  Database['market']['Tables']['stock_snapshots']['Row'],
+  Database['market']['Tables']['stock_snapshots']['Row'],
+  StockSnapshot[],
+  'stock_snapshots',
+  unknown
+>;
+
+const fromStockSnapshots = () => supabase.schema('market').from('stock_snapshots') as StockSnapshotQuery;
+
+const runStockSnapshotsQuery = (buildQuery: (query: StockSnapshotQuery) => StockSnapshotQuery) =>
+  buildQuery(fromStockSnapshots());
+
 // Stock Snapshots API - Read financial data from database (with caching)
 export const stockSnapshotsApi = {
   // Initialize cache by pre-loading first 60 stocks
@@ -1109,12 +1123,12 @@ export const stockSnapshotsApi = {
     
     console.log('[Cache] Initializing - loading first', stockCache.PRELOAD_COUNT, 'stocks...');
     
-    const { data, error } = await supabase
-      .schema('market')
-      .from('stock_snapshots')
-      .select('*')
-      .order('updated_at', { ascending: false })
-      .limit(stockCache.PRELOAD_COUNT);
+    const { data, error } = await runStockSnapshotsQuery(query =>
+      query
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(stockCache.PRELOAD_COUNT)
+    );
     
     if (error) {
       console.error('[Cache] Failed to initialize:', error);
@@ -1146,17 +1160,15 @@ export const stockSnapshotsApi = {
     
     // Cache miss - fetch from database
     console.log('[Cache] Miss for main list - fetching from database');
-    let query = supabase
-      .schema('market')
-      .from('stock_snapshots')
-      .select('*')
-      .order('updated_at', { ascending: false });
-
     // Fetch at least PRELOAD_COUNT to populate cache, or more if requested
     const fetchLimit = Math.max(limit || 0, stockCache.PRELOAD_COUNT);
-    query = query.limit(fetchLimit);
-    
-    const { data, error } = await query;
+
+    const { data, error } = await runStockSnapshotsQuery(query =>
+      query
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(fetchLimit)
+    );
     if (error) throw error;
     
     const result = data || [];
@@ -1175,14 +1187,14 @@ export const stockSnapshotsApi = {
     
     // Cache miss - fetch from database
     console.log('[Cache] Miss for ticker:', ticker, '- fetching from database');
-    const { data, error } = await supabase
-      .schema('market')
-      .from('stock_snapshots')
-      .select('*')
-      .eq('ticker', ticker.toUpperCase())
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data, error } = await runStockSnapshotsQuery(query =>
+      query
+        .select('*')
+        .eq('ticker', ticker.toUpperCase())
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    );
     
     if (error) throw error;
     
@@ -1202,14 +1214,14 @@ export const stockSnapshotsApi = {
     
     // Cache miss - fetch from database
     console.log('[Cache] Miss for company name:', companyName, '- fetching from database');
-    const { data, error } = await supabase
-      .schema('market')
-      .from('stock_snapshots')
-      .select('*')
-      .ilike('company_name', `%${companyName}%`)
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    const { data, error } = await runStockSnapshotsQuery(query =>
+      query
+        .select('*')
+        .ilike('company_name', `%${companyName}%`)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    );
     
     if (error) {
       throw error;
@@ -1249,12 +1261,12 @@ export const stockSnapshotsApi = {
     
     // Fetch missing tickers from database
     console.log('[Cache] Fetching', tickersToFetch.length, 'missing tickers from database');
-    const { data, error } = await supabase
-      .schema('market')
-      .from('stock_snapshots')
-      .select('*')
-      .in('ticker', tickersToFetch)
-      .order('updated_at', { ascending: false });
+    const { data, error } = await runStockSnapshotsQuery(query =>
+      query
+        .select('*')
+        .in('ticker', tickersToFetch)
+        .order('updated_at', { ascending: false })
+    );
     
     if (error) throw error;
     
@@ -1272,18 +1284,18 @@ export const stockSnapshotsApi = {
   // Get stock snapshots with signals (with caching for individual results)
   async getWithSignals(limit?: number): Promise<StockSnapshot[]> {
     // This query is dynamic (filtered by signal), so we fetch fresh but cache results
-    let query = supabase
-      .schema('market')
-      .from('stock_snapshots')
-      .select('*')
-      .not('latest_signal', 'is', null)
-      .order('signal_timestamp', { ascending: false });
-    
-    if (limit) {
-      query = query.limit(limit);
-    }
-    
-    const { data, error } = await query;
+    const { data, error } = await runStockSnapshotsQuery(query => {
+      let filteredQuery = query
+        .select('*')
+        .not('latest_signal', 'is', null)
+        .order('signal_timestamp', { ascending: false });
+
+      if (limit) {
+        filteredQuery = filteredQuery.limit(limit);
+      }
+
+      return filteredQuery;
+    });
     if (error) throw error;
     
     // Cache individual results
@@ -1301,18 +1313,18 @@ export const stockSnapshotsApi = {
     const cutoffTime = new Date();
     cutoffTime.setHours(cutoffTime.getHours() - hours);
     
-    let query = supabase
-      .schema('market')
-      .from('stock_snapshots')
-      .select('*')
-      .gte('updated_at', cutoffTime.toISOString())
-      .order('updated_at', { ascending: false });
-    
-    if (limit) {
-      query = query.limit(limit);
-    }
-    
-    const { data, error } = await query;
+    const { data, error } = await runStockSnapshotsQuery(query => {
+      let filteredQuery = query
+        .select('*')
+        .gte('updated_at', cutoffTime.toISOString())
+        .order('updated_at', { ascending: false });
+
+      if (limit) {
+        filteredQuery = filteredQuery.limit(limit);
+      }
+
+      return filteredQuery;
+    });
     if (error) throw error;
     return data || [];
   },
