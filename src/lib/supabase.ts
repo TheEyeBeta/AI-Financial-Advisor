@@ -12,6 +12,9 @@ const createDummyClient = () => {
   const dummyKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NDUxOTIwMDAsImV4cCI6MTk2MDc2ODAwMH0.placeholder';
   
   return createClient<Database>(dummyUrl, dummyKey, {
+    db: {
+      schema: 'ai',
+    },
     auth: {
       persistSession: false,
       autoRefreshToken: false,
@@ -31,6 +34,9 @@ if (!supabaseConfig.isConfigured) {
 
 export const supabase = supabaseConfig.isConfigured
   ? createClient<Database>(supabaseConfig.supabaseUrl, supabaseConfig.supabaseAnonKey, {
+      db: {
+        schema: 'ai',
+      },
       auth: {
         persistSession: true,
         autoRefreshToken: true,
