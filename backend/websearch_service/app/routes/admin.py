@@ -6,13 +6,14 @@ heartbeats, and run read-only queries against the engine database.
 
 **Authentication**: Every route in this module requires either:
   1. A valid Supabase JWT (Authorization: Bearer <token>) from a user
-     whose ``userType`` is ``'Admin'`` in the ``public.users`` table, OR
+     whose ``userType`` is ``'Admin'`` in the ``core.users`` table, OR
   2. A static API key (X-Admin-Key header) matching the ``ADMIN_API_KEY``
      environment variable (for direct/automated access).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -40,7 +41,7 @@ async def _require_admin(request: Request) -> str:
       1. ``X-Admin-Key`` header matching ``ADMIN_API_KEY`` env var.
       2. ``Authorization: Bearer <supabase-jwt>`` — the JWT is verified
          against Supabase, and the corresponding user must have
-         ``userType = 'Admin'`` in ``public.users``.
+         ``userType = 'Admin'`` in ``core.users``.
 
     Returns the authenticated principal identifier (email or "api-key").
     Raises ``HTTPException(401/403)`` on failure.
@@ -98,7 +99,7 @@ async def _require_admin(request: Request) -> str:
     if not user_id:
         raise HTTPException(status_code=401, detail="Token did not resolve to a user")
 
-    # Check admin status in public.users table
+    # Check admin status in core.users table
     try:
         async with httpx.AsyncClient(timeout=10.0) as http:
             resp = await http.get(
@@ -107,6 +108,7 @@ async def _require_admin(request: Request) -> str:
                 headers={
                     "apikey": supabase_key,
                     "Authorization": f"Bearer {supabase_key}",  # service role for RLS bypass
+                    "Accept-Profile": "core",
                 },
             )
     except Exception as exc:
@@ -258,6 +260,111 @@ async def _check_supabase() -> dict[str, Any]:
             return {"status": "error", "message": f"HTTP {resp.status_code}"}
     except Exception as exc:
         return {"status": "error", "message": str(exc)}
+
+
+def _get_supabase_rest_config() -> tuple[str, str]:
+    url = (os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")).strip()
+    key = (
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or os.getenv("VITE_SUPABASE_ANON_KEY")
+        or ""
+    ).strip()
+    if not url or not key:
+        raise HTTPException(status_code=503, detail="Supabase credentials not configured")
+    return url.rstrip("/"), key
+
+
+def _parse_count(resp: httpx.Response) -> int:
+    content_range = resp.headers.get("content-range", "")
+    if "/" not in content_range:
+        return 0
+
+    _, total = content_range.rsplit("/", 1)
+    try:
+        return int(total)
+    except ValueError:
+        return 0
+
+
+async def _fetch_ai_table_count(table: str, params: dict[str, str] | None = None) -> int:
+    base_url, service_role_key = _get_supabase_rest_config()
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+        "Accept-Profile": "ai",
+        "Prefer": "count=exact",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        resp = await http.head(
+            f"{base_url}/rest/v1/{table}",
+            params={"select": "id", **(params or {})},
+            headers=headers,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase count query failed: HTTP {resp.status_code}")
+
+    return _parse_count(resp)
+
+
+async def _fetch_recent_ai_activity(limit: int = 10) -> list[dict[str, Any]]:
+    base_url, service_role_key = _get_supabase_rest_config()
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+        "Accept-Profile": "ai",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as http:
+        resp = await http.get(
+            f"{base_url}/rest/v1/chat_messages",
+            params={
+                "select": "id,user_id,role,created_at",
+                "order": "created_at.desc",
+                "limit": str(limit),
+            },
+            headers=headers,
+        )
+
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"Supabase recent activity query failed: HTTP {resp.status_code}")
+
+    return resp.json()
+
+
+@router.get("/api/admin/chat-dashboard")
+async def chat_dashboard(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    total_chats, total_messages, active_today, recent_messages = await _gather_chat_dashboard(today)
+
+    return {
+        "totalChats": total_chats,
+        "totalMessages": total_messages,
+        "activeToday": active_today,
+        "recentActivity": [
+            {
+                "id": msg["id"],
+                "user_email": "User",
+                "action": "Sent message" if msg.get("role") == "user" else "Received AI response",
+                "timestamp": msg["created_at"],
+            }
+            for msg in recent_messages
+        ],
+    }
+
+
+async def _gather_chat_dashboard(today: str) -> tuple[int, int, int, list[dict[str, Any]]]:
+    total_chats, total_messages, active_today, recent_messages = await asyncio.gather(
+        _fetch_ai_table_count("chats"),
+        _fetch_ai_table_count("chat_messages"),
+        _fetch_ai_table_count("chats", {"updated_at": f"gte.{today}"}),
+        _fetch_recent_ai_activity(),
+    )
+    return total_chats, total_messages, active_today, recent_messages
 
 
 async def _check_dataapi() -> dict[str, Any]:

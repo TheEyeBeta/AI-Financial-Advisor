@@ -9,6 +9,9 @@
 -- Enable required extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Ensure application schemas exist
+CREATE SCHEMA IF NOT EXISTS ai;
+
 -- ============================================================
 -- ENUM Types
 -- ============================================================
@@ -54,7 +57,7 @@ CREATE TABLE IF NOT EXISTS public.users (
 );
 
 -- Chats table (conversation sessions)
-CREATE TABLE IF NOT EXISTS public.chats (
+CREATE TABLE IF NOT EXISTS ai.chats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
     title TEXT DEFAULT 'New Chat',
@@ -63,10 +66,10 @@ CREATE TABLE IF NOT EXISTS public.chats (
 );
 
 -- Chat Messages (AI Advisor conversations)
-CREATE TABLE IF NOT EXISTS public.chat_messages (
+CREATE TABLE IF NOT EXISTS ai.chat_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
+    chat_id UUID REFERENCES ai.chats(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -304,10 +307,10 @@ CREATE TABLE IF NOT EXISTS public.stock_snapshots (
 -- ============================================================
 
 CREATE INDEX IF NOT EXISTS idx_users_auth_id ON public.users(auth_id);
-CREATE INDEX IF NOT EXISTS idx_chats_user_id ON public.chats(user_id);
-CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON public.chats(updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON public.chat_messages(chat_id);
-CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON public.chat_messages(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chats_user_id ON ai.chats(user_id);
+CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON ai.chats(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON ai.chat_messages(chat_id);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_user ON ai.chat_messages(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_portfolio_history_user_date ON public.portfolio_history(user_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_open_positions_user ON public.open_positions(user_id);
 CREATE INDEX IF NOT EXISTS idx_trades_user ON public.trades(user_id, exit_date DESC);
@@ -326,8 +329,8 @@ CREATE INDEX IF NOT EXISTS idx_eye_snapshots_user_active ON public.eye_snapshots
 -- ============================================================
 
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai.chats ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ai.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.portfolio_history ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.open_positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.trades ENABLE ROW LEVEL SECURITY;
@@ -340,6 +343,10 @@ ALTER TABLE public.news_articles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.news ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.eye_snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.stock_snapshots ENABLE ROW LEVEL SECURITY;
+
+GRANT USAGE ON SCHEMA ai TO anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ai.chats TO authenticated;
+GRANT SELECT, INSERT, DELETE ON TABLE ai.chat_messages TO authenticated;
 
 -- ============================================================
 -- Helper Functions
@@ -454,42 +461,54 @@ ON public.users FOR INSERT
 WITH CHECK (true);
 
 -- Chats policies
-DROP POLICY IF EXISTS "Users can view own chats" ON public.chats;
-DROP POLICY IF EXISTS "Users can create own chats" ON public.chats;
-DROP POLICY IF EXISTS "Users can update own chats" ON public.chats;
-DROP POLICY IF EXISTS "Users can delete own chats" ON public.chats;
+DROP POLICY IF EXISTS "Users can view own chats" ON ai.chats;
+DROP POLICY IF EXISTS "Users can create own chats" ON ai.chats;
+DROP POLICY IF EXISTS "Users can update own chats" ON ai.chats;
+DROP POLICY IF EXISTS "Users can delete own chats" ON ai.chats;
 
 CREATE POLICY "Users can view own chats"
-ON public.chats FOR SELECT
+ON ai.chats FOR SELECT
 USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can create own chats"
-ON public.chats FOR INSERT
+ON ai.chats FOR INSERT
 WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own chats"
-ON public.chats FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+ON ai.chats FOR UPDATE
+USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()))
+WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can delete own chats"
-ON public.chats FOR DELETE
+ON ai.chats FOR DELETE
 USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Chat Messages policies
-DROP POLICY IF EXISTS "Users can view own chat messages" ON public.chat_messages;
-DROP POLICY IF EXISTS "Users can insert own chat messages" ON public.chat_messages;
-DROP POLICY IF EXISTS "Users can delete own chat messages" ON public.chat_messages;
+DROP POLICY IF EXISTS "Users can view own chat messages" ON ai.chat_messages;
+DROP POLICY IF EXISTS "Users can insert own chat messages" ON ai.chat_messages;
+DROP POLICY IF EXISTS "Users can delete own chat messages" ON ai.chat_messages;
 
 CREATE POLICY "Users can view own chat messages"
-ON public.chat_messages FOR SELECT
+ON ai.chat_messages FOR SELECT
 USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own chat messages"
-ON public.chat_messages FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+ON ai.chat_messages FOR INSERT
+WITH CHECK (
+    user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+    AND (
+        chat_id IS NULL
+        OR EXISTS (
+            SELECT 1
+            FROM ai.chats
+            WHERE ai.chats.id = chat_id
+              AND ai.chats.user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+        )
+    )
+);
 
 CREATE POLICY "Users can delete own chat messages"
-ON public.chat_messages FOR DELETE
+ON ai.chat_messages FOR DELETE
 USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
 
 -- Portfolio History policies
@@ -659,9 +678,9 @@ CREATE TRIGGER update_users_updated_at
     BEFORE UPDATE ON public.users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS update_chats_updated_at ON public.chats;
+DROP TRIGGER IF EXISTS update_chats_updated_at ON ai.chats;
 CREATE TRIGGER update_chats_updated_at
-    BEFORE UPDATE ON public.chats
+    BEFORE UPDATE ON ai.chats
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_open_positions_updated_at ON public.open_positions;

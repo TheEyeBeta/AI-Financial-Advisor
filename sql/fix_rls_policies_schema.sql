@@ -103,7 +103,18 @@ USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 DROP POLICY IF EXISTS "Users can insert own chat messages" ON ai.chat_messages;
 CREATE POLICY "Users can insert own chat messages"
 ON ai.chat_messages FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+WITH CHECK (
+  user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid())
+  AND (
+    chat_id IS NULL
+    OR EXISTS (
+      SELECT 1
+      FROM ai.chats
+      WHERE ai.chats.id = chat_id
+        AND ai.chats.user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid())
+    )
+  )
+);
 
 DROP POLICY IF EXISTS "Users can delete own chat messages" ON ai.chat_messages;
 CREATE POLICY "Users can delete own chat messages"
