@@ -474,6 +474,24 @@ function fromAiChatMessages() {
   return aiDb.from('chat_messages');
 }
 
+function normalizeChatTitle(title?: string): string {
+  const trimmedTitle = title?.trim();
+
+  if (trimmedTitle == null) {
+    return 'New Chat';
+  }
+
+  if (trimmedTitle.length === 0) {
+    throw new Error('Title cannot be empty');
+  }
+
+  if (trimmedTitle.length > MAX_TITLE_LENGTH) {
+    throw new Error(`Title too long. Maximum length is ${MAX_TITLE_LENGTH} characters.`);
+  }
+
+  return trimmedTitle;
+}
+
 async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
   const { data: chats, error: chatsError } = await fromAiChats()
     .select('*')
@@ -526,8 +544,10 @@ export const chatsApi = {
 
   // Create a new chat
   async create(userId: string, title?: string): Promise<Chat> {
+    const normalizedTitle = normalizeChatTitle(title);
+
     const { data, error } = await fromAiChats()
-      .insert({ user_id: userId, title: title || 'New Chat' })
+      .insert({ user_id: userId, title: normalizedTitle })
       .select()
       .single();
 
@@ -537,16 +557,10 @@ export const chatsApi = {
 
   // Update chat title
   async updateTitle(chatId: string, title: string): Promise<Chat> {
-    // Input validation
-    if (!title || title.trim().length === 0) {
-      throw new Error('Title cannot be empty');
-    }
-    if (title.length > MAX_TITLE_LENGTH) {
-      throw new Error(`Title too long. Maximum length is ${MAX_TITLE_LENGTH} characters.`);
-    }
+    const normalizedTitle = normalizeChatTitle(title);
     
     const { data, error } = await fromAiChats()
-      .update({ title, updated_at: new Date().toISOString() })
+      .update({ title: normalizedTitle, updated_at: new Date().toISOString() })
       .eq('id', chatId)
       .select()
       .single();

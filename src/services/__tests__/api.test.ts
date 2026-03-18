@@ -255,6 +255,18 @@ describe('chatsApi', () => {
   });
 
   describe('create', () => {
+    it('rejects empty titles after trimming', async () => {
+      await expect(chatsApi.create('user-123', '   ')).rejects.toThrow(
+        'Title cannot be empty'
+      );
+    });
+
+    it('rejects titles that exceed the max length', async () => {
+      await expect(chatsApi.create('user-123', 'a'.repeat(201))).rejects.toThrow(
+        /Title too long/
+      );
+    });
+
     it('creates a new chat with default title', async () => {
       const mockChat = {
         id: 'chat-123',
@@ -286,7 +298,7 @@ describe('chatsApi', () => {
 
       mockChain = createChainableMock({ data: mockChat, error: null });
 
-      const result = await chatsApi.create('user-123', 'Custom Title');
+      const result = await chatsApi.create('user-123', '  Custom Title  ');
 
       expect(mockChain.insert).toHaveBeenCalledWith({
         user_id: 'user-123',

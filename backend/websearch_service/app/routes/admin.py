@@ -13,6 +13,7 @@ heartbeats, and run read-only queries against the engine database.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -357,12 +358,13 @@ async def chat_dashboard(admin: str = Depends(_require_admin)) -> dict[str, Any]
 
 
 async def _gather_chat_dashboard(today: str) -> tuple[int, int, int, list[dict[str, Any]]]:
-    return (
-        await _fetch_ai_table_count("chats"),
-        await _fetch_ai_table_count("chat_messages"),
-        await _fetch_ai_table_count("chats", {"updated_at": f"gte.{today}"}),
-        await _fetch_recent_ai_activity(),
+    total_chats, total_messages, active_today, recent_messages = await asyncio.gather(
+        _fetch_ai_table_count("chats"),
+        _fetch_ai_table_count("chat_messages"),
+        _fetch_ai_table_count("chats", {"updated_at": f"gte.{today}"}),
+        _fetch_recent_ai_activity(),
     )
+    return total_chats, total_messages, active_today, recent_messages
 
 
 async def _check_dataapi() -> dict[str, Any]:
