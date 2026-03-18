@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { tradesApi, chatsApi, chatApi, portfolioApi, newsApi } from '../api';
+import {
+  tradesApi,
+  chatsApi,
+  chatApi,
+  portfolioApi,
+  newsApi,
+  __resetChatSchemaAvailabilityForTests,
+} from '../api';
 
 // Mock supabase with a more robust mock
 const createChainableMock = (finalResult: { data: unknown; error: unknown }) => {
@@ -38,6 +45,7 @@ beforeEach(() => {
   mockChain = createChainableMock({ data: [], error: null });
   mockChainsByTable = {};
   mockSchemaChainsBySchemaAndTable = {};
+  __resetChatSchemaAvailabilityForTests();
 });
 
 describe('tradesApi', () => {
@@ -374,6 +382,36 @@ describe('chatsApi', () => {
       expect(result[0].messages[1].id).toBe('msg-123');
       expect(result[0].lastMessage?.id).toBe('msg-123');
       expect(result[0].messageCount).toBe(2);
+    });
+
+    it('remembers missing schemas to avoid repeated 404-producing requests', async () => {
+      const missingAiSchema = createChainableMock({
+        data: null,
+        error: { code: 'PGRST205', message: 'Could not find the table ai.chats in the schema cache' },
+      });
+      const publicChats = createChainableMock({
+        data: [
+          {
+            id: 'chat-123',
+            user_id: 'user-123',
+            title: 'Recovered Chat',
+            created_at: '2024-01-15T00:00:00Z',
+            updated_at: '2024-01-16T00:00:00Z',
+          },
+        ],
+        error: null,
+      });
+      const publicMessages = createChainableMock({ data: [], error: null });
+
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingAiSchema;
+      mockSchemaChainsBySchemaAndTable['public.chats'] = publicChats;
+      mockSchemaChainsBySchemaAndTable['public.chat_messages'] = publicMessages;
+
+      await chatsApi.getAll('user-123');
+      await chatsApi.getAll('user-123');
+
+      expect(missingAiSchema.eq).toHaveBeenCalledTimes(1);
+      expect(publicChats.eq).toHaveBeenCalledTimes(2);
     });
 
     it('falls back to public when ai.chats exists but is empty', async () => {
