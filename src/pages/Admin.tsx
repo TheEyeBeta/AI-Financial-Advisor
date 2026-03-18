@@ -12,6 +12,7 @@ import {
   Wifi, WifiOff, Loader2, Play, Terminal
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { CHAT_SCHEMA_FALLBACKS, isMissingChatSchemaError, type ChatSchemaName } from "@/lib/chat-schema";
 import { supabase } from "@/lib/supabase";
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -67,29 +68,6 @@ interface ActivityLog {
   user_email: string;
   action: string;
   timestamp: string;
-}
-
-type ChatSchemaName = "ai" | "public";
-
-const CHAT_SCHEMA_FALLBACKS: ChatSchemaName[] = ["ai", "public"];
-
-function isMissingChatSchemaError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-
-  const candidate = error as {
-    code?: string;
-    status?: number;
-    message?: string;
-    details?: string;
-  };
-  const message = `${candidate.message ?? ""} ${candidate.details ?? ""}`.toLowerCase();
-
-  return (
-    candidate.code === "PGRST205" ||
-    candidate.status === 404 ||
-    message.includes("could not find the table") ||
-    (message.includes("relation") && message.includes("does not exist"))
-  );
 }
 
 export default function Admin() {
@@ -153,6 +131,33 @@ export default function Admin() {
     }
 
     throw lastError;
+  }, []);
+
+  const runChatCountQuery = useCallback(async (
+    schema: ChatSchemaName,
+    table: "chats" | "chat_messages",
+    filter?: (query: ReturnType<typeof supabase.schema>) => unknown
+  ) => {
+    let query = supabase.schema(schema).from(table).select("id", { count: "exact", head: true });
+    if (filter) {
+      query = filter(query as ReturnType<typeof supabase.schema>) as typeof query;
+    }
+
+    const result = await query;
+    if (result.error) throw result.error;
+    return result;
+  }, []);
+
+  const runRecentActivityQuery = useCallback(async (schema: ChatSchemaName) => {
+    const result = await supabase
+      .schema(schema)
+      .from("chat_messages")
+      .select("id, user_id, role, created_at")
+      .order("created_at", { ascending: false })
+      .limit(10);
+
+    if (result.error) throw result.error;
+    return result;
   }, []);
 
   /** Get the current Supabase access token for authenticated admin requests. */
@@ -272,9 +277,9 @@ export default function Admin() {
 
       const [chatsResult, messagesResult, todayResult] = await withAdminChatSchemaFallback(
         (schema) => Promise.all([
-          supabase.schema(schema).from("chats").select("id", { count: "exact", head: true }),
-          supabase.schema(schema).from("chat_messages").select("id", { count: "exact", head: true }),
-          supabase.schema(schema).from("chats").select("id", { count: "exact", head: true }).gte("updated_at", today),
+          runChatCountQuery(schema, "chats"),
+          runChatCountQuery(schema, "chat_messages"),
+          runChatCountQuery(schema, "chats", (query) => query.gte("updated_at", today)),
         ])
       );
 
@@ -309,14 +314,7 @@ export default function Admin() {
   const fetchRecentActivity = async () => {
     try {
       // Get recent chat messages as activity
-      const { data } = await withAdminChatSchemaFallback((schema) =>
-        supabase
-          .schema(schema)
-          .from("chat_messages")
-          .select("id, user_id, role, created_at")
-          .order("created_at", { ascending: false })
-          .limit(10)
-      );
+      const { data } = await withAdminChatSchemaFallback(runRecentActivityQuery);
 
       if (data) {
         // Map to activity format
