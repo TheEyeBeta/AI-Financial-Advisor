@@ -24,7 +24,7 @@ interface AcademyTutorProps {
 }
 
 export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTutorProps) {
-  const { userId } = useAuth();
+  const { authUserId } = useAuth();
   const [session, setSession] = useState<ChatSession | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
@@ -36,7 +36,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
   const latestInitReqRef = useRef(0);
 
   const initSession = useCallback(async () => {
-    if (!userId) {
+    if (!authUserId) {
       // Reset state when user is not authenticated to avoid stale data
       // and a stuck loading indicator.
       ++latestInitReqRef.current; // invalidate any in-flight requests
@@ -50,7 +50,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
     try {
       setLoadingSession(true);
       const [sess, prompts] = await Promise.all([
-        academyApi.getChatSession(userId, lesson.id),
+        academyApi.getChatSession(authUserId, lesson.id),
         academyApi.getLessonPromptTemplates(lesson.id).catch(() => [] as PromptTemplate[]),
       ]);
       const msgs = await academyApi.getChatMessages(sess.id);
@@ -69,11 +69,11 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
         setLoadingSession(false);
       }
     }
-  }, [userId, lesson.id]);
+  }, [authUserId, lesson.id]);
 
   useEffect(() => {
     initSession();
-  }, [userId, lesson.id, initSession]);
+  }, [authUserId, lesson.id, initSession]);
 
   useEffect(() => {
     scrollToBottom();
@@ -102,7 +102,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
   }
 
   async function sendMessage() {
-    if (!input.trim() || sending || !userId || !session) return;
+    if (!input.trim() || sending || !authUserId || !session) return;
 
     const userText = input.trim();
     // Snapshot history before any state updates so the slice window is accurate

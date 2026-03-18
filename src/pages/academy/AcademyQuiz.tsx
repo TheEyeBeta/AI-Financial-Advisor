@@ -48,7 +48,7 @@ interface QuestionResult {
 }
 
 export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttempt, onPassed }: QuizProps) {
-  const { userId } = useAuth();
+  const { authUserId } = useAuth();
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [textAnswers, setTextAnswers] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -143,7 +143,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
   }
 
   async function handleSubmit() {
-    if (!userId || !allAnswered) return;
+    if (!authUserId || !allAnswered) return;
     setSubmitting(true);
 
     try {
@@ -208,7 +208,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
       // Create attempt — if subsequent steps fail, clean up to avoid orphaned attempts
       const attempt = await academyApi.createQuizAttempt({
         quiz_id: quiz.id,
-        user_id: userId,
+        user_id: authUserId,
         score: scorePercent,
         passed: hasPassed,
         ai_feedback_md: null,
@@ -230,7 +230,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
 
         // Update progress if passed
         if (hasPassed) {
-          await academyApi.updateProgressOnPass(userId, lessonId, scorePercent);
+          await academyApi.updateProgressOnPass(authUserId, lessonId, scorePercent);
           onPassed(scorePercent);
         }
       } catch (postErr) {

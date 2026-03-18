@@ -2,13 +2,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useEffect } from "react";
 import Landing from "./pages/Landing";
 import Advisor from "./pages/Advisor";
 import ChatHistory from "./pages/ChatHistory";
 import Dashboard from "./pages/Dashboard";
-import Learning from "./pages/Learning";
 import PaperTrading from "./pages/PaperTrading";
 import News from "./pages/News";
 import TopStocks from "./pages/TopStocks";
@@ -96,7 +95,7 @@ const App = () => {
               path="/learning"
               element={
                 <ProtectedRoute>
-                  <Learning />
+                  <Navigate to="/academy" replace />
                 </ProtectedRoute>
               }
             />

@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
-import { learningApi } from "@/services/api";
+import { academyApi, TIER_IDS } from "@/services/academy-api";
 
 type MaritalStatus = "single" | "married" | "divorced" | "widowed";
 type InvestmentGoal = "retirement" | "wealth_building" | "education" | "house_purchase" | "other";
@@ -22,7 +22,7 @@ interface OnboardingAnswers {
 }
 
 const Onboarding = () => {
-  const { userProfile, userId, refreshProfile } = useAuth();
+  const { authUserId, userProfile, appUserId, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,7 +53,7 @@ const Onboarding = () => {
   };
 
   const handleSubmit = async () => {
-    if (!userProfile?.id || !userId) {
+    if (!userProfile?.id || !appUserId) {
       toast({
         title: "Error",
         description: "User profile not found. Please try signing in again.",
@@ -89,13 +89,22 @@ const Onboarding = () => {
 
       if (error) throw error;
 
-      // Initialize learning topics based on experience level
+      // Initialize Academy profile + baseline enrollment after onboarding
       try {
-        const experienceLevel = userProfile.experience_level || 'beginner';
-        await learningApi.initializeTopics(userProfile.id, experienceLevel);
-      } catch (topicError) {
-        // Don't fail onboarding if topic initialization fails
-        console.warn('Failed to initialize learning topics:', topicError);
+        if (!authUserId) {
+          throw new Error('Missing auth user id for Academy initialization');
+        }
+
+        const displayName = [userProfile.first_name, userProfile.last_name]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+
+        await academyApi.upsertProfile(authUserId, displayName || undefined);
+        await academyApi.enrollInTier(authUserId, TIER_IDS.BEGINNER, 'default');
+      } catch (academyInitError) {
+        // Don't fail onboarding if Academy initialization fails
+        console.warn('Failed to initialize Academy profile:', academyInitError);
       }
 
       // Refresh the profile in AuthContext so ProtectedRoute sees the update
