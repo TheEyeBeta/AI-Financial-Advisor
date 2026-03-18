@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent } from "@/components/ui/card";
@@ -51,25 +51,9 @@ export default function AcademyLanding() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Keep name fields in refs so loadData can read them without depending on them.
-  const firstNameRef = useRef(userProfile?.first_name);
-  const lastNameRef = useRef(userProfile?.last_name);
-  firstNameRef.current = userProfile?.first_name;
-  lastNameRef.current = userProfile?.last_name;
-
-  // Sync academy profile display name when name changes, without triggering
-  // a full data reload.
-  useEffect(() => {
-    if (!authUserId) return;
-    const displayName = firstNameRef.current && lastNameRef.current
-      ? `${firstNameRef.current} ${lastNameRef.current}`
-      : firstNameRef.current || null;
-    if (displayName) {
-      academyApi.upsertProfile(authUserId, displayName).catch((err) =>
-        console.error('Failed to upsert academy profile:', err),
-      );
-    }
-  }, [authUserId, userProfile?.first_name, userProfile?.last_name]);
+  const displayName = userProfile?.first_name && userProfile?.last_name
+    ? `${userProfile.first_name} ${userProfile.last_name}`
+    : userProfile?.first_name || null;
 
   const loadData = useCallback(async () => {
     if (!authUserId) return;
@@ -78,10 +62,6 @@ export default function AcademyLanding() {
       setError(null);
 
       // Ensure profile row exists before any enrollment operations.
-      // Reads name from refs to avoid adding name fields to deps.
-      const displayName = firstNameRef.current && lastNameRef.current
-        ? `${firstNameRef.current} ${lastNameRef.current}`
-        : firstNameRef.current || null;
       await (displayName
         ? academyApi.upsertProfile(authUserId, displayName)
         : academyApi.upsertProfile(authUserId)
@@ -151,7 +131,7 @@ export default function AcademyLanding() {
     } finally {
       setLoading(false);
     }
-  }, [authUserId]);
+  }, [authUserId, displayName]);
 
   useEffect(() => {
     if (!authUserId) return;

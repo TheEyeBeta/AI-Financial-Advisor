@@ -22,7 +22,7 @@ interface OnboardingAnswers {
 }
 
 const Onboarding = () => {
-  const { authUserId, userProfile, userId, refreshProfile } = useAuth();
+  const { authUserId, userProfile, appUserId, refreshProfile } = useAuth();
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -53,7 +53,7 @@ const Onboarding = () => {
   };
 
   const handleSubmit = async () => {
-    if (!userProfile?.id || !userId) {
+    if (!userProfile?.id || !appUserId) {
       toast({
         title: "Error",
         description: "User profile not found. Please try signing in again.",
