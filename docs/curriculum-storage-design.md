@@ -116,7 +116,7 @@ CREATE TABLE public.education_questions (
 ```sql
 CREATE TABLE public.user_learning_progress (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_code TEXT NOT NULL REFERENCES public.education_bank(module_code) ON DELETE CASCADE,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
@@ -135,7 +135,7 @@ CREATE TABLE public.user_learning_progress (
 ```sql
 CREATE TABLE public.user_question_attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES public.education_questions(id) ON DELETE CASCADE,
     module_code TEXT NOT NULL REFERENCES public.education_bank(module_code) ON DELETE CASCADE,
     user_answer TEXT NOT NULL,
@@ -152,7 +152,7 @@ CREATE TABLE public.user_question_attempts (
 ```sql
 CREATE TABLE public.user_module_assessments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_code TEXT NOT NULL REFERENCES public.education_bank(module_code) ON DELETE CASCADE,
     total_questions INTEGER NOT NULL,
     correct_answers INTEGER NOT NULL,
@@ -214,7 +214,7 @@ BEGIN
         ulp.completed_at,
         ulp.started_at
     FROM public.education_bank eb
-    LEFT JOIN public.users u ON u.id = p_user_id
+    LEFT JOIN core.users u ON u.id = p_user_id
     LEFT JOIN public.user_learning_progress ulp ON ulp.user_id = p_user_id AND ulp.module_code = eb.module_code
     WHERE 
         eb.is_active = TRUE

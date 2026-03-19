@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS public.education_bank (
     prerequisites TEXT[], -- Array of module_codes
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     CONSTRAINT valid_module_code CHECK (module_code ~ '^[A-Z][0-9]+(\.[0-9]+)?$'),
     CONSTRAINT valid_display_order CHECK (display_order > 0),
     CONSTRAINT valid_estimated_minutes CHECK (estimated_minutes > 0)
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS public.education_questions (
     is_active BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     CONSTRAINT valid_points CHECK (points > 0),
     CONSTRAINT valid_display_order CHECK (display_order > 0)
 );
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS public.education_questions (
 -- User Learning Progress
 CREATE TABLE IF NOT EXISTS public.user_learning_progress (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_code TEXT NOT NULL REFERENCES public.education_bank(module_code) ON DELETE CASCADE,
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
@@ -90,14 +90,14 @@ CREATE TABLE IF NOT EXISTS public.user_learning_progress (
     last_accessed_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    
+
     UNIQUE(user_id, module_code)
 );
 
 -- User Question Attempts
 CREATE TABLE IF NOT EXISTS public.user_question_attempts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES public.education_questions(id) ON DELETE CASCADE,
     module_code TEXT NOT NULL REFERENCES public.education_bank(module_code) ON DELETE CASCADE,
     user_answer TEXT NOT NULL,
@@ -109,7 +109,7 @@ CREATE TABLE IF NOT EXISTS public.user_question_attempts (
 -- User Module Assessments
 CREATE TABLE IF NOT EXISTS public.user_module_assessments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_code TEXT NOT NULL REFERENCES public.education_bank(module_code) ON DELETE CASCADE,
     total_questions INTEGER NOT NULL,
     correct_answers INTEGER NOT NULL,
@@ -123,21 +123,21 @@ CREATE TABLE IF NOT EXISTS public.user_module_assessments (
 -- 3. INDEXES
 -- ============================================================
 
-CREATE INDEX IF NOT EXISTS idx_education_bank_level_active 
+CREATE INDEX IF NOT EXISTS idx_education_bank_level_active
     ON public.education_bank(level, is_active, display_order);
-CREATE INDEX IF NOT EXISTS idx_education_bank_track 
+CREATE INDEX IF NOT EXISTS idx_education_bank_track
     ON public.education_bank(track_or_pathway) WHERE track_or_pathway IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_education_bank_status 
+CREATE INDEX IF NOT EXISTS idx_education_bank_status
     ON public.education_bank(status, is_active);
-CREATE INDEX IF NOT EXISTS idx_education_questions_module 
+CREATE INDEX IF NOT EXISTS idx_education_questions_module
     ON public.education_questions(module_code, display_order);
-CREATE INDEX IF NOT EXISTS idx_user_progress_user_module 
+CREATE INDEX IF NOT EXISTS idx_user_progress_user_module
     ON public.user_learning_progress(user_id, module_code);
-CREATE INDEX IF NOT EXISTS idx_user_progress_user_level 
+CREATE INDEX IF NOT EXISTS idx_user_progress_user_level
     ON public.user_learning_progress(user_id) INCLUDE (module_code);
-CREATE INDEX IF NOT EXISTS idx_user_question_attempts_user_module 
+CREATE INDEX IF NOT EXISTS idx_user_question_attempts_user_module
     ON public.user_question_attempts(user_id, module_code, attempted_at DESC);
-CREATE INDEX IF NOT EXISTS idx_user_assessments_user_module 
+CREATE INDEX IF NOT EXISTS idx_user_assessments_user_module
     ON public.user_module_assessments(user_id, module_code, completed_at DESC);
 
 -- ============================================================
@@ -171,7 +171,7 @@ RETURNS TABLE (
 ) AS $$
 BEGIN
     RETURN QUERY
-    SELECT 
+    SELECT
         eb.module_code,
         eb.level,
         eb.track_or_pathway,
@@ -185,9 +185,9 @@ BEGIN
         ulp.completed_at,
         ulp.started_at
     FROM public.education_bank eb
-    LEFT JOIN public.users u ON u.id = p_user_id
+    LEFT JOIN core.users u ON u.id = p_user_id
     LEFT JOIN public.user_learning_progress ulp ON ulp.user_id = p_user_id AND ulp.module_code = eb.module_code
-    WHERE 
+    WHERE
         eb.is_active = TRUE
         AND eb.status = 'published'
         AND (
@@ -195,7 +195,7 @@ BEGIN
             OR
             (u.experience_level IS NULL AND eb.level = 'beginner')
         )
-    ORDER BY 
+    ORDER BY
         CASE WHEN ulp.completed_at IS NULL THEN 0 ELSE 1 END,
         eb.display_order ASC,
         ulp.last_accessed_at DESC NULLS LAST;
@@ -208,8 +208,8 @@ RETURNS void AS $$
 BEGIN
     INSERT INTO public.user_learning_progress (user_id, module_code, started_at, last_accessed_at)
     VALUES (p_user_id, p_module_code, NOW(), NOW())
-    ON CONFLICT (user_id, module_code) 
-    DO UPDATE SET 
+    ON CONFLICT (user_id, module_code)
+    DO UPDATE SET
         last_accessed_at = NOW(),
         started_at = COALESCE(user_learning_progress.started_at, NOW());
 END;
@@ -220,19 +220,19 @@ CREATE OR REPLACE FUNCTION complete_lesson(p_user_id UUID, p_module_code TEXT)
 RETURNS void AS $$
 BEGIN
     UPDATE public.user_learning_progress
-    SET 
+    SET
         completed_at = NOW(),
         progress_percent = 100,
         updated_at = NOW()
     WHERE user_id = p_user_id AND module_code = p_module_code;
-    
+
     -- Sync to learning_topics if topic_name matches
     UPDATE public.learning_topics
-    SET 
+    SET
         completed = TRUE,
         progress = 100,
         updated_at = NOW()
-    WHERE user_id = p_user_id 
+    WHERE user_id = p_user_id
     AND topic_name = (SELECT title FROM public.education_bank WHERE module_code = p_module_code);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -255,22 +255,22 @@ BEGIN
     INTO v_correct_answer, v_explanation, v_points, v_module_code
     FROM public.education_questions
     WHERE id = p_question_id;
-    
+
     v_is_correct := (p_user_answer = v_correct_answer);
-    
+
     INSERT INTO public.user_question_attempts (
         user_id, question_id, module_code, user_answer, is_correct, points_earned
     )
     VALUES (
-        p_user_id, 
+        p_user_id,
         p_question_id,
         v_module_code,
         p_user_answer,
         v_is_correct,
         CASE WHEN v_is_correct THEN v_points ELSE 0 END
     );
-    
-    RETURN QUERY SELECT v_is_correct, v_explanation, 
+
+    RETURN QUERY SELECT v_is_correct, v_explanation,
         CASE WHEN v_is_correct THEN v_points ELSE 0 END;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -292,41 +292,41 @@ BEGIN
     SELECT level INTO v_level
     FROM public.education_bank
     WHERE module_code = p_module_code;
-    
+
     v_threshold := CASE v_level
         WHEN 'beginner' THEN 60
         WHEN 'intermediate' THEN 70
         WHEN 'advanced' THEN 80
         ELSE 60
     END;
-    
+
     SELECT COUNT(*) INTO v_total
     FROM public.education_questions
     WHERE module_code = p_module_code AND is_active = TRUE;
-    
+
     SELECT COUNT(DISTINCT question_id) INTO v_correct
     FROM (
         SELECT DISTINCT ON (question_id) question_id, is_correct
         FROM public.user_question_attempts
-        WHERE user_id = p_user_id 
+        WHERE user_id = p_user_id
         AND module_code = p_module_code
         ORDER BY question_id, attempted_at DESC
     ) latest_attempts
     WHERE is_correct = TRUE;
-    
+
     v_score := ROUND((v_correct::NUMERIC / NULLIF(v_total, 0) * 100)::NUMERIC);
     v_passed := (v_score >= v_threshold);
-    
+
     INSERT INTO public.user_module_assessments (
-        user_id, module_code, total_questions, correct_answers, 
+        user_id, module_code, total_questions, correct_answers,
         score_percent, passed, threshold_required
     )
     VALUES (p_user_id, p_module_code, v_total, v_correct, v_score, v_passed, v_threshold);
-    
+
     IF v_passed THEN
         PERFORM complete_lesson(p_user_id, p_module_code);
     END IF;
-    
+
     RETURN QUERY SELECT v_passed, v_score, v_total, v_correct;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -369,7 +369,7 @@ ON public.education_bank FOR SELECT
 TO authenticated
 USING (
     level = COALESCE(
-        (SELECT experience_level FROM public.users WHERE auth_id = auth.uid())::experience_level_enum,
+        (SELECT experience_level FROM core.users WHERE auth_id = auth.uid())::experience_level_enum,
         'beginner'::experience_level_enum
     )
     AND is_active = TRUE
@@ -382,8 +382,8 @@ ON public.education_bank FOR ALL
 TO authenticated
 USING (
     EXISTS (
-        SELECT 1 FROM public.users 
-        WHERE auth_id = auth.uid() 
+        SELECT 1 FROM core.users
+        WHERE auth_id = auth.uid()
         AND "userType" = 'Admin'
     )
 );
@@ -397,7 +397,7 @@ USING (
     module_code IN (
         SELECT module_code FROM public.education_bank
         WHERE level = COALESCE(
-            (SELECT experience_level FROM public.users WHERE auth_id = auth.uid())::experience_level_enum,
+            (SELECT experience_level FROM core.users WHERE auth_id = auth.uid())::experience_level_enum,
             'beginner'::experience_level_enum
         )
         AND is_active = TRUE
@@ -412,8 +412,8 @@ ON public.education_questions FOR ALL
 TO authenticated
 USING (
     EXISTS (
-        SELECT 1 FROM public.users 
-        WHERE auth_id = auth.uid() 
+        SELECT 1 FROM core.users
+        WHERE auth_id = auth.uid()
         AND "userType" = 'Admin'
     )
 );
@@ -423,39 +423,39 @@ DROP POLICY IF EXISTS "Users can view own progress" ON public.user_learning_prog
 CREATE POLICY "Users can view own progress"
 ON public.user_learning_progress FOR SELECT
 TO authenticated
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 DROP POLICY IF EXISTS "Users can update own progress" ON public.user_learning_progress;
 CREATE POLICY "Users can update own progress"
 ON public.user_learning_progress FOR INSERT, UPDATE
 TO authenticated
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- User Question Attempts Policies
 DROP POLICY IF EXISTS "Users can view own attempts" ON public.user_question_attempts;
 CREATE POLICY "Users can view own attempts"
 ON public.user_question_attempts FOR SELECT
 TO authenticated
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 DROP POLICY IF EXISTS "Users can record own attempts" ON public.user_question_attempts;
 CREATE POLICY "Users can record own attempts"
 ON public.user_question_attempts FOR INSERT
 TO authenticated
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- User Module Assessments Policies
 DROP POLICY IF EXISTS "Users can view own assessments" ON public.user_module_assessments;
 CREATE POLICY "Users can view own assessments"
 ON public.user_module_assessments FOR SELECT
 TO authenticated
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 DROP POLICY IF EXISTS "Users can record own assessments" ON public.user_module_assessments;
 CREATE POLICY "Users can record own assessments"
 ON public.user_module_assessments FOR INSERT
 TO authenticated
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- ============================================================
 -- Migration Complete

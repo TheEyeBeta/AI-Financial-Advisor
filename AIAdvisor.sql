@@ -8,7 +8,7 @@ CREATE TABLE public.achievements (
   icon text,
   unlocked_at timestamp with time zone DEFAULT now(),
   CONSTRAINT achievements_pkey PRIMARY KEY (id),
-  CONSTRAINT achievements_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT achievements_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE ai.chat_messages (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -18,7 +18,7 @@ CREATE TABLE ai.chat_messages (
   created_at timestamp with time zone DEFAULT now(),
   chat_id uuid,
   CONSTRAINT chat_messages_pkey PRIMARY KEY (id),
-  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT chat_messages_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id),
   CONSTRAINT chat_messages_chat_id_fkey FOREIGN KEY (chat_id) REFERENCES ai.chats(id)
 );
 CREATE TABLE ai.chats (
@@ -28,7 +28,7 @@ CREATE TABLE ai.chats (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT chats_pkey PRIMARY KEY (id),
-  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT chats_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.financial_plans (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -82,7 +82,7 @@ CREATE TABLE public.learning_topics (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT learning_topics_pkey PRIMARY KEY (id),
-  CONSTRAINT learning_topics_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT learning_topics_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.life_events (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -139,7 +139,7 @@ CREATE TABLE public.open_positions (
   updated_at timestamp with time zone DEFAULT now(),
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT open_positions_pkey PRIMARY KEY (id),
-  CONSTRAINT open_positions_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT open_positions_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.paper_trade_closes (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -152,7 +152,7 @@ CREATE TABLE public.paper_trade_closes (
   tags ARRAY,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT paper_trade_closes_pkey PRIMARY KEY (id),
-  CONSTRAINT paper_trade_closes_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id),
+  CONSTRAINT paper_trade_closes_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id),
   CONSTRAINT paper_trade_closes_buy_trade_id_fkey FOREIGN KEY (buy_trade_id) REFERENCES public.paper_trades(id)
 );
 CREATE TABLE public.paper_trades (
@@ -168,7 +168,7 @@ CREATE TABLE public.paper_trades (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT paper_trades_pkey PRIMARY KEY (id),
-  CONSTRAINT paper_trades_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT paper_trades_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.portfolio_history (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -177,7 +177,7 @@ CREATE TABLE public.portfolio_history (
   value numeric NOT NULL,
   created_at timestamp with time zone DEFAULT now(),
   CONSTRAINT portfolio_history_pkey PRIMARY KEY (id),
-  CONSTRAINT portfolio_history_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT portfolio_history_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.risk_alerts (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -271,7 +271,7 @@ CREATE TABLE public.trade_journal (
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT trade_journal_pkey PRIMARY KEY (id),
   CONSTRAINT trade_journal_trade_id_fkey FOREIGN KEY (trade_id) REFERENCES public.trades(id),
-  CONSTRAINT trade_journal_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT trade_journal_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.trades (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -288,7 +288,7 @@ CREATE TABLE public.trades (
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
   CONSTRAINT trades_pkey PRIMARY KEY (id),
-  CONSTRAINT trades_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id)
+  CONSTRAINT trades_user_id_fkey FOREIGN KEY (user_id) REFERENCES core.users(id)
 );
 CREATE TABLE public.trending_stocks (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
@@ -342,7 +342,7 @@ CREATE TABLE public.user_profiles (
   CONSTRAINT user_profiles_pkey PRIMARY KEY (id),
   CONSTRAINT user_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
 );
-CREATE TABLE public.users (
+CREATE TABLE core.users (
   id uuid NOT NULL DEFAULT uuid_generate_v4(),
   auth_id uuid NOT NULL UNIQUE,
   first_name text,

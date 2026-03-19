@@ -46,13 +46,13 @@ interface WebSearchResponse {
 
 /**
  * Detect if the user's message requires a web search.
- * 
+ *
  * IMPORTANT: Web search is used for:
  * - News (why is stock dropping, latest headlines, what's happening)
  * - General knowledge (what is a P/E ratio, how does Fed affect markets)
  * - General real-world price lookups (e.g., "price of a boat")
  * - Current events (Fed decisions, earnings announcements)
- * 
+ *
  * NOT used for:
  * - Stock prices (from The Eye database)
  * - Technical indicators (from The Eye database)
@@ -62,7 +62,7 @@ function detectSearchIntent(message: string): SearchIntent {
   const msgUpper = message.toUpperCase();
   const financeTopicPattern = /\b(finance|financial|invest|investment|investing|stock|stocks|equity|etf|mutual fund|bond|bonds|portfolio|trading|trade|market|markets|economy|economic|inflation|interest rate|fed|federal reserve|gdp|earnings|sec|tax|taxes|budget|debt|loan|mortgage|retirement|savings|cash flow|net worth|asset allocation|risk|dividend)\b/i;
   const marketAssetPattern = /\b(stock|stocks|share|shares|ticker|quote|crypto|bitcoin|btc|eth|forex|etf|index)\b/i;
-  
+
   // News-related patterns - things that require current events/news
   const newsPatterns = [
     /(?:latest|recent|breaking|today(?:'s)?|current)\s+(?:news|headlines|updates|developments)/i,
@@ -72,7 +72,7 @@ function detectSearchIntent(message: string): SearchIntent {
     /why\s+(?:is|did|has|are)\s+.+\s+(?:going|dropping|rising|falling|crashing|surging|up|down|tanking|mooning|rallying)/i,
     /what\s+(?:caused|happened|is happening)/i,
   ];
-  
+
   // General knowledge patterns - educational/informational queries
   const generalPatterns = [
     /(?:search|look up|find|google)\s+(?:for\s+)?/i,
@@ -88,7 +88,7 @@ function detectSearchIntent(message: string): SearchIntent {
     /(?:price|cost|value|worth)\s+(?:of|for)\s+(.+?)(?:\?|$|\.)/i,
     /how much (?:is|does)\s+(.+?)\s+(?:cost|worth|go for)(?:\?|$|\.)/i,
   ];
-  
+
   // Check for news intent (why is X dropping, what's happening with Y)
   for (const pattern of newsPatterns) {
     if (pattern.test(message)) {
@@ -96,7 +96,7 @@ function detectSearchIntent(message: string): SearchIntent {
       const tickerMatch = msgUpper.match(/\b([A-Z]{2,5})\b/);
       const subjectMatch = message.match(/(?:news|headlines|happening|going on)\s+(?:about|on|for|with|to|at)\s+([A-Za-z\s]+?)(?:\?|$|\.)/i);
       const whyMatch = message.match(/why\s+(?:is|did|has|are)\s+([A-Za-z\s]+?)\s+(?:going|dropping|rising|falling|crashing|surging|up|down|tanking|mooning|rallying)/i);
-      
+
       const searchSubject = tickerMatch?.[1] || subjectMatch?.[1]?.trim() || whyMatch?.[1]?.trim() || '';
       if (searchSubject) {
         return {
@@ -105,7 +105,7 @@ function detectSearchIntent(message: string): SearchIntent {
           intentType: 'news',
         };
       }
-      
+
       // Generic news search
       return {
         shouldSearch: true,
@@ -131,7 +131,7 @@ function detectSearchIntent(message: string): SearchIntent {
       }
     }
   }
-  
+
   // Check for general search intent (explicit search requests, Fed info, etc.)
   for (const pattern of generalPatterns) {
     if (pattern.test(message)) {
@@ -161,7 +161,7 @@ function detectSearchIntent(message: string): SearchIntent {
       }
     }
   }
-  
+
   // No search needed
   return {
     shouldSearch: false,
@@ -176,30 +176,30 @@ function detectSearchIntent(message: string): SearchIntent {
  */
 async function performWebSearch(query: string, maxResults: number = 5): Promise<WebSearchResponse | null> {
   const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
-  
+
   if (!pythonBackendUrl) {
     console.log('[WebSearch] Backend URL not configured');
     return null;
   }
-  
+
   try {
     const params = new URLSearchParams({
       query,
       max_results: maxResults.toString(),
     });
-    
+
     const response = await fetch(`${pythonBackendUrl}/api/search?${params}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     });
-    
+
     if (!response.ok) {
       console.log('[WebSearch] Search endpoint returned error:', response.status);
       return null;
     }
-    
+
     const data: WebSearchResponse = await response.json();
     console.log('[WebSearch] Found', data.results?.length || 0, 'results for:', query);
     return data;
@@ -216,26 +216,26 @@ function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType:
   if (!searchResponse.results || searchResponse.results.length === 0) {
     return '';
   }
-  
+
   let context = '\n\n=== WEB SEARCH RESULTS ===\n';
   context += `Search Query: "${searchResponse.query}"\n`;
   context += `Results Found: ${searchResponse.results.length}\n\n`;
-  
+
   if (intentType === 'news') {
     context += 'NEWS FROM WEB:\n';
   } else {
     context += 'SEARCH RESULTS:\n';
   }
-  
+
   searchResponse.results.forEach((result, index) => {
     context += `\n[${index + 1}] ${result.title}\n`;
     context += `    ${result.snippet}\n`;
     context += `    Source: ${result.url}\n`;
   });
-  
+
   context += '\n=== END WEB SEARCH RESULTS ===\n';
   context += 'IMPORTANT: Use the web search results above to answer the user\'s question. Cite sources when appropriate.\n';
-  
+
   return context;
 }
 
@@ -248,7 +248,7 @@ export const portfolioApi = {
       .select('*')
       .eq('user_id', userId)
       .order('date', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -260,7 +260,7 @@ export const portfolioApi = {
       .insert({ user_id: userId, date, value })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -275,7 +275,7 @@ export const positionsApi = {
       .select('*')
       .eq('user_id', userId)
       .order('entry_date', { ascending: false });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -287,7 +287,7 @@ export const positionsApi = {
       .insert({ ...position, user_id: userId })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -315,7 +315,7 @@ export const positionsApi = {
       .eq('user_id', userId)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -341,7 +341,7 @@ export const positionsApi = {
       .delete()
       .eq('id', id)
       .eq('user_id', userId);
-    
+
     if (error) throw error;
   },
 };
@@ -355,7 +355,7 @@ export const tradesApi = {
       .select('*')
       .eq('user_id', userId)
       .order('exit_date', { ascending: false, nullsFirst: false });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -368,7 +368,7 @@ export const tradesApi = {
       .eq('user_id', userId)
       .eq('action', 'CLOSED')
       .order('exit_date', { ascending: false });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -380,7 +380,7 @@ export const tradesApi = {
       .insert({ ...trade, user_id: userId })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -389,21 +389,21 @@ export const tradesApi = {
     const trades = await this.getClosed(userId);
     const winningTrades = trades.filter(t => (t.pnl || 0) > 0);
     const losingTrades = trades.filter(t => (t.pnl || 0) <= 0);
-    
+
     const avgProfit = winningTrades.length > 0
       ? winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0) / winningTrades.length
       : 0;
-    
+
     const avgLoss = losingTrades.length > 0
       ? losingTrades.reduce((sum, t) => sum + Math.abs(t.pnl || 0), 0) / losingTrades.length
       : 0;
-    
+
     // Calculate profit factor: ratio of average profit to average loss
     // Edge case: If all trades are winners (avgLoss = 0), profit factor is undefined
     // In this case, we return 0 to indicate we can't calculate a meaningful ratio
     // This represents a perfect trading record with no losses
     const profitFactor = avgLoss > 0 ? Math.abs(avgProfit) / avgLoss : 0;
-    
+
     return {
       winRate: trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0,
       avgProfit,
@@ -425,7 +425,7 @@ export const journalApi = {
       .select('*')
       .eq('user_id', userId)
       .order('date', { ascending: false });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -437,7 +437,7 @@ export const journalApi = {
       .insert({ ...entry, user_id: userId })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -450,7 +450,7 @@ export const journalApi = {
       .eq('id', id)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -461,18 +461,10 @@ export const journalApi = {
       .from('trade_journal')
       .delete()
       .eq('id', id);
-    
+
     if (error) throw error;
   },
 };
-
-function fromAiChats() {
-  return aiDb.from('chats');
-}
-
-function fromAiChatMessages() {
-  return aiDb.from('chat_messages');
-}
 
 function normalizeChatTitle(title?: string): string {
   const trimmedTitle = title?.trim();
@@ -490,6 +482,14 @@ function normalizeChatTitle(title?: string): string {
   }
 
   return trimmedTitle;
+}
+
+function fromAiChats() {
+  return aiDb.from('chats');
+}
+
+function fromAiChatMessages() {
+  return aiDb.from('chat_messages');
 }
 
 async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
@@ -533,7 +533,6 @@ async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
   return data || [];
 }
 
-
 // Chat API
 // Chats API - for managing chat sessions
 export const chatsApi = {
@@ -558,13 +557,13 @@ export const chatsApi = {
   // Update chat title
   async updateTitle(chatId: string, title: string): Promise<Chat> {
     const normalizedTitle = normalizeChatTitle(title);
-    
+
     const { data, error } = await fromAiChats()
       .update({ title: normalizedTitle, updated_at: new Date().toISOString() })
       .eq('id', chatId)
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -574,7 +573,7 @@ export const chatsApi = {
     const { error } = await fromAiChats()
       .delete()
       .eq('id', chatId);
-    
+
     if (error) throw error;
   },
 
@@ -592,7 +591,7 @@ export const chatsApi = {
       .select('*')
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
-    
+
     if (messagesError) throw messagesError;
 
     return {
@@ -611,7 +610,7 @@ export const chatApi = {
       .select('*')
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -629,12 +628,12 @@ export const chatApi = {
     if (content.length > MAX_MESSAGE_LENGTH) {
       throw new Error(`Message too long. Maximum length is ${MAX_MESSAGE_LENGTH} characters.`);
     }
-    
+
     const { data, error } = await fromAiChatMessages()
       .insert({ user_id: userId, chat_id: chatId, role, content })
       .select()
       .single();
-    
+
     if (error) throw error;
 
     // Update chat's updated_at timestamp
@@ -646,7 +645,7 @@ export const chatApi = {
       // Log error but don't fail the message creation
       console.error('Failed to update chat timestamp', { chatId, error: updateChatError });
     }
-    
+
     return data;
   },
 
@@ -654,7 +653,7 @@ export const chatApi = {
     const { error } = await fromAiChatMessages()
       .delete()
       .eq('chat_id', chatId);
-    
+
     if (error) throw error;
   },
 };
@@ -668,7 +667,7 @@ export const learningApi = {
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -685,7 +684,7 @@ export const learningApi = {
       })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -730,10 +729,10 @@ export const learningApi = {
     ];
 
     // Select topics based on experience level
-    const topics = experienceLevel === 'advanced' 
-      ? advancedTopics 
-      : experienceLevel === 'intermediate' 
-      ? intermediateTopics 
+    const topics = experienceLevel === 'advanced'
+      ? advancedTopics
+      : experienceLevel === 'intermediate'
+      ? intermediateTopics
       : beginnerTopics;
 
     // Get existing topics to avoid duplicates
@@ -767,7 +766,7 @@ export const learningApi = {
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: true });
-      
+
       if (selectError) throw selectError;
       return allTopics || [];
     }
@@ -778,7 +777,7 @@ export const learningApi = {
       .from('learning_topics')
       .insert(topicsToInsert)
       .select();
-    
+
     if (error) {
       console.error('Error inserting learning topics:', error);
       throw error;
@@ -791,7 +790,7 @@ export const learningApi = {
       .select('*')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
-    
+
     if (selectError) throw selectError;
     return allTopics || [];
   },
@@ -806,7 +805,7 @@ export const achievementsApi = {
       .select('*')
       .eq('user_id', userId)
       .order('unlocked_at', { ascending: false });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -818,7 +817,7 @@ export const achievementsApi = {
       .insert({ user_id: userId, name, icon })
       .select()
       .single();
-    
+
     if (error) throw error;
     return data;
   },
@@ -832,7 +831,7 @@ export const marketApi = {
       .from('market_indices')
       .select('*')
       .order('symbol', { ascending: true });
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -844,7 +843,7 @@ export const marketApi = {
       .select('*')
       .order('updated_at', { ascending: false })
       .limit(10);
-    
+
     if (error) throw error;
     return data || [];
   },
@@ -1033,11 +1032,11 @@ const stockCache = {
   TTL_MS: 5 * 60 * 1000,
   // Number of stocks to pre-cache
   PRELOAD_COUNT: 60,
-  
+
   isExpired(timestamp: number): boolean {
     return Date.now() - timestamp > this.TTL_MS;
   },
-  
+
   getTicker(ticker: string): StockSnapshot | null {
     const entry = this.tickers.get(ticker.toUpperCase());
     if (entry && !this.isExpired(entry.timestamp)) {
@@ -1046,11 +1045,11 @@ const stockCache = {
     }
     return null;
   },
-  
+
   setTicker(ticker: string, data: StockSnapshot): void {
     this.tickers.set(ticker.toUpperCase(), { data, timestamp: Date.now() });
   },
-  
+
   getCompanyName(name: string): StockSnapshot | null | undefined {
     const entry = this.companyNames.get(name.toLowerCase());
     if (entry && !this.isExpired(entry.timestamp)) {
@@ -1059,11 +1058,11 @@ const stockCache = {
     }
     return undefined; // undefined means not in cache, null means cached as "not found"
   },
-  
+
   setCompanyName(name: string, data: StockSnapshot | null): void {
     this.companyNames.set(name.toLowerCase(), { data, timestamp: Date.now() });
   },
-  
+
   getMainList(): StockSnapshot[] | null {
     if (this.mainList && !this.isExpired(this.mainList.timestamp)) {
       console.log('[Cache] Hit for main stock list');
@@ -1071,7 +1070,7 @@ const stockCache = {
     }
     return null;
   },
-  
+
   setMainList(data: StockSnapshot[]): void {
     this.mainList = { data, timestamp: Date.now() };
     // Also populate individual ticker cache from the list
@@ -1084,7 +1083,7 @@ const stockCache = {
     });
     console.log('[Cache] Stored', data.length, 'stocks in cache');
   },
-  
+
   clear(): void {
     this.tickers.clear();
     this.companyNames.clear();
@@ -1092,7 +1091,7 @@ const stockCache = {
     this.initialized = false;
     console.log('[Cache] Cleared');
   },
-  
+
   getStats(): { tickers: number; companyNames: number; hasMainList: boolean; initialized: boolean } {
     return {
       tickers: this.tickers.size,
@@ -1124,31 +1123,31 @@ export const stockSnapshotsApi = {
       console.log('[Cache] Already initialized and valid');
       return;
     }
-    
+
     console.log('[Cache] Initializing - loading first', stockCache.PRELOAD_COUNT, 'stocks...');
-    
+
     const { data, error } = await runStockSnapshotsQuery(query =>
       query
         .select('*')
         .order('updated_at', { ascending: false })
         .limit(stockCache.PRELOAD_COUNT)
     );
-    
+
     if (error) {
       console.error('[Cache] Failed to initialize:', error);
       throw error;
     }
-    
+
     stockCache.setMainList(data || []);
     stockCache.initialized = true;
     console.log('[Cache] Initialization complete -', data?.length || 0, 'stocks cached');
   },
-  
+
   // Get cache statistics
   getCacheStats() {
     return stockCache.getStats();
   },
-  
+
   // Clear the cache (useful for forcing refresh)
   clearCache(): void {
     stockCache.clear();
@@ -1161,7 +1160,7 @@ export const stockSnapshotsApi = {
     if (cached) {
       return limit ? cached.slice(0, limit) : cached;
     }
-    
+
     // Cache miss - fetch from database
     console.log('[Cache] Miss for main list - fetching from database');
     // Fetch at least PRELOAD_COUNT to populate cache, or more if requested
@@ -1174,10 +1173,10 @@ export const stockSnapshotsApi = {
         .limit(fetchLimit)
     );
     if (error) throw error;
-    
+
     const result = data || [];
     stockCache.setMainList(result);
-    
+
     return limit ? result.slice(0, limit) : result;
   },
 
@@ -1188,7 +1187,7 @@ export const stockSnapshotsApi = {
     if (cached) {
       return cached;
     }
-    
+
     // Cache miss - fetch from database
     console.log('[Cache] Miss for ticker:', ticker, '- fetching from database');
     const { data, error } = await runStockSnapshotsQuery(query =>
@@ -1199,9 +1198,9 @@ export const stockSnapshotsApi = {
         .limit(1)
         .maybeSingle()
     );
-    
+
     if (error) throw error;
-    
+
     if (data) {
       stockCache.setTicker(ticker, data);
     }
@@ -1215,7 +1214,7 @@ export const stockSnapshotsApi = {
     if (cached !== undefined) {
       return cached; // Could be null (meaning "not found" is cached)
     }
-    
+
     // Cache miss - fetch from database
     console.log('[Cache] Miss for company name:', companyName, '- fetching from database');
     const { data, error } = await runStockSnapshotsQuery(query =>
@@ -1226,7 +1225,7 @@ export const stockSnapshotsApi = {
         .limit(1)
         .maybeSingle()
     );
-    
+
     if (error) {
       throw error;
     }
@@ -1236,7 +1235,7 @@ export const stockSnapshotsApi = {
       stockCache.setCompanyName(companyName, null);
       return null;
     }
-    
+
     stockCache.setCompanyName(companyName, data);
     stockCache.setTicker(data.ticker, data); // Also cache by ticker
     return data;
@@ -1246,7 +1245,7 @@ export const stockSnapshotsApi = {
   async getByTickers(tickers: string[]): Promise<StockSnapshot[]> {
     const results: StockSnapshot[] = [];
     const tickersToFetch: string[] = [];
-    
+
     // Check cache for each ticker
     for (const ticker of tickers) {
       const cached = stockCache.getTicker(ticker);
@@ -1256,13 +1255,13 @@ export const stockSnapshotsApi = {
         tickersToFetch.push(ticker.toUpperCase());
       }
     }
-    
+
     // If all found in cache, return
     if (tickersToFetch.length === 0) {
       console.log('[Cache] All', tickers.length, 'tickers found in cache');
       return results;
     }
-    
+
     // Fetch missing tickers from database
     console.log('[Cache] Fetching', tickersToFetch.length, 'missing tickers from database');
     const { data, error } = await runStockSnapshotsQuery(query =>
@@ -1271,9 +1270,9 @@ export const stockSnapshotsApi = {
         .in('ticker', tickersToFetch)
         .order('updated_at', { ascending: false })
     );
-    
+
     if (error) throw error;
-    
+
     // Cache and add to results
     if (data) {
       data.forEach(snap => {
@@ -1281,7 +1280,7 @@ export const stockSnapshotsApi = {
         results.push(snap);
       });
     }
-    
+
     return results;
   },
 
@@ -1301,14 +1300,14 @@ export const stockSnapshotsApi = {
       return filteredQuery;
     });
     if (error) throw error;
-    
+
     // Cache individual results
     if (data) {
       data.forEach(snap => {
         stockCache.setTicker(snap.ticker, snap);
       });
     }
-    
+
     return data || [];
   },
 
@@ -1316,7 +1315,7 @@ export const stockSnapshotsApi = {
   async getRecentlyUpdated(hours: number = 24, limit?: number): Promise<StockSnapshot[]> {
     const cutoffTime = new Date();
     cutoffTime.setHours(cutoffTime.getHours() - hours);
-    
+
     const { data, error } = await runStockSnapshotsQuery(query => {
       let filteredQuery = query
         .select('*')
@@ -1463,7 +1462,7 @@ type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 function getSystemPrompt(experienceLevel: ExperienceLevel, hasEyeData: boolean = false): string {
   // Default to intermediate if null
   const level = experienceLevel ?? 'intermediate';
-  
+
   const baseRules = `
 IDENTITY:
 You are the AI behind The Eye — a proprietary financial intelligence platform. You are NOT a generic chatbot. You have real-time market data, signals, and analysis at your fingertips. Speak with that authority.
@@ -1542,7 +1541,7 @@ export const pythonApi = {
   // Analyze quantitative data using Deepseek (compliance-safe: only sends numerical data, no PII)
   async analyzeQuantitativeData(quantitativeData: Record<string, number | undefined>): Promise<string> {
     const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
-    
+
     if (!pythonBackendUrl) {
       throw new Error('AI backend URL not configured');
     }
@@ -1583,8 +1582,8 @@ export const pythonApi = {
 
   // Call backend AI proxy for chat response (API keys remain server-side)
   async getChatResponse(
-    message: string, 
-    userId: string, 
+    message: string,
+    userId: string,
     experienceLevel?: ExperienceLevel,
     chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
     tradeEngineContext?: TradeEngineAIContext | null
@@ -1599,18 +1598,18 @@ export const pythonApi = {
     if (chatHistory && chatHistory.length > 100) {
       throw new Error(`Chat history too long. Maximum ${100} messages allowed.`);
     }
-    
+
     const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
-    
+
     const hasTradeEngineData = !!tradeEngineContext;
-    
+
     // Extract ticker from message FIRST (before fetching all data)
     // This allows us to query for specific ticker if needed
     const messageUpper = message.toUpperCase();
     const skipWords = new Set(['WHAT', 'WHEN', 'WHERE', 'WHY', 'HOW', 'HOWS', 'HOW\'S', 'WHO', 'WHICH', 'IS', 'ARE', 'WAS', 'WERE', 'THE', 'A', 'AN', 'FOR', 'AND', 'OR', 'BUT', 'WITH', 'ABOUT', 'FROM', 'TO', 'OF', 'IN', 'ON', 'AT', 'BY', 'LATEST', 'PRICE', 'STOCK', 'SHARES', 'SHARE', 'COMPANY', 'TICKER', 'SYMBOL', 'ME', 'YOU', 'TELL', 'SHOW', 'GIVE', 'CAN', 'WILL', 'SHOULD', 'WOULD', 'COULD', 'GOOD', 'NOW', 'THEN', 'BOND', 'BONDS']);
-    
+
     let requestedTicker: string | null = null;
-    
+
     // Priority 1: Check for ticker in parentheses (e.g., "Apple (AAPL)")
     const parenMatch = messageUpper.match(/\(([A-Z]{1,5})\)/);
     if (parenMatch && parenMatch[1]) {
@@ -1619,7 +1618,7 @@ export const pythonApi = {
         requestedTicker = ticker;
       }
     }
-    
+
     // Priority 2: Check after common phrases (e.g., "what is AAPL", "price of NVDA")
     if (!requestedTicker) {
       const afterPhraseMatch = messageUpper.match(/(?:about|for|on|with|regarding|tell me about|what is|what's|price of|price for|show me|give me|tell me|latest price for|latest price of)\s+([A-Z]{1,5})\b/i);
@@ -1630,7 +1629,7 @@ export const pythonApi = {
         }
       }
     }
-    
+
     // Priority 3: Look for ticker patterns in all words (2-5 uppercase letters, not in skip list)
     if (!requestedTicker) {
       const words = messageUpper.split(/\s+/);
@@ -1642,7 +1641,7 @@ export const pythonApi = {
         }
       }
     }
-    
+
     // Priority 4: Check for standalone ticker (entire message is just a ticker)
     if (!requestedTicker) {
       const cleanMessage = messageUpper.trim().replace(/[^A-Z]/g, '');
@@ -1650,10 +1649,10 @@ export const pythonApi = {
         requestedTicker = cleanMessage;
       }
     }
-    
+
     // Store original query for company name search if ticker not found
     const originalQuery = message.trim();
-    
+
     // Detect if this message is asking about stocks/market data
     // Only query database when relevant to avoid unnecessary API calls
     const stockRelatedPatterns = [
@@ -1662,13 +1661,13 @@ export const pythonApi = {
       /(?:earnings|dividend|pe ratio|market cap|volume|rsi|macd|sma|ema)/i,
       /\b[A-Z]{2,5}\b/, // Potential ticker symbols
     ];
-    
+
     const isStockRelatedQuery = stockRelatedPatterns.some(pattern => pattern.test(message)) || !!requestedTicker;
-    
+
     // Fetch stock snapshots from database ONLY when needed
     let stockSnapshotsData: StockSnapshot[] = [];
     let specificTickerSnapshot: StockSnapshot | null = null;
-    
+
     // Only query database if:
     // 1. User is asking about a specific ticker, OR
     // 2. Query is stock-related and we don't have Trade Engine data
@@ -1677,13 +1676,13 @@ export const pythonApi = {
         // Initialize cache on first stock-related query (loads 60 stocks)
         // This is a no-op if cache is already initialized and valid
         await stockSnapshotsApi.initializeCache();
-        
+
         // If we have a specific ticker, query for it (will hit cache if available)
         if (requestedTicker) {
           try {
             // Try exact ticker match first
             specificTickerSnapshot = await stockSnapshotsApi.getByTicker(requestedTicker);
-            
+
             // If not found, try common typos/variations
             if (!specificTickerSnapshot) {
               const typoMap: Record<string, string> = {
@@ -1697,7 +1696,7 @@ export const pythonApi = {
                 'TESLA': 'TSLA',
                 'AMAZON': 'AMZN',
               };
-              
+
               const correctedTicker = typoMap[requestedTicker];
               if (correctedTicker) {
                 specificTickerSnapshot = await stockSnapshotsApi.getByTicker(correctedTicker);
@@ -1706,7 +1705,7 @@ export const pythonApi = {
                 }
               }
             }
-            
+
             // If still not found, try company name search (for company names like "APPLE", "MICROSOFT")
             if (!specificTickerSnapshot) {
               specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(requestedTicker);
@@ -1714,7 +1713,7 @@ export const pythonApi = {
                 requestedTicker = specificTickerSnapshot.ticker; // Update to actual ticker
               }
             }
-            
+
             console.log('[AI] Queried database for ticker:', requestedTicker, specificTickerSnapshot ? '(found)' : '(not found)');
           } catch (_error) {
             // Ignore errors, continue without specific ticker
@@ -1722,14 +1721,14 @@ export const pythonApi = {
           }
         } else {
           // No ticker extracted, but might be a company name - try searching by company name
-          const companyNameWords = originalQuery.split(/\s+/).filter(w => 
+          const companyNameWords = originalQuery.split(/\s+/).filter(w =>
             w.length > 3 && !skipWords.has(w.toUpperCase())
           );
-          
+
           if (companyNameWords.length > 0) {
             // Try the longest word as company name
             const potentialCompanyName = companyNameWords.sort((a, b) => b.length - a.length)[0];
-            
+
             try {
               specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(potentialCompanyName);
               if (specificTickerSnapshot) {
@@ -1741,14 +1740,14 @@ export const pythonApi = {
             }
           }
         }
-        
+
         // Only fetch general stock list if:
         // - No specific ticker was found AND
         // - No Trade Engine data is available AND
         // - Query seems to be asking about general market/multiple stocks
-        const needsGeneralStockList = !specificTickerSnapshot && !hasTradeEngineData && 
+        const needsGeneralStockList = !specificTickerSnapshot && !hasTradeEngineData &&
           /(?:market|stocks|portfolio|top|best|worst|signals|overview)/i.test(message);
-        
+
         if (needsGeneralStockList) {
           stockSnapshotsData = await stockSnapshotsApi.getAll(50); // Reduced from 100 to 50
           console.log('[AI] Fetched general stock list:', stockSnapshotsData.length, 'tickers');
@@ -1760,7 +1759,7 @@ export const pythonApi = {
     } else {
       console.log('[AI] Skipping database query - not a stock-related question');
     }
-    
+
     const hasStockSnapshotsData = stockSnapshotsData.length > 0 || !!specificTickerSnapshot;
     const hasAnyFinancialData = hasTradeEngineData || hasStockSnapshotsData;
 
@@ -1774,30 +1773,30 @@ export const pythonApi = {
     } catch (error) {
       console.log('[AI] Supabase news fetch failed, continuing without news data:', error);
     }
-    
+
     const systemPrompt = getSystemPrompt(experienceLevel ?? null, hasAnyFinancialData);
-    
+
     // Build The Eye data context from LIVE Trade Engine connection AND database snapshots
     let eyeDataContext = '';
-    
+
     if (hasTradeEngineData && tradeEngineContext) {
       // Use the same ticker extraction logic as above (requestedTicker already extracted at the top)
       // No need to re-extract - the requestedTicker variable from above is already available
-      
+
       // Find requested ticker in snapshots if mentioned
       let requestedTickerSnapshot = null;
       let requestedTickerSignal = null;
       let isTickerTracked = false;
-      
+
       if (requestedTicker) {
         // Check if ticker is tracked
         isTickerTracked = tradeEngineContext.tracked_tickers.includes(requestedTicker);
-        
+
         // Find in snapshots
         requestedTickerSnapshot = tradeEngineContext.ticker_snapshots.find(
           snap => snap.ticker.toUpperCase() === requestedTicker
         );
-        
+
         // Fallback: find in signals if not in snapshots
         if (!requestedTickerSnapshot) {
           requestedTickerSignal = tradeEngineContext.recent_signals.find(
@@ -1805,22 +1804,22 @@ export const pythonApi = {
           );
         }
       }
-      
+
       // Helper function to format number with null handling
       const fmt = (val: number | null, decimals: number = 2, prefix: string = '', suffix: string = ''): string => {
         if (val === null || val === undefined) return 'N/A';
         return `${prefix}${val.toFixed(decimals)}${suffix}`;
       };
-      
+
       // Helper function to format percentage
       const fmtPct = (val: number | null): string => {
         if (val === null || val === undefined) return 'N/A';
         return `${val >= 0 ? '+' : ''}${val.toFixed(2)}%`;
       };
-      
+
       eyeDataContext = '\n\n=== THE EYE TRADE ENGINE - LIVE DATABASE ACCESS ===\n';
       eyeDataContext += `Data Generated: ${new Date(tradeEngineContext.generated_at).toLocaleString()}\n\n`;
-      
+
       // Engine Status
       eyeDataContext += `Engine Status: ${tradeEngineContext.engine_status.is_running ? '🟢 RUNNING' : '🔴 STOPPED'}\n`;
       if (tradeEngineContext.engine_status.last_price_tick) {
@@ -1828,16 +1827,16 @@ export const pythonApi = {
       }
       eyeDataContext += `Total Ticks Processed: ${tradeEngineContext.engine_status.total_ticks_processed.toLocaleString()}\n`;
       eyeDataContext += `Total News Fetched: ${tradeEngineContext.engine_status.total_news_fetched.toLocaleString()}\n`;
-      
+
       // ============================================
       // TIER 1: REQUESTED TICKER (FULL DETAIL)
       // ============================================
       if (requestedTicker && requestedTickerSnapshot) {
         const snap = requestedTickerSnapshot;
         const companyName = snap.company_name || snap.ticker;
-        
+
         eyeDataContext += `\n--- ${snap.ticker} DETAILED ANALYSIS (${companyName}) ---\n`;
-        
+
         // Price Data
         eyeDataContext += `Price: ${fmt(snap.last_price, 2, '$')}`;
         if (snap.price_change_pct !== null) {
@@ -1847,11 +1846,11 @@ export const pythonApi = {
           }
         }
         eyeDataContext += '\n';
-        
+
         if (snap.high_52w !== null || snap.low_52w !== null) {
           eyeDataContext += `52W Range: ${fmt(snap.low_52w, 2, '$')} - ${fmt(snap.high_52w, 2, '$')}\n`;
         }
-        
+
         // Volume
         if (snap.volume !== null || snap.volume_ratio !== null) {
           const volStr = snap.volume ? `${(snap.volume / 1000000).toFixed(1)}M` : 'N/A';
@@ -1862,11 +1861,11 @@ export const pythonApi = {
           }
           eyeDataContext += '\n';
         }
-        
+
         // Moving Averages
         const hasSMA = snap.sma_10 !== null || snap.sma_20 !== null || snap.sma_50 !== null || snap.sma_100 !== null || snap.sma_200 !== null;
         const hasEMA = snap.ema_10 !== null || snap.ema_20 !== null || snap.ema_50 !== null || snap.ema_200 !== null;
-        
+
         if (hasSMA || hasEMA) {
           eyeDataContext += '\nMoving Averages:\n';
           if (hasSMA) {
@@ -1886,7 +1885,7 @@ export const pythonApi = {
             if (snap.ema_200 !== null) emaParts.push(`EMA 200: ${fmt(snap.ema_200, 2, '$')}`);
             if (emaParts.length > 0) eyeDataContext += `  ${emaParts.join(' | ')}\n`;
           }
-          
+
           // Price Position
           const positionParts: string[] = [];
           if (snap.price_vs_sma_50 !== null) positionParts.push(`${fmtPct(snap.price_vs_sma_50)} above SMA 50`);
@@ -1898,9 +1897,9 @@ export const pythonApi = {
             eyeDataContext += `  Price Position: ${positionParts.join(', ')}\n`;
           }
         }
-        
+
         // Momentum Indicators
-        const hasMomentum = snap.rsi_14 !== null || snap.rsi_9 !== null || snap.macd !== null || 
+        const hasMomentum = snap.rsi_14 !== null || snap.rsi_9 !== null || snap.macd !== null ||
                            snap.stochastic_k !== null || snap.williams_r !== null || snap.cci !== null;
         if (hasMomentum) {
           eyeDataContext += '\nMomentum:\n';
@@ -1925,7 +1924,7 @@ export const pythonApi = {
           if (snap.williams_r !== null) eyeDataContext += `  Williams %R: ${fmt(snap.williams_r, 1)}\n`;
           if (snap.cci !== null) eyeDataContext += `  CCI: ${fmt(snap.cci, 1)}\n`;
         }
-        
+
         // Volatility Indicators
         if (snap.bollinger_upper !== null || snap.bollinger_middle !== null || snap.bollinger_lower !== null || snap.atr !== null) {
           eyeDataContext += '\nVolatility:\n';
@@ -1940,14 +1939,14 @@ export const pythonApi = {
           }
           if (snap.atr !== null) eyeDataContext += `  ATR: ${fmt(snap.atr, 2, '$')} (volatility measure)\n`;
         }
-        
+
         // Trend Indicators
         if (snap.adx !== null) {
           eyeDataContext += '\nTrend:\n';
           const trendStrength = snap.adx > 25 ? 'strong trend' : 'weak trend';
           eyeDataContext += `  ADX: ${fmt(snap.adx, 1)} (${trendStrength})\n`;
         }
-        
+
         // Fundamental Data
         const hasFundamentals = snap.pe_ratio !== null || snap.forward_pe !== null || snap.peg_ratio !== null ||
                                snap.price_to_book !== null || snap.price_to_sales !== null || snap.dividend_yield !== null ||
@@ -1973,7 +1972,7 @@ export const pythonApi = {
           if (snap.eps_growth !== null) eyeDataContext += `  EPS Growth: ${fmt(snap.eps_growth, 1)}%\n`;
           if (snap.revenue_growth !== null) eyeDataContext += `  Revenue Growth: ${fmt(snap.revenue_growth, 1)}%\n`;
         }
-        
+
         // Signal
         if (snap.latest_signal) {
           const confStr = snap.signal_confidence ? `${(snap.signal_confidence * 100).toFixed(0)}%` : 'N/A';
@@ -1988,7 +1987,7 @@ export const pythonApi = {
           eyeDataContext += `Recent Signal: ${requestedTickerSignal.signal} (${requestedTickerSignal.strategy}) @ ${new Date(requestedTickerSignal.timestamp).toLocaleString()}\n`;
         }
       }
-      
+
       // ============================================
       // TIER 2: TOP 50 ACTIVE TICKERS (COMPACT)
       // ============================================
@@ -1997,16 +1996,16 @@ export const pythonApi = {
         const otherSnapshots = requestedTickerSnapshot
           ? tradeEngineContext.ticker_snapshots.filter(snap => snap.ticker.toUpperCase() !== requestedTicker)
           : tradeEngineContext.ticker_snapshots;
-        
+
         // Sort by volume ratio or volume, then take top 50
         const sortedByVolume = [...otherSnapshots].sort((a, b) => {
           const volA = a.volume_ratio || (a.volume || 0);
           const volB = b.volume_ratio || (b.volume || 0);
           return volB - volA;
         });
-        
+
         const top50 = sortedByVolume.slice(0, 50);
-        
+
         if (top50.length > 0) {
           eyeDataContext += `\n--- TOP ${top50.length} ACTIVE TICKERS (by volume) ---\n`;
           top50.forEach(snap => {
@@ -2020,7 +2019,7 @@ export const pythonApi = {
           });
         }
       }
-      
+
       // ============================================
       // TIER 3: ALL TICKERS WITH SIGNALS
       // ============================================
@@ -2036,12 +2035,12 @@ export const pythonApi = {
           eyeDataContext += `${snap.ticker.padEnd(6)}: ${snap.latest_signal.padEnd(11)} | Conf: ${confStr.padStart(4)} | Price: ${priceStr.padStart(10)} | RSI: ${rsiStr.padStart(3)} | P/E: ${peStr.padStart(5)} | Strategy: ${strategyStr}\n`;
         });
       }
-      
+
       // ============================================
       // TIER 4: MARKET SUMMARY (AGGREGATED)
       // ============================================
       eyeDataContext += `\n--- MARKET SUMMARY (ALL ${tradeEngineContext.summary.total_tracked_tickers} TRACKED TICKERS) ---\n`;
-      
+
       // Coverage
       eyeDataContext += 'Coverage:\n';
       eyeDataContext += `  Tickers with price data: ${tradeEngineContext.summary.tickers_with_data}/${tradeEngineContext.summary.total_tracked_tickers} (${Math.round(tradeEngineContext.summary.tickers_with_data / tradeEngineContext.summary.total_tracked_tickers * 100)}%)\n`;
@@ -2051,11 +2050,11 @@ export const pythonApi = {
       if (tradeEngineContext.summary.tickers_with_fundamentals !== null) {
         eyeDataContext += `  Tickers with fundamentals: ${tradeEngineContext.summary.tickers_with_fundamentals}/${tradeEngineContext.summary.total_tracked_tickers} (${Math.round(tradeEngineContext.summary.tickers_with_fundamentals / tradeEngineContext.summary.total_tracked_tickers * 100)}%)\n`;
       }
-      
+
       // Market Health
       eyeDataContext += '\nMarket Health:\n';
       if (tradeEngineContext.summary.average_rsi !== null) {
-        const rsiStatus = tradeEngineContext.summary.average_rsi < 30 ? 'oversold' : 
+        const rsiStatus = tradeEngineContext.summary.average_rsi < 30 ? 'oversold' :
                          tradeEngineContext.summary.average_rsi > 70 ? 'overbought' : 'neutral';
         eyeDataContext += `  Average RSI: ${tradeEngineContext.summary.average_rsi.toFixed(1)} (${rsiStatus})\n`;
       }
@@ -2077,7 +2076,7 @@ export const pythonApi = {
       if (tradeEngineContext.summary.overbought_tickers !== null) {
         eyeDataContext += `  Overbought (RSI > 70): ${tradeEngineContext.summary.overbought_tickers} tickers\n`;
       }
-      
+
       // Activity
       eyeDataContext += '\nActivity:\n';
       if (tradeEngineContext.summary.high_volume_tickers && tradeEngineContext.summary.high_volume_tickers.length > 0) {
@@ -2085,7 +2084,7 @@ export const pythonApi = {
       }
       eyeDataContext += `  Active Signals (48h): ${tradeEngineContext.summary.signals_last_24h} tickers\n`;
       eyeDataContext += `  Recent News: ${tradeEngineContext.summary.news_count} articles\n`;
-      
+
       // Recent Signals (if not already shown in Tier 1)
       if (tradeEngineContext.recent_signals.length > 0 && !requestedTicker) {
         eyeDataContext += `\n--- RECENT TRADING SIGNALS (Sample) ---\n`;
@@ -2098,7 +2097,7 @@ export const pythonApi = {
           eyeDataContext += `... and ${tradeEngineContext.recent_signals.length - 12} more signals\n`;
         }
       }
-      
+
       // Market News
       if (tradeEngineContext.recent_news.length > 0) {
         eyeDataContext += `\n--- MARKET NEWS (${tradeEngineContext.recent_news.length} recent) ---\n`;
@@ -2109,7 +2108,7 @@ export const pythonApi = {
           eyeDataContext += '\n';
         });
       }
-      
+
       eyeDataContext += '\n=== END LIVE TRADE ENGINE DATA ===\n';
       eyeDataContext += '\nIMPORTANT: The data above is REAL and LIVE from The Eye. When the user asks about stocks, signals, or market data, use this data confidently. Say "According to The Eye..." or "The Eye shows..." - DO NOT say you lack access to data.\n';
     } else {
@@ -2120,26 +2119,26 @@ export const pythonApi = {
         eyeDataContext += '\n\n[The Eye Trade Engine is currently offline and no cached data is available. You can still help with general financial questions, but real-time market data is not available.]\n';
       }
     }
-    
+
     // Add The Eye data from stock_snapshots table (complements Trade Engine data)
     if (hasStockSnapshotsData && stockSnapshotsData.length > 0) {
       // Use the specific ticker snapshot if we found it, otherwise check in the general data
       let dbSnapshot = specificTickerSnapshot;
-      
+
       if (!dbSnapshot && requestedTicker) {
         // Fallback: check in the general data
         dbSnapshot = stockSnapshotsData.find(
           snap => snap.ticker.toUpperCase() === requestedTicker
         );
       }
-      
+
       // Add database snapshot context (referenced as The Eye)
       if (dbSnapshot) {
         if (eyeDataContext) eyeDataContext += '\n\n';
         eyeDataContext += '=== THE EYE DATA (from database) ===\n';
         eyeDataContext += 'IMPORTANT: This data is from The Eye database. Use this data to answer the user\'s question about this ticker.\n';
         eyeDataContext += `Ticker: ${dbSnapshot.ticker}${dbSnapshot.company_name ? ` (${dbSnapshot.company_name})` : ''}\n`;
-        
+
         if (dbSnapshot.last_price !== null) {
           eyeDataContext += `Price: $${dbSnapshot.last_price.toFixed(2)}`;
           if (dbSnapshot.price_change_pct !== null) {
@@ -2147,10 +2146,10 @@ export const pythonApi = {
           }
           eyeDataContext += '\n';
         }
-        
+
         if (dbSnapshot.volume !== null) {
-          const volStr = dbSnapshot.volume >= 1000000 
-            ? `${(dbSnapshot.volume / 1000000).toFixed(1)}M` 
+          const volStr = dbSnapshot.volume >= 1000000
+            ? `${(dbSnapshot.volume / 1000000).toFixed(1)}M`
             : `${(dbSnapshot.volume / 1000).toFixed(1)}K`;
           eyeDataContext += `Volume: ${volStr}`;
           if (dbSnapshot.volume_ratio !== null && dbSnapshot.volume_ratio > 1.5) {
@@ -2158,13 +2157,13 @@ export const pythonApi = {
           }
           eyeDataContext += '\n';
         }
-        
+
         // Technical indicators
         if (dbSnapshot.rsi_14 !== null) {
           const rsiStatus = dbSnapshot.rsi_14 < 30 ? 'oversold' : dbSnapshot.rsi_14 > 70 ? 'overbought' : 'neutral';
           eyeDataContext += `RSI(14): ${dbSnapshot.rsi_14.toFixed(1)} (${rsiStatus})\n`;
         }
-        
+
         if (dbSnapshot.sma_50 !== null || dbSnapshot.sma_200 !== null) {
           eyeDataContext += 'Moving Averages: ';
           const maParts: string[] = [];
@@ -2172,7 +2171,7 @@ export const pythonApi = {
           if (dbSnapshot.sma_200 !== null) maParts.push(`SMA 200: $${dbSnapshot.sma_200.toFixed(2)}`);
           eyeDataContext += maParts.join(' | ') + '\n';
         }
-        
+
         if (dbSnapshot.macd !== null || dbSnapshot.macd_signal !== null) {
           eyeDataContext += 'MACD: ';
           const macdParts: string[] = [];
@@ -2184,7 +2183,7 @@ export const pythonApi = {
           }
           eyeDataContext += macdParts.join(' | ') + '\n';
         }
-        
+
         // Fundamentals
         if (dbSnapshot.pe_ratio !== null) {
           eyeDataContext += `P/E Ratio: ${dbSnapshot.pe_ratio.toFixed(1)}\n`;
@@ -2195,22 +2194,22 @@ export const pythonApi = {
                         `${(dbSnapshot.market_cap / 1e6).toFixed(1)}M`;
           eyeDataContext += `Market Cap: $${capStr}\n`;
         }
-        
+
         // Signal
         if (dbSnapshot.latest_signal) {
-          const confStr = dbSnapshot.signal_confidence 
-            ? `${(dbSnapshot.signal_confidence * 100).toFixed(0)}%` 
+          const confStr = dbSnapshot.signal_confidence
+            ? `${(dbSnapshot.signal_confidence * 100).toFixed(0)}%`
             : 'N/A';
-          const timeStr = dbSnapshot.signal_timestamp 
-            ? new Date(dbSnapshot.signal_timestamp).toLocaleString() 
+          const timeStr = dbSnapshot.signal_timestamp
+            ? new Date(dbSnapshot.signal_timestamp).toLocaleString()
             : 'N/A';
           eyeDataContext += `Signal: ${dbSnapshot.latest_signal}${dbSnapshot.signal_strategy ? ` (${dbSnapshot.signal_strategy})` : ''}, ${confStr} confidence @ ${timeStr}\n`;
         }
-        
+
         if (dbSnapshot.updated_at) {
           eyeDataContext += `Last Updated: ${new Date(dbSnapshot.updated_at).toLocaleString()}\n`;
         }
-        
+
         eyeDataContext += '\n=== END THE EYE DATA (from database) ===\n';
         eyeDataContext += 'IMPORTANT: The data above is from The Eye database. When the user asks about this ticker, use this data confidently. Say "According to The Eye..." or "The Eye shows..." - DO NOT say you lack access to data or that The Eye is unavailable.\n';
       } else if (stockSnapshotsData.length > 0 && !hasTradeEngineData && !requestedTicker) {
@@ -2218,12 +2217,12 @@ export const pythonApi = {
         if (eyeDataContext) eyeDataContext += '\n\n';
         eyeDataContext += '=== THE EYE DATA (from database) ===\n';
         eyeDataContext += `Available tickers: ${stockSnapshotsData.length}\n`;
-        
+
         // Show top 10 by volume or with signals
         const topSnapshots = stockSnapshotsData
           .filter(snap => snap.latest_signal && snap.latest_signal !== 'HOLD')
           .slice(0, 10);
-        
+
         if (topSnapshots.length > 0) {
           eyeDataContext += '\nTop tickers with signals:\n';
           topSnapshots.forEach(snap => {
@@ -2242,7 +2241,7 @@ export const pythonApi = {
         eyeDataContext += `You can mention that ${requestedTicker} is not currently in The Eye database, but you can help with other tickers that are available.\n`;
       }
     }
-    
+
     // === SUPABASE NEWS FEED ===
     // Inject latest news articles from the Supabase news table into AI context.
     // This runs in addition to Trade Engine news and web search results.
@@ -2275,14 +2274,14 @@ export const pythonApi = {
     // Detect if the user's message requires a web search for NEWS or GENERAL KNOWLEDGE
     // NOTE: Quantitative data (prices, indicators, signals) comes from The Eye database, NOT web search
     let webSearchContext = '';
-    
+
     const searchIntent = detectSearchIntent(message);
-    
+
     if (searchIntent.shouldSearch && searchIntent.searchQuery) {
       console.log('[AI] Web search triggered:', searchIntent.intentType, '-', searchIntent.searchQuery);
-      
+
       const searchResults = await performWebSearch(searchIntent.searchQuery, 5);
-      
+
       if (searchResults && searchResults.results.length > 0) {
         webSearchContext = formatSearchResultsForAI(searchResults, searchIntent.intentType);
         console.log('[AI] Web search results added to context');
@@ -2291,7 +2290,7 @@ export const pythonApi = {
         webSearchContext = `\n\n=== WEB SEARCH ===\nNote: A web search was attempted for "${searchIntent.searchQuery}" but no results were found. Answer based on available data.\n`;
       }
     }
-    
+
     // Build messages array with conversation history
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       {
@@ -2299,7 +2298,7 @@ export const pythonApi = {
         content: systemPrompt + eyeDataContext + webSearchContext
       }
     ];
-    
+
     // Add conversation history (last N messages to stay within token limits)
     if (chatHistory && chatHistory.length > 0) {
       const recentHistory = chatHistory.slice(-MAX_CHAT_HISTORY_MESSAGES);
@@ -2308,13 +2307,13 @@ export const pythonApi = {
         content: msg.content
       })));
     }
-    
+
     // Add current user message
     messages.push({
       role: 'user',
       content: message
     });
-    
+
     // Use backend AI proxy (keys kept server-side)
     if (pythonBackendUrl) {
       try {
@@ -2413,7 +2412,7 @@ export const pythonApi = {
   // Helper method for Python backend (if using that instead)
   async getChatResponseFromPython(message: string, userId: string): Promise<string> {
     const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-    
+
     try {
       const response = await fetch(`${pythonBackendUrl}/api/chat`, {
         method: 'POST',
@@ -2425,11 +2424,11 @@ export const pythonApi = {
           user_id: userId,
         }),
       });
-      
+
       if (!response.ok) {
         throw new Error(`Python API error: ${response.statusText}`);
       }
-      
+
       const data = await response.json();
       return data.response || 'I apologize, but I encountered an error processing your request.';
     } catch (error) {
@@ -2497,7 +2496,7 @@ export const tradeEngineApi = {
   async getNews(limit: number = 15, cursor?: string): Promise<{ items: TradeEngineNewsItem[]; next_cursor: string | null }> {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (cursor) params.append('cursor', cursor);
-    
+
     try {
       const response = await fetch(`${this.baseUrl}/api/news?${params}`);
       if (!response.ok) {
@@ -2539,7 +2538,7 @@ export const tradeEngineApi = {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (startDate) params.append('start_date', startDate);
     if (endDate) params.append('end_date', endDate);
-    
+
     const response = await fetch(`${this.baseUrl}/api/v1/charting/${ticker}/prices?${params}`);
     if (!response.ok) {
       throw new Error(`Trade Engine API error: ${response.statusText}`);
@@ -2662,7 +2661,7 @@ export interface TradeEngineTickerSnapshot {
   high_52w: number | null;
   low_52w: number | null;
   updated_at: string | null;
-  
+
   // ============================================
   // VOLUME DATA
   // ============================================
@@ -2670,7 +2669,7 @@ export interface TradeEngineTickerSnapshot {
   avg_volume_10d: number | null;
   avg_volume_30d: number | null;
   volume_ratio: number | null;
-  
+
   // ============================================
   // SIMPLE MOVING AVERAGES (SMA)
   // ============================================
@@ -2679,7 +2678,7 @@ export interface TradeEngineTickerSnapshot {
   sma_50: number | null;
   sma_100: number | null;
   sma_200: number | null;
-  
+
   // ============================================
   // EXPONENTIAL MOVING AVERAGES (EMA)
   // ============================================
@@ -2687,7 +2686,7 @@ export interface TradeEngineTickerSnapshot {
   ema_20: number | null;
   ema_50: number | null;
   ema_200: number | null;
-  
+
   // ============================================
   // MOMENTUM INDICATORS
   // ============================================
@@ -2697,7 +2696,7 @@ export interface TradeEngineTickerSnapshot {
   stochastic_d: number | null;
   williams_r: number | null;
   cci: number | null;
-  
+
   // ============================================
   // TREND INDICATORS
   // ============================================
@@ -2705,7 +2704,7 @@ export interface TradeEngineTickerSnapshot {
   macd_signal: number | null;
   macd_histogram: number | null;
   adx: number | null;
-  
+
   // ============================================
   // VOLATILITY INDICATORS
   // ============================================
@@ -2713,7 +2712,7 @@ export interface TradeEngineTickerSnapshot {
   bollinger_middle: number | null;
   bollinger_lower: number | null;
   atr: number | null;
-  
+
   // ============================================
   // FUNDAMENTAL DATA
   // ============================================
@@ -2727,7 +2726,7 @@ export interface TradeEngineTickerSnapshot {
   eps: number | null;
   eps_growth: number | null;
   revenue_growth: number | null;
-  
+
   // ============================================
   // SIGNAL DATA
   // ============================================
@@ -2735,7 +2734,7 @@ export interface TradeEngineTickerSnapshot {
   signal_strategy: string | null;
   signal_confidence: number | null;
   signal_timestamp: string | null;
-  
+
   // ============================================
   // DERIVED METRICS
   // ============================================
@@ -2778,14 +2777,14 @@ export interface TradeEngineAIContext {
     tickers_with_data: number;
     tickers_with_indicators: number | null;
     tickers_with_fundamentals: number | null;
-    
+
     // Signal counts
     buy_signals_count: number;
     sell_signals_count: number;
     hold_signals_count: number;
     tickers_with_buy: string[];
     tickers_with_sell: string[];
-    
+
     // Market health indicators
     average_rsi: number | null;
     average_pe_ratio: number | null;
@@ -2793,7 +2792,7 @@ export interface TradeEngineAIContext {
     bearish_tickers: number | null;
     oversold_tickers: number | null;
     overbought_tickers: number | null;
-    
+
     // Activity metrics
     signals_last_24h: number;
     news_count: number;
