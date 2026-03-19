@@ -4,7 +4,18 @@
 
 export interface Database {
   public: {
-    Tables: Record<string, never>;
+    Tables: {
+      chats: {
+        Row: { id: string; user_id: string; title: string | null; created_at: string | null; updated_at: string | null };
+        Insert: { id?: string; user_id: string; title?: string | null; created_at?: string | null; updated_at?: string | null };
+        Update: { id?: string; user_id?: string; title?: string | null; created_at?: string | null; updated_at?: string | null };
+      };
+      chat_messages: {
+        Row: { id: string; user_id: string; role: string; content: string; created_at: string | null; chat_id: string | null };
+        Insert: { id?: string; user_id: string; role: string; content: string; created_at?: string | null; chat_id?: string | null };
+        Update: { id?: string; user_id?: string; role?: string; content?: string; created_at?: string | null; chat_id?: string | null };
+      };
+    };
   };
   academy: {
     Tables: {
