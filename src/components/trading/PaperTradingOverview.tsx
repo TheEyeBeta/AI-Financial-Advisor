@@ -6,7 +6,12 @@ import { useTradeEngineConnection, useTradeEnginePrices } from "@/hooks/use-trad
 import { cn } from "@/lib/utils";
 
 function formatCurrency(value: number) {
-  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const absoluteValue = Math.abs(value).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+
+  return `${value < 0 ? '-' : ''}$${absoluteValue}`;
 }
 
 export function PaperTradingOverview() {
@@ -14,11 +19,12 @@ export function PaperTradingOverview() {
   const { data: trades = [] } = useClosedTrades();
   const { data: portfolioHistory = [] } = usePortfolioHistory();
   const { isConnected, isConnecting } = useTradeEngineConnection();
-  const livePrices = useTradeEnginePrices(positions.map((position) => position.symbol));
+  const livePrices = useTradeEnginePrices(positions.map((position) => position.symbol.toUpperCase()));
 
   const summary = useMemo(() => {
     const markedPositions = positions.map((position) => {
-      const livePrice = livePrices[position.symbol.toUpperCase()]?.price ?? position.current_price ?? position.entry_price;
+      const normalizedSymbol = position.symbol.toUpperCase();
+      const livePrice = livePrices[normalizedSymbol]?.price ?? position.current_price ?? position.entry_price;
       return {
         ...position,
         markedPrice: livePrice,
@@ -57,14 +63,14 @@ export function PaperTradingOverview() {
     },
     {
       label: 'Total Return',
-      value: `${summary.totalReturn >= 0 ? '+' : ''}${formatCurrency(summary.totalReturn)}`,
+      value: formatCurrency(summary.totalReturn),
       helper: `${summary.totalReturnPct >= 0 ? '+' : ''}${summary.totalReturnPct.toFixed(2)}% vs starting basis`,
       icon: LineChart,
       accent: summary.totalReturn >= 0 ? 'text-profit' : 'text-loss',
     },
     {
       label: 'P&L Split',
-      value: `${summary.realizedPnL >= 0 ? '+' : ''}${formatCurrency(summary.realizedPnL)} / ${summary.unrealizedPnL >= 0 ? '+' : ''}${formatCurrency(summary.unrealizedPnL)}`,
+      value: `${formatCurrency(summary.realizedPnL)} / ${formatCurrency(summary.unrealizedPnL)}`,
       helper: 'Realized / Unrealized',
       icon: Activity,
     },

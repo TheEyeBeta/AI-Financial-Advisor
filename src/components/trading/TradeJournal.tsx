@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useTradeJournal, useCreateJournalEntry, useOpenPositions } from "@/hooks/use-data";
+import { useCreateJournalEntry } from "@/hooks/use-data";
 import { positionsApi, tradesApi } from "@/services/api";
 import { useAuth } from "@/hooks/use-auth";
 import { format, parseISO } from "date-fns";
@@ -21,6 +21,7 @@ import { useForm, Controller } from "react-hook-form";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { cn } from "@/lib/utils";
+import type { OpenPosition, TradeJournalEntry } from "@/types/database";
 
 interface JournalFormData {
   symbol: string;
@@ -35,11 +36,17 @@ interface JournalFormData {
 
 interface TradeJournalProps {
   mode?: 'workspace' | 'journal';
+  journalEntries?: TradeJournalEntry[];
+  isJournalLoading?: boolean;
+  openPositions?: OpenPosition[];
 }
 
-export function TradeJournal({ mode = 'workspace' }: TradeJournalProps) {
-  const { data: journalEntries = [], isLoading } = useTradeJournal();
-  const { data: openPositions = [] } = useOpenPositions();
+export function TradeJournal({
+  mode = 'workspace',
+  journalEntries = [],
+  isJournalLoading = false,
+  openPositions = [],
+}: TradeJournalProps) {
   const createEntry = useCreateJournalEntry();
   const { userId } = useAuth();
   const [showForm, setShowForm] = useState(mode === 'workspace');
@@ -319,7 +326,7 @@ export function TradeJournal({ mode = 'workspace' }: TradeJournalProps) {
       )}
 
       {/* Journal Entries */}
-      {mode === "workspace" ? null : isLoading ? (
+      {mode === "workspace" ? null : isJournalLoading ? (
         <div className="space-y-2">
           {[1, 2].map((i) => (
             <div key={i} className="h-24 bg-muted/30 rounded-xl animate-pulse" />

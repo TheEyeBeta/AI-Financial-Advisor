@@ -2,8 +2,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PerformanceCharts } from "@/components/trading/PerformanceCharts";
 import { TradeHistory } from "@/components/trading/TradeHistory";
 import { TradeJournal } from "@/components/trading/TradeJournal";
+import type { OpenPosition, TradeJournalEntry } from "@/types/database";
 
-export function TradingReviewTabs() {
+interface TradingReviewTabsProps {
+  journalEntries: TradeJournalEntry[];
+  isJournalLoading: boolean;
+  openPositions: OpenPosition[];
+}
+
+export function TradingReviewTabs({
+  journalEntries,
+  isJournalLoading,
+  openPositions,
+}: TradingReviewTabsProps) {
   return (
     <Tabs defaultValue="performance" className="space-y-4">
       <TabsList className="grid w-full grid-cols-3 lg:w-auto">
@@ -19,7 +30,12 @@ export function TradingReviewTabs() {
         <TradeHistory />
       </TabsContent>
       <TabsContent value="journal" className="space-y-4">
-        <TradeJournal mode="journal" />
+        <TradeJournal
+          mode="journal"
+          journalEntries={journalEntries}
+          isJournalLoading={isJournalLoading}
+          openPositions={openPositions}
+        />
       </TabsContent>
     </Tabs>
   );

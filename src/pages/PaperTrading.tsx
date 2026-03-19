@@ -6,9 +6,12 @@ import { PaperTradingOverview } from "@/components/trading/PaperTradingOverview"
 import { TradingReviewTabs } from "@/components/trading/TradingReviewTabs";
 import { TradeEngineStatus } from "@/components/trading/TradeEngineStatus";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useOpenPositions, useTradeJournal } from "@/hooks/use-data";
 
 const PaperTrading = () => {
   const { userProfile } = useAuth();
+  const { data: journalEntries = [], isLoading: isJournalLoading } = useTradeJournal();
+  const { data: openPositions = [] } = useOpenPositions();
   const heading = userProfile?.first_name
     ? `${userProfile.first_name}, run your paper trading desk`
     : "Run your paper trading desk";
@@ -27,12 +30,15 @@ const PaperTrading = () => {
           <TradeEngineStatus compact showSignals={false} />
         </div>
 
-        <div className={sectionAnimation} style={{ animationDelay: '50ms' }}>
+        <div className={sectionAnimation} style={{ animationDelay: "50ms" }}>
           <PaperTradingOverview />
         </div>
 
         <div className="grid gap-4 grid-cols-1 xl:grid-cols-[1.05fr_1.4fr]">
-          <Card className={`${sectionAnimation} border-border/50 bg-card/50 backdrop-blur-sm`} style={{ animationDelay: '100ms' }}>
+          <Card
+            className={`${sectionAnimation} border-border/50 bg-card/50 backdrop-blur-sm`}
+            style={{ animationDelay: "100ms" }}
+          >
             <CardHeader className="pb-3">
               <CardTitle className="text-base">Trade Ticket</CardTitle>
               <p className="text-sm text-muted-foreground">
@@ -40,23 +46,32 @@ const PaperTrading = () => {
               </p>
             </CardHeader>
             <CardContent>
-              <TradeJournal mode="workspace" />
+              <TradeJournal
+                mode="workspace"
+                journalEntries={journalEntries}
+                isJournalLoading={isJournalLoading}
+                openPositions={openPositions}
+              />
             </CardContent>
           </Card>
 
-          <div className={sectionAnimation} style={{ animationDelay: '150ms' }}>
+          <div className={sectionAnimation} style={{ animationDelay: "150ms" }}>
             <OpenPositions />
           </div>
         </div>
 
-        <section className={`${sectionAnimation} space-y-3`} style={{ animationDelay: '200ms' }}>
+        <section className={`${sectionAnimation} space-y-3`} style={{ animationDelay: "200ms" }}>
           <div>
             <h2 className="text-lg font-semibold">Review & Learn</h2>
             <p className="text-sm text-muted-foreground">
               Analyze performance, inspect execution history, and revisit your trade journal in one place.
             </p>
           </div>
-          <TradingReviewTabs />
+          <TradingReviewTabs
+            journalEntries={journalEntries}
+            isJournalLoading={isJournalLoading}
+            openPositions={openPositions}
+          />
         </section>
       </div>
     </AppLayout>
