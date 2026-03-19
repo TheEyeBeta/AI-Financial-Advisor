@@ -493,9 +493,14 @@ function fromAiChatMessages() {
 
 /**
  * Returns true when a Supabase/PostgREST error indicates that the table or
- * schema is not accessible (404 Not Found, 400 schema-not-in-search-path,
- * or PostgreSQL error 42P01 undefined_table).  In those cases callers should
- * treat the result as empty rather than propagating a hard error.
+ * schema is not accessible.  This covers:
+ *   - 404: table/schema not found OR role missing GRANT USAGE/SELECT on schema
+ *   - 400 with "schema" in message: schema not in PostgREST search path
+ *   - PostgreSQL 42P01: undefined_table
+ *   - PostgreSQL 42501: insufficient_privilege (missing GRANT on table/schema)
+ *
+ * In all these cases callers should treat the result as empty or throw a
+ * user-friendly error rather than propagating the raw Supabase error.
  */
 function isSchemaOrTableNotFound(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
@@ -503,8 +508,13 @@ function isSchemaOrTableNotFound(error: unknown): boolean {
   if (e.status === 404) return true;
   if (e.status === 400 && e.message?.includes('schema')) return true;
   if (e.code === '42P01') return true; // PostgreSQL: undefined_table
+  if (e.code === '42501') return true; // PostgreSQL: insufficient_privilege (missing GRANT)
   return false;
 }
+
+const CHAT_SETUP_ERROR =
+  'Chat is unavailable: the ai schema is missing required GRANT permissions. ' +
+  'Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor to fix this.';
 
 async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
   const { data: chats, error: chatsError } = await fromAiChats()
@@ -514,7 +524,7 @@ async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
 
   if (chatsError) {
     if (isSchemaOrTableNotFound(chatsError)) {
-      console.warn('ai.chats table not accessible (404). The table may not exist yet — run sql/create_ai_chat_tables.sql in the Supabase SQL Editor to create it. Returning empty chat list.');
+      console.warn('ai.chats returned 404. The table exists and the schema is exposed, so the likely cause is missing GRANT permissions — run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning empty chat list.');
       return [];
     }
     throw chatsError;
@@ -529,7 +539,7 @@ async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
 
   if (messagesError) {
     if (isSchemaOrTableNotFound(messagesError)) {
-      console.warn('ai.chat_messages table not accessible (404). Run sql/create_ai_chat_tables.sql in the Supabase SQL Editor. Returning chats without messages.');
+      console.warn('ai.chat_messages returned 404 — missing GRANT permissions. Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning chats without messages.');
       return chats.map(chat => ({ ...chat, messages: [], messageCount: 0, lastMessage: undefined }));
     }
     throw messagesError;
@@ -557,7 +567,7 @@ async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
 
   if (error) {
     if (isSchemaOrTableNotFound(error)) {
-      console.warn('ai.chat_messages table not accessible (404). Run sql/create_ai_chat_tables.sql in the Supabase SQL Editor. Returning empty message list.');
+      console.warn('ai.chat_messages returned 404 — missing GRANT permissions. Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning empty message list.');
       return [];
     }
     throw error;
@@ -582,7 +592,10 @@ export const chatsApi = {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (isSchemaOrTableNotFound(error)) throw new Error(CHAT_SETUP_ERROR);
+      throw error;
+    }
     return data;
   },
 
@@ -596,7 +609,10 @@ export const chatsApi = {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (isSchemaOrTableNotFound(error)) throw new Error(CHAT_SETUP_ERROR);
+      throw error;
+    }
     return data;
   },
 
@@ -677,7 +693,10 @@ export const chatApi = {
       .select()
       .single();
 
-    if (error) throw error;
+    if (error) {
+      if (isSchemaOrTableNotFound(error)) throw new Error(CHAT_SETUP_ERROR);
+      throw error;
+    }
 
     // Update chat's updated_at timestamp
     const { error: updateChatError } = await fromAiChats()
