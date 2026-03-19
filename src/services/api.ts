@@ -491,13 +491,34 @@ function fromAiChatMessages() {
   return aiDb.from('chat_messages');
 }
 
+/**
+ * Returns true when a Supabase/PostgREST error indicates that the table or
+ * schema is not accessible (404 Not Found, 400 schema-not-in-search-path,
+ * or PostgreSQL error 42P01 undefined_table).  In those cases callers should
+ * treat the result as empty rather than propagating a hard error.
+ */
+function isSchemaOrTableNotFound(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const e = error as { status?: number; code?: string; message?: string };
+  if (e.status === 404) return true;
+  if (e.status === 400 && e.message?.includes('schema')) return true;
+  if (e.code === '42P01') return true; // PostgreSQL: undefined_table
+  return false;
+}
+
 async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
   const { data: chats, error: chatsError } = await fromAiChats()
     .select('*')
     .eq('user_id', userId)
     .order('updated_at', { ascending: false });
 
-  if (chatsError) throw chatsError;
+  if (chatsError) {
+    if (isSchemaOrTableNotFound(chatsError)) {
+      console.warn('ai.chats table not accessible (404). Ensure the "ai" schema is added to Supabase Exposed Schemas. Returning empty chat list.');
+      return [];
+    }
+    throw chatsError;
+  }
   if (!Array.isArray(chats) || chats.length === 0) return [];
 
   const chatIds = chats.map(c => c.id);
@@ -506,7 +527,13 @@ async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
     .in('chat_id', chatIds)
     .order('created_at', { ascending: false });
 
-  if (messagesError) throw messagesError;
+  if (messagesError) {
+    if (isSchemaOrTableNotFound(messagesError)) {
+      console.warn('ai.chat_messages table not accessible (404). Returning chats without messages.');
+      return chats.map(chat => ({ ...chat, messages: [], messageCount: 0, lastMessage: undefined }));
+    }
+    throw messagesError;
+  }
 
   const messagesByChat = (messages || []).reduce((acc, msg) => {
     if (!acc[msg.chat_id!]) acc[msg.chat_id!] = [];
@@ -528,7 +555,13 @@ async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
 
-  if (error) throw error;
+  if (error) {
+    if (isSchemaOrTableNotFound(error)) {
+      console.warn('ai.chat_messages table not accessible (404). Returning empty message list.');
+      return [];
+    }
+    throw error;
+  }
   return data || [];
 }
 
@@ -583,7 +616,10 @@ export const chatsApi = {
       .eq('id', chatId)
       .maybeSingle();
 
-    if (chatError) throw chatError;
+    if (chatError) {
+      if (isSchemaOrTableNotFound(chatError)) return null;
+      throw chatError;
+    }
     if (!chat) return null;
 
     const { data: messages, error: messagesError } = await fromAiChatMessages()
@@ -591,7 +627,12 @@ export const chatsApi = {
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
 
-    if (messagesError) throw messagesError;
+    if (messagesError) {
+      if (isSchemaOrTableNotFound(messagesError)) {
+        return { ...chat, messages: [], messageCount: 0, lastMessage: undefined };
+      }
+      throw messagesError;
+    }
 
     return {
       ...chat,
@@ -610,7 +651,10 @@ export const chatApi = {
       .eq('chat_id', chatId)
       .order('created_at', { ascending: true });
 
-    if (error) throw error;
+    if (error) {
+      if (isSchemaOrTableNotFound(error)) return [];
+      throw error;
+    }
     return data || [];
   },
 
