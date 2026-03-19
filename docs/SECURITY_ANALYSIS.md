@@ -267,7 +267,7 @@ This tells an attacker: (a) the service uses OpenAI, (b) the env var name.
 client queries without admin-scope policies. The queries return data scoped to the
 admin's own rows only (because RLS filters by `auth.uid()`), but the admin UI
 presents these as "total platform stats" — misleading but not a security issue.
-**Real risk:** The `fetchUsers()` query returns ALL users from `public.users`. The
+**Real risk:** The `fetchUsers()` query returns ALL users from `core.users`. The
 `is_current_user_admin()` check in the SELECT policy allows this. An attacker who
 gains admin (via RF-004) gets a full user roster with names and emails.
 **Mitigation (RF-004 already closed):** Add backend-enforced admin verification.
@@ -441,7 +441,7 @@ Recommended improvements:
 ### 6.2 Critical Misconfigurations (Pre-Fix)
 
 **MC-001: users INSERT policy is `WITH CHECK (true)`**
-Any anonymous or authenticated client can insert rows into `public.users` with
+Any anonymous or authenticated client can insert rows into `core.users` with
 arbitrary values including `userType='Admin'`. The policy name says "Service role"
 but the condition is unrestricted.
 
@@ -484,7 +484,7 @@ fallback is a synchronous Supabase REST call per request — slower and adds lat
 ### 6.6 handle_new_user() SECURITY DEFINER Trigger
 
 The trigger fires on every `auth.users` INSERT or UPDATE and copies
-`raw_user_meta_data` fields directly into `public.users`. An attacker who controls
+`raw_user_meta_data` fields directly into `core.users`. An attacker who controls
 their own `raw_user_meta_data` during signup could inject:
 - `experience_level`: constrained by enum — safe
 - `risk_level`: constrained by enum — safe
@@ -498,13 +498,13 @@ as long as `dangerouslySetInnerHTML` is never used with these fields.
 
 ### 6.7 Multi-Tenant Isolation
 
-All user-scoped tables use `user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())`.
+All user-scoped tables use `user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid())`.
 This subquery pattern is correct but has a subtle performance and security consideration:
 if the `users` table is large, the subquery runs on every policy evaluation. Use
 a function or direct comparison for clarity and index efficiency:
 ```sql
 -- More efficient alternative:
-USING (user_id = (SELECT id FROM public.users WHERE auth_id = auth.uid() LIMIT 1))
+USING (user_id = (SELECT id FROM core.users WHERE auth_id = auth.uid() LIMIT 1))
 ```
 
 ### 6.8 Backups
@@ -626,7 +626,7 @@ Supabase provides point-in-time recovery on Pro plans. Verify:
 - [ ] Use an expired JWT
 
 #### Broken access control / IDOR
-- [ ] Query `public.users` for another user's row via anon key
+- [ ] Query `core.users` for another user's row via anon key
 - [ ] Read another user's `chats`, `chat_messages`, `trades`
 - [ ] Update another user's profile
 - [ ] Attempt `userType` self-promotion via direct Supabase SDK call
@@ -655,7 +655,7 @@ Supabase provides point-in-time recovery on Pro plans. Verify:
 - [ ] Attempt admin promotion via `/admin` toggleAdminStatus as a regular user
 
 #### Mass scraping
-- [ ] Enumerate user IDs by querying `public.users` with anon key
+- [ ] Enumerate user IDs by querying `core.users` with anon key
 - [ ] Scrape all `public.news` and `public.stock_snapshots` without auth
 
 #### Malicious file upload
