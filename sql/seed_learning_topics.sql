@@ -6,7 +6,7 @@
 -- ============================================================
 
 -- Example: Get your user_id first
--- SELECT id FROM public.users WHERE auth_id = auth.uid();
+-- SELECT id FROM core.users WHERE auth_id = auth.uid();
 
 -- Insert sample learning topics (replace YOUR_USER_ID with actual user_id)
 -- You can run this in Supabase SQL Editor after getting your user_id
@@ -26,6 +26,6 @@ VALUES
 ON CONFLICT (user_id, topic_name) DO NOTHING;
 
 -- To get your user_id, run this first:
--- SELECT id, first_name, email FROM public.users WHERE auth_id = auth.uid();
+-- SELECT id, first_name, email FROM core.users WHERE auth_id = auth.uid();
 
 -- Then replace 'YOUR_USER_ID' above with the id from the query result
