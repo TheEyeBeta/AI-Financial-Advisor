@@ -514,7 +514,7 @@ async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
 
   if (chatsError) {
     if (isSchemaOrTableNotFound(chatsError)) {
-      console.warn('ai.chats table not accessible (404). Ensure the "ai" schema is added to Supabase Exposed Schemas. Returning empty chat list.');
+      console.warn('ai.chats table not accessible (404). The table may not exist yet — run sql/create_ai_chat_tables.sql in the Supabase SQL Editor to create it. Returning empty chat list.');
       return [];
     }
     throw chatsError;
@@ -529,7 +529,7 @@ async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
 
   if (messagesError) {
     if (isSchemaOrTableNotFound(messagesError)) {
-      console.warn('ai.chat_messages table not accessible (404). Returning chats without messages.');
+      console.warn('ai.chat_messages table not accessible (404). Run sql/create_ai_chat_tables.sql in the Supabase SQL Editor. Returning chats without messages.');
       return chats.map(chat => ({ ...chat, messages: [], messageCount: 0, lastMessage: undefined }));
     }
     throw messagesError;
@@ -557,7 +557,7 @@ async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
 
   if (error) {
     if (isSchemaOrTableNotFound(error)) {
-      console.warn('ai.chat_messages table not accessible (404). Returning empty message list.');
+      console.warn('ai.chat_messages table not accessible (404). Run sql/create_ai_chat_tables.sql in the Supabase SQL Editor. Returning empty message list.');
       return [];
     }
     throw error;
