@@ -1,4 +1,4 @@
-import { supabase } from '@/lib/supabase';
+import { aiDb, supabase } from '@/lib/supabase';
 import type { PostgrestFilterBuilder } from '@supabase/postgrest-js';
 import type {
   PortfolioHistory,
@@ -484,11 +484,11 @@ function normalizeChatTitle(title?: string): string {
 }
 
 function fromAiChats() {
-  return supabase.from('chats');
+  return aiDb.from('chats');
 }
 
 function fromAiChatMessages() {
-  return supabase.from('chat_messages');
+  return aiDb.from('chat_messages');
 }
 
 /**

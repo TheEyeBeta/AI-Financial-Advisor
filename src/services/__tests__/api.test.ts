@@ -309,9 +309,9 @@ describe('chatsApi', () => {
     });
   });
 
-  describe('public schema access', () => {
-    it('loads chats and messages from public.chats and public.chat_messages', async () => {
-      const chats = createChainableMock({
+  describe('ai schema access', () => {
+    it('loads chats and messages from ai.chats and ai.chat_messages only', async () => {
+      const aiChats = createChainableMock({
         data: [
           {
             id: 'chat-ai',
@@ -323,7 +323,7 @@ describe('chatsApi', () => {
         ],
         error: null,
       });
-      const messages = createChainableMock({
+      const aiMessages = createChainableMock({
         data: [
           {
             id: 'msg-ai',
@@ -337,22 +337,23 @@ describe('chatsApi', () => {
         error: null,
       });
 
-      mockChainsByTable['chats'] = chats;
-      mockChainsByTable['chat_messages'] = messages;
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = aiChats;
+      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = aiMessages;
 
       const result = await chatsApi.getAll('user-123');
 
-      expect(chats.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(aiChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('chat-ai');
       expect(result[0].lastMessage?.id).toBe('msg-ai');
+      expect(mockSchemaChainsBySchemaAndTable['public.chats']).toBeUndefined();
     });
 
     it('returns null when a chat does not exist', async () => {
       const missingChat = createChainableMock({ data: null, error: null });
       missingChat.maybeSingle = vi.fn().mockResolvedValue({ data: null, error: null });
 
-      mockChainsByTable['chats'] = missingChat;
+      mockSchemaChainsBySchemaAndTable['ai.chats'] = missingChat;
 
       const result = await chatsApi.getWithMessages('missing-chat');
 
@@ -360,8 +361,8 @@ describe('chatsApi', () => {
       expect(result).toBeNull();
     });
 
-    it('returns all user messages from public.chat_messages in ascending order', async () => {
-      const messages = createChainableMock({
+    it('returns all user messages from ai.chat_messages in ascending order', async () => {
+      const aiMessages = createChainableMock({
         data: [
           {
             id: 'msg-100',
@@ -383,12 +384,13 @@ describe('chatsApi', () => {
         error: null,
       });
 
-      mockChainsByTable['chat_messages'] = messages;
+      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = aiMessages;
 
       const result = await chatApi.getAllUserMessages('user-123');
 
-      expect(messages.eq).toHaveBeenCalledWith('user_id', 'user-123');
+      expect(aiMessages.eq).toHaveBeenCalledWith('user_id', 'user-123');
       expect(result.map((message) => message.id)).toEqual(['msg-100', 'msg-200']);
+      expect(mockSchemaChainsBySchemaAndTable['public.chat_messages']).toBeUndefined();
     });
   });
 });

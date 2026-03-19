@@ -66,8 +66,8 @@ CREATE TABLE IF NOT EXISTS core.users (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Chats table (conversation sessions) - in public schema for PostgREST accessibility
-CREATE TABLE IF NOT EXISTS public.chats (
+-- Chats table (conversation sessions)
+CREATE TABLE IF NOT EXISTS ai.chats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     title TEXT DEFAULT 'New Chat',
@@ -75,11 +75,11 @@ CREATE TABLE IF NOT EXISTS public.chats (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Chat Messages (AI Advisor conversations) - in public schema for PostgREST accessibility
-CREATE TABLE IF NOT EXISTS public.chat_messages (
+-- Chat Messages (AI Advisor conversations)
+CREATE TABLE IF NOT EXISTS ai.chat_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
-    chat_id UUID REFERENCES public.chats(id) ON DELETE CASCADE,
+    chat_id UUID REFERENCES ai.chats(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
