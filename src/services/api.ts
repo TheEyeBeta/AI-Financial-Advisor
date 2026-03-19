@@ -13,7 +13,6 @@ import type {
   MarketIndex,
   TrendingStock,
   NewsArticle,
-  LegacyNewsArticle,
   StockSnapshot,
 } from '@/types/database';
 
@@ -661,138 +660,104 @@ export const chatApi = {
 // Learning API
 export const learningApi = {
   async getTopics(userId: string): Promise<LearningTopic[]> {
-    const { data, error } = await supabase
-      .schema('core')
-      .from('learning_topics')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true });
+    const [{ data: lessons, error: lessonsError }, { data: progressRows, error: progressError }] = await Promise.all([
+      supabase
+        .schema('academy')
+        .from('lessons')
+        .select('id, tier_id, title, order_index, created_at, updated_at')
+        .eq('is_published', true)
+        .order('order_index', { ascending: true }),
+      supabase
+        .schema('academy')
+        .from('user_lesson_progress')
+        .select('lesson_id, status, best_quiz_score, last_opened_at, completed_at')
+        .eq('user_id', userId),
+    ]);
 
-    if (error) throw error;
-    return data || [];
+    if (lessonsError) throw lessonsError;
+    if (progressError) throw progressError;
+
+    const progressByLesson = new Map((progressRows || []).map((row) => [row.lesson_id, row]));
+
+    return (lessons || []).map((lesson) => {
+      const progress = progressByLesson.get(lesson.id);
+      const completed = progress?.status === 'completed';
+      const derivedProgress = completed
+        ? 100
+        : progress?.status === 'in_progress'
+          ? Math.max(5, Math.min(95, Math.round(Number(progress?.best_quiz_score ?? 0))))
+          : 0;
+
+      return {
+        id: lesson.id,
+        user_id: userId,
+        topic_name: lesson.title,
+        progress: derivedProgress,
+        completed,
+        created_at: lesson.created_at ?? null,
+        updated_at: lesson.updated_at ?? progress?.last_opened_at ?? progress?.completed_at ?? null,
+        lesson_id: lesson.id,
+        tier_id: lesson.tier_id ?? null,
+      };
+    });
   },
 
   async updateProgress(userId: string, topicName: string, progress: number, completed?: boolean): Promise<LearningTopic> {
-    const { data, error } = await supabase
-      .schema('core')
-      .from('learning_topics')
+    const { data: lesson, error: lessonError } = await supabase
+      .schema('academy')
+      .from('lessons')
+      .select('id, tier_id, title, created_at, updated_at')
+      .eq('title', topicName)
+      .maybeSingle();
+
+    if (lessonError) throw lessonError;
+    if (!lesson) throw new Error(`No academy lesson found for topic "${topicName}".`);
+
+    const { data: existingProgress, error: existingProgressError } = await supabase
+      .schema('academy')
+      .from('user_lesson_progress')
+      .select('id, best_quiz_score, completed_at')
+      .eq('user_id', userId)
+      .eq('lesson_id', lesson.id)
+      .maybeSingle();
+
+    if (existingProgressError) throw existingProgressError;
+
+    const normalizedProgress = Math.max(0, Math.min(100, progress));
+    const status = completed ?? normalizedProgress >= 100 ? 'completed' : normalizedProgress > 0 ? 'in_progress' : 'not_started';
+    const timestamp = new Date().toISOString();
+
+    const { error: upsertError } = await supabase
+      .schema('academy')
+      .from('user_lesson_progress')
       .upsert({
         user_id: userId,
-        topic_name: topicName,
-        progress,
-        completed: completed ?? progress === 100,
-      })
-      .select()
-      .single();
+        lesson_id: lesson.id,
+        status,
+        best_quiz_score: existingProgress?.best_quiz_score ?? null,
+        last_opened_at: timestamp,
+        completed_at: status === 'completed'
+          ? existingProgress?.completed_at ?? timestamp
+          : null,
+      }, { onConflict: 'user_id,lesson_id' });
 
-    if (error) throw error;
-    return data;
+    if (upsertError) throw upsertError;
+
+    return {
+      id: lesson.id,
+      user_id: userId,
+      topic_name: lesson.title,
+      progress: status === 'completed' ? 100 : normalizedProgress,
+      completed: status === 'completed',
+      created_at: lesson.created_at ?? null,
+      updated_at: timestamp,
+      lesson_id: lesson.id,
+      tier_id: lesson.tier_id ?? null,
+    };
   },
 
-  async initializeTopics(userId: string, experienceLevel: 'beginner' | 'intermediate' | 'advanced' = 'beginner'): Promise<LearningTopic[]> {
-    // Beginner topics (from curriculum)
-    const beginnerTopics = [
-      'What Does Finance Actually Do?',
-      'Time is Money: The Power of Compounding',
-      'The Big 4 Asset Classes',
-      'Risk vs. Return: The Golden Rule',
-      'Diversification: Don\'t Put All Eggs in One Basket',
-      'Stocks 101: Owning a Piece of a Company',
-      'Bonds 101: Lending Your Money',
-      'Funds, ETFs & Managed Products',
-      'Reading a Company\'s Report Card',
-      'Inflation & Real Returns',
-      'Fees & Costs: The Silent Killer',
-      'Your First Portfolio: Asset Allocation Basics',
-    ];
-
-    // Intermediate topics (sample)
-    const intermediateTopics = [
-      'Statistics for Investors',
-      'Expected Return & Risk Modeling',
-      'Sharpe Ratio & Risk-Adjusted Returns',
-      'How Financial Markets Work',
-      'Macroeconomics & Your Portfolio',
-      'Stock Valuation: Multiples & Ratios',
-      'Strategic Asset Allocation',
-      'Rebalancing & Portfolio Maintenance',
-    ];
-
-    // Advanced topics (sample)
-    const advancedTopics = [
-      'Advanced Financial Statement Analysis',
-      'Building a 3-Statement Model',
-      'Comprehensive DCF Valuation',
-      'Advanced Portfolio Theory',
-      'Risk Budgeting & Risk Parity',
-      'Derivatives Pricing & Hedging',
-    ];
-
-    // Select topics based on experience level
-    const topics = experienceLevel === 'advanced'
-      ? advancedTopics
-      : experienceLevel === 'intermediate'
-      ? intermediateTopics
-      : beginnerTopics;
-
-    // Get existing topics to avoid duplicates
-    const { data: existingTopics, error: fetchError } = await supabase
-      .schema('core')
-      .from('learning_topics')
-      .select('topic_name')
-      .eq('user_id', userId);
-
-    if (fetchError) {
-      console.warn('Error fetching existing topics:', fetchError);
-    }
-
-    const existingTopicNames = new Set(existingTopics?.map(t => t.topic_name) || []);
-
-    // Only insert topics that don't already exist
-    const topicsToInsert = topics
-      .filter(topicName => !existingTopicNames.has(topicName))
-      .map(topicName => ({
-        user_id: userId,
-        topic_name: topicName,
-        progress: 0,
-        completed: false,
-      }));
-
-    // If no new topics to insert, return existing ones
-    if (topicsToInsert.length === 0) {
-      const { data: allTopics, error: selectError } = await supabase
-        .schema('core')
-        .from('learning_topics')
-        .select('*')
-        .eq('user_id', userId)
-        .order('created_at', { ascending: true });
-
-      if (selectError) throw selectError;
-      return allTopics || [];
-    }
-
-    // Insert only new topics (no upsert needed since we filtered duplicates)
-    const { error } = await supabase
-      .schema('core')
-      .from('learning_topics')
-      .insert(topicsToInsert)
-      .select();
-
-    if (error) {
-      console.error('Error inserting learning topics:', error);
-      throw error;
-    }
-
-    // Return all topics (existing + newly inserted)
-    const { data: allTopics, error: selectError } = await supabase
-      .schema('core')
-      .from('learning_topics')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: true });
-
-    if (selectError) throw selectError;
-    return allTopics || [];
+  async initializeTopics(userId: string): Promise<LearningTopic[]> {
+    return this.getTopics(userId);
   },
 };
 
@@ -850,40 +815,6 @@ export const marketApi = {
 };
 
 // News API - for financial news articles
-const MISSING_RELATION_ERROR_CODE = '42P01';
-
-function isMissingNewsTableError(error: { code?: string; message?: string } | null): boolean {
-  if (!error) return false;
-  if (error.code === MISSING_RELATION_ERROR_CODE) return true;
-  return /public\.news|relation .*news/i.test(error.message ?? '');
-}
-
-function mapLegacyNewsArticle(article: LegacyNewsArticle): NewsArticle {
-  return {
-    id: article.id,
-    title: article.title,
-    summary: article.summary,
-    link: article.link,
-    provider: article.source,
-    published_at: article.published_at,
-    created_at: article.created_at,
-    updated_at: article.updated_at,
-  };
-}
-
-async function fetchLegacyNews(limit?: number): Promise<NewsArticle[]> {
-  const query = supabase
-    .schema('market')
-    .from('news_articles')
-    .select('*')
-    .order('published_at', { ascending: false });
-
-  const { data, error } = typeof limit === 'number' ? await query.limit(limit) : await query;
-
-  if (error) throw error;
-  return (data || []).map(mapLegacyNewsArticle);
-}
-
 /**
  * Score a news article by financial importance.
  * Higher score = more market-moving / significant.
@@ -958,12 +889,7 @@ export const newsApi = {
       .order('published_at', { ascending: false })
       .limit(limit);
 
-    if (error) {
-      if (isMissingNewsTableError(error)) {
-        return fetchLegacyNews(limit);
-      }
-      throw error;
-    }
+    if (error) throw error;
 
     return data || [];
   },
@@ -975,12 +901,7 @@ export const newsApi = {
       .select('*')
       .order('published_at', { ascending: false });
 
-    if (error) {
-      if (isMissingNewsTableError(error)) {
-        return fetchLegacyNews();
-      }
-      throw error;
-    }
+    if (error) throw error;
 
     return data || [];
   },
@@ -997,14 +918,7 @@ export const newsApi = {
       .order('published_at', { ascending: false })
       .limit(limit);
 
-    if (error) {
-      if (isMissingNewsTableError(error)) {
-        // Fallback: fetch legacy table and filter client-side
-        const all = await fetchLegacyNews(limit);
-        return all.filter(a => a.published_at >= since);
-      }
-      throw error;
-    }
+    if (error) throw error;
 
     return data || [];
   },
@@ -2502,7 +2416,7 @@ export const tradeEngineApi = {
       if (!response.ok) {
         // If endpoint doesn't exist or returns error, return empty results
         // News should come from Supabase instead
-        console.warn('News endpoint not available, using Supabase news_articles table instead');
+        console.warn('News endpoint not available, using Supabase news table instead');
         return { items: [], next_cursor: null };
       }
       const data = await response.json();

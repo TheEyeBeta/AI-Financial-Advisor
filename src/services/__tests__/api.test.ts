@@ -5,6 +5,7 @@ import {
   chatApi,
   portfolioApi,
   newsApi,
+  learningApi,
 } from '../api';
 
 // Mock supabase with a more robust mock
@@ -440,6 +441,63 @@ describe('portfolioApi', () => {
   });
 });
 
+
+describe('learningApi', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('updateProgress', () => {
+    it('preserves existing best quiz score when manual progress changes', async () => {
+      const lessonChain = createChainableMock({
+        data: {
+          id: 'lesson-1',
+          tier_id: 'tier-1',
+          title: 'Topic 1',
+          created_at: '2026-03-01T00:00:00.000Z',
+          updated_at: '2026-03-02T00:00:00.000Z',
+        },
+        error: null,
+      });
+      const progressChain = createChainableMock({
+        data: {
+          id: 'progress-1',
+          best_quiz_score: 85,
+          completed_at: '2026-03-03T00:00:00.000Z',
+        },
+        error: null,
+      });
+      progressChain.maybeSingle = vi.fn().mockResolvedValue({
+        data: {
+          id: 'progress-1',
+          best_quiz_score: 85,
+          completed_at: '2026-03-03T00:00:00.000Z',
+        },
+        error: null,
+      });
+      progressChain.upsert = vi.fn().mockReturnThis();
+
+      mockSchemaChainsBySchemaAndTable = {
+        'academy.lessons': lessonChain,
+        'academy.user_lesson_progress': progressChain,
+      };
+
+      await learningApi.updateProgress('user-123', 'Topic 1', 100, true);
+
+      expect(progressChain.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: 'user-123',
+          lesson_id: 'lesson-1',
+          status: 'completed',
+          best_quiz_score: 85,
+          completed_at: '2026-03-03T00:00:00.000Z',
+        }),
+        { onConflict: 'user_id,lesson_id' },
+      );
+    });
+  });
+});
+
 describe('newsApi', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -471,48 +529,17 @@ describe('newsApi', () => {
       expect(result).toEqual(canonicalRows);
     });
 
-    it('falls back to legacy news_articles when canonical table is missing', async () => {
+    it('throws when the canonical news table is missing', async () => {
       const missingTableError = {
         code: '42P01',
         message: 'relation "public.news" does not exist',
       };
 
       const canonicalChain = createChainableMock({ data: null, error: missingTableError });
-      const legacyRows = [
-        {
-          id: 'legacy-1',
-          title: 'Earnings beat expectations',
-          summary: 'Quarterly earnings summary',
-          link: 'https://example.com/earnings',
-          source: 'Bloomberg',
-          published_at: '2026-02-28T09:00:00.000Z',
-          created_at: '2026-02-28T09:00:00.000Z',
-          updated_at: '2026-02-28T09:00:00.000Z',
-        },
-      ];
-      const legacyChain = createChainableMock({ data: legacyRows, error: null });
+      mockChainsByTable = { news: canonicalChain };
 
-      mockChainsByTable = {
-        news: canonicalChain,
-        news_articles: legacyChain,
-      };
-
-      const result = await newsApi.getLatest(3);
-
+      await expect(newsApi.getLatest(3)).rejects.toMatchObject(missingTableError);
       expect(canonicalChain.limit).toHaveBeenCalledWith(3);
-      expect(legacyChain.limit).toHaveBeenCalledWith(3);
-      expect(result).toEqual([
-        {
-          id: 'legacy-1',
-          title: 'Earnings beat expectations',
-          summary: 'Quarterly earnings summary',
-          link: 'https://example.com/earnings',
-          provider: 'Bloomberg',
-          published_at: '2026-02-28T09:00:00.000Z',
-          created_at: '2026-02-28T09:00:00.000Z',
-          updated_at: '2026-02-28T09:00:00.000Z',
-        },
-      ]);
     });
   });
 });
