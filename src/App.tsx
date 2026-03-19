@@ -27,7 +27,18 @@ import { healthCheck } from "@/services/healthCheck";
 import { analytics } from "@/services/analytics";
 import { AnalyticsPageTracker } from "@/components/AnalyticsPageTracker";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Do not retry on 4xx errors — they are permanent (table not found, auth errors, etc.)
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number; code?: number })?.status;
+        if (status !== undefined && status >= 400 && status < 500) return false;
+        return failureCount < 2;
+      },
+    },
+  },
+});
 
 const App = () => {
   useEffect(() => {
