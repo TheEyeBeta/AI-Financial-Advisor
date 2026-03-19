@@ -713,6 +713,16 @@ export const learningApi = {
     if (lessonError) throw lessonError;
     if (!lesson) throw new Error(`No academy lesson found for topic "${topicName}".`);
 
+    const { data: existingProgress, error: existingProgressError } = await supabase
+      .schema('academy')
+      .from('user_lesson_progress')
+      .select('id, best_quiz_score, completed_at')
+      .eq('user_id', userId)
+      .eq('lesson_id', lesson.id)
+      .maybeSingle();
+
+    if (existingProgressError) throw existingProgressError;
+
     const normalizedProgress = Math.max(0, Math.min(100, progress));
     const status = completed ?? normalizedProgress >= 100 ? 'completed' : normalizedProgress > 0 ? 'in_progress' : 'not_started';
     const timestamp = new Date().toISOString();
@@ -724,9 +734,11 @@ export const learningApi = {
         user_id: userId,
         lesson_id: lesson.id,
         status,
-        best_quiz_score: status === 'completed' ? normalizedProgress : null,
+        best_quiz_score: existingProgress?.best_quiz_score ?? null,
         last_opened_at: timestamp,
-        completed_at: status === 'completed' ? timestamp : null,
+        completed_at: status === 'completed'
+          ? existingProgress?.completed_at ?? timestamp
+          : null,
       }, { onConflict: 'user_id,lesson_id' });
 
     if (upsertError) throw upsertError;

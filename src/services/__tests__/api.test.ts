@@ -5,6 +5,7 @@ import {
   chatApi,
   portfolioApi,
   newsApi,
+  learningApi,
 } from '../api';
 
 // Mock supabase with a more robust mock
@@ -436,6 +437,63 @@ describe('portfolioApi', () => {
         value: 12000,
       });
       expect(result).toEqual(mockEntry);
+    });
+  });
+});
+
+
+describe('learningApi', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('updateProgress', () => {
+    it('preserves existing best quiz score when manual progress changes', async () => {
+      const lessonChain = createChainableMock({
+        data: {
+          id: 'lesson-1',
+          tier_id: 'tier-1',
+          title: 'Topic 1',
+          created_at: '2026-03-01T00:00:00.000Z',
+          updated_at: '2026-03-02T00:00:00.000Z',
+        },
+        error: null,
+      });
+      const progressChain = createChainableMock({
+        data: {
+          id: 'progress-1',
+          best_quiz_score: 85,
+          completed_at: '2026-03-03T00:00:00.000Z',
+        },
+        error: null,
+      });
+      progressChain.maybeSingle = vi.fn().mockResolvedValue({
+        data: {
+          id: 'progress-1',
+          best_quiz_score: 85,
+          completed_at: '2026-03-03T00:00:00.000Z',
+        },
+        error: null,
+      });
+      progressChain.upsert = vi.fn().mockReturnThis();
+
+      mockSchemaChainsBySchemaAndTable = {
+        'academy.lessons': lessonChain,
+        'academy.user_lesson_progress': progressChain,
+      };
+
+      await learningApi.updateProgress('user-123', 'Topic 1', 100, true);
+
+      expect(progressChain.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: 'user-123',
+          lesson_id: 'lesson-1',
+          status: 'completed',
+          best_quiz_score: 85,
+          completed_at: '2026-03-03T00:00:00.000Z',
+        }),
+        { onConflict: 'user_id,lesson_id' },
+      );
     });
   });
 });
