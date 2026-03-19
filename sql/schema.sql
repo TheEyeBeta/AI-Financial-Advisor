@@ -21,8 +21,6 @@ CREATE SCHEMA IF NOT EXISTS ai;
 CREATE SCHEMA IF NOT EXISTS core;
 CREATE SCHEMA IF NOT EXISTS trading;
 CREATE SCHEMA IF NOT EXISTS market;
-CREATE SCHEMA IF NOT EXISTS academy;
-CREATE SCHEMA IF NOT EXISTS meridian;
 
 -- ============================================================
 -- ENUM Types
