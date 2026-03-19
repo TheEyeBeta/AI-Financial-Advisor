@@ -33,12 +33,16 @@ interface JournalFormData {
   tags: string;
 }
 
-export function TradeJournal() {
+interface TradeJournalProps {
+  mode?: 'workspace' | 'journal';
+}
+
+export function TradeJournal({ mode = 'workspace' }: TradeJournalProps) {
   const { data: journalEntries = [], isLoading } = useTradeJournal();
   const { data: openPositions = [] } = useOpenPositions();
   const createEntry = useCreateJournalEntry();
   const { userId } = useAuth();
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(mode === 'workspace');
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<JournalFormData>({
     defaultValues: {
       type: 'BUY',
@@ -189,7 +193,7 @@ export function TradeJournal() {
           className="h-8 text-xs gap-1.5"
         >
           {showForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-          {showForm ? 'Cancel' : 'Log Trade'}
+          {showForm ? 'Cancel' : mode === 'workspace' ? 'Place Trade' : 'Log Trade'}
         </Button>
       </div>
 
@@ -315,7 +319,7 @@ export function TradeJournal() {
       )}
 
       {/* Journal Entries */}
-      {isLoading ? (
+      {mode === "workspace" ? null : isLoading ? (
         <div className="space-y-2">
           {[1, 2].map((i) => (
             <div key={i} className="h-24 bg-muted/30 rounded-xl animate-pulse" />
