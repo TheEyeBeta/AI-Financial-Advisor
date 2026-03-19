@@ -7,7 +7,7 @@
 -- 1. Privilege escalation via users UPDATE (missing WITH CHECK)
 --    A regular user could update their own userType to 'Admin'.
 -- 2. Overly permissive users INSERT policy — allows any anon/authed
---    user to insert arbitrary rows into public.users.
+--    user to insert arbitrary rows into core.users.
 -- 3. Overly permissive news INSERT/UPDATE/DELETE policy.
 -- ============================================================
 
@@ -23,10 +23,10 @@
 --   - Normal users cannot change their own userType.
 --   - Only admins can change userType on any row.
 
-DROP POLICY IF EXISTS "Users can update profiles" ON public.users;
+DROP POLICY IF EXISTS "Users can update profiles" ON core.users;
 
 CREATE POLICY "Users can update profiles"
-ON public.users FOR UPDATE
+ON core.users FOR UPDATE
 USING (
   -- Who can target a row for update:
   auth_id = auth.uid()             -- own row
@@ -38,7 +38,7 @@ WITH CHECK (
     -- Regular users updating their own row: userType must remain unchanged.
     auth_id = auth.uid()
     AND NOT public.is_current_user_admin()
-    AND "userType" = (SELECT "userType" FROM public.users WHERE auth_id = auth.uid())
+    AND "userType" = (SELECT "userType" FROM core.users WHERE auth_id = auth.uid())
   )
   OR
   -- Admins may change any column on any row.
@@ -57,7 +57,7 @@ WITH CHECK (
 -- The handle_new_user() trigger runs as SECURITY DEFINER and bypasses RLS,
 -- so legitimate inserts still work. This policy prevents client-side abuse.
 
-DROP POLICY IF EXISTS "Service role can insert user profiles" ON public.users;
+DROP POLICY IF EXISTS "Service role can insert user profiles" ON core.users;
 
 -- No INSERT policy for authenticated/anon roles.
 -- The handle_new_user() SECURITY DEFINER trigger handles all inserts.
@@ -118,7 +118,7 @@ DROP POLICY IF EXISTS "Authenticated users can delete stock snapshots" ON public
 -- FIX 8: Achievements — Prevent users from self-awarding achievements
 -- ============================================================
 -- The current policy allows users to INSERT their own achievements with
--- WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())).
+-- WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid())).
 -- This means users can award themselves any achievement.
 -- If achievements should only be awarded by the backend/admin, drop the policy.
 --

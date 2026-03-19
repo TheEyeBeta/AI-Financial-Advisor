@@ -11,6 +11,9 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Ensure application schemas exist
 CREATE SCHEMA IF NOT EXISTS ai;
+CREATE SCHEMA IF NOT EXISTS core;
+CREATE SCHEMA IF NOT EXISTS trading;
+CREATE SCHEMA IF NOT EXISTS market;
 
 -- ============================================================
 -- ENUM Types
@@ -37,7 +40,7 @@ END $$;
 -- ============================================================
 
 -- Users table (extends Supabase auth.users via auth_id)
-CREATE TABLE IF NOT EXISTS public.users (
+CREATE TABLE IF NOT EXISTS core.users (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     auth_id UUID NOT NULL UNIQUE REFERENCES auth.users(id) ON DELETE CASCADE,
     first_name TEXT,
@@ -59,7 +62,7 @@ CREATE TABLE IF NOT EXISTS public.users (
 -- Chats table (conversation sessions)
 CREATE TABLE IF NOT EXISTS ai.chats (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     title TEXT DEFAULT 'New Chat',
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -68,7 +71,7 @@ CREATE TABLE IF NOT EXISTS ai.chats (
 -- Chat Messages (AI Advisor conversations)
 CREATE TABLE IF NOT EXISTS ai.chat_messages (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     chat_id UUID REFERENCES ai.chats(id) ON DELETE CASCADE,
     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
     content TEXT NOT NULL,
@@ -78,7 +81,7 @@ CREATE TABLE IF NOT EXISTS ai.chat_messages (
 -- Portfolio Performance History
 CREATE TABLE IF NOT EXISTS public.portfolio_history (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     date DATE NOT NULL,
     value DECIMAL(12, 2) NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -88,7 +91,7 @@ CREATE TABLE IF NOT EXISTS public.portfolio_history (
 -- Open Positions (Active trades)
 CREATE TABLE IF NOT EXISTS public.open_positions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     symbol TEXT NOT NULL,
     name TEXT,
     quantity INTEGER NOT NULL,
@@ -103,7 +106,7 @@ CREATE TABLE IF NOT EXISTS public.open_positions (
 -- Trade History (Closed trades)
 CREATE TABLE IF NOT EXISTS public.trades (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     symbol TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('LONG', 'SHORT')),
     action TEXT NOT NULL CHECK (action IN ('OPENED', 'CLOSED')),
@@ -120,7 +123,7 @@ CREATE TABLE IF NOT EXISTS public.trades (
 -- Trade Journal (Detailed trade notes and strategy)
 CREATE TABLE IF NOT EXISTS public.trade_journal (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     trade_id UUID REFERENCES public.trades(id) ON DELETE SET NULL,
     symbol TEXT NOT NULL,
     type TEXT NOT NULL CHECK (type IN ('BUY', 'SELL')),
@@ -137,7 +140,7 @@ CREATE TABLE IF NOT EXISTS public.trade_journal (
 -- Learning Progress
 CREATE TABLE IF NOT EXISTS public.learning_topics (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     topic_name TEXT NOT NULL,
     progress INTEGER NOT NULL CHECK (progress >= 0 AND progress <= 100) DEFAULT 0,
     completed BOOLEAN DEFAULT FALSE,
@@ -149,7 +152,7 @@ CREATE TABLE IF NOT EXISTS public.learning_topics (
 -- Achievements
 CREATE TABLE IF NOT EXISTS public.achievements (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
     icon TEXT,
     unlocked_at TIMESTAMPTZ DEFAULT NOW(),
@@ -216,7 +219,7 @@ ON CONFLICT (link) DO NOTHING;
 -- The Eye Trade Engine Snapshots
 CREATE TABLE IF NOT EXISTS public.eye_snapshots (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     snapshot_name TEXT,
     snapshot_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     portfolio_value DECIMAL(12, 2),
@@ -306,7 +309,7 @@ CREATE TABLE IF NOT EXISTS public.stock_snapshots (
 -- Indexes
 -- ============================================================
 
-CREATE INDEX IF NOT EXISTS idx_users_auth_id ON public.users(auth_id);
+CREATE INDEX IF NOT EXISTS idx_users_auth_id ON core.users(auth_id);
 CREATE INDEX IF NOT EXISTS idx_chats_user_id ON ai.chats(user_id);
 CREATE INDEX IF NOT EXISTS idx_chats_updated_at ON ai.chats(updated_at DESC);
 CREATE INDEX IF NOT EXISTS idx_chat_messages_chat_id ON ai.chat_messages(chat_id);
@@ -328,7 +331,7 @@ CREATE INDEX IF NOT EXISTS idx_eye_snapshots_user_active ON public.eye_snapshots
 -- Row Level Security (RLS)
 -- ============================================================
 
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE core.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai.chats ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ai.chat_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.portfolio_history ENABLE ROW LEVEL SECURITY;
@@ -360,8 +363,8 @@ SECURITY DEFINER
 STABLE
 AS $$
   SELECT EXISTS (
-    SELECT 1 FROM public.users 
-    WHERE auth_id = auth.uid() 
+    SELECT 1 FROM core.users
+    WHERE auth_id = auth.uid()
     AND "userType" = 'Admin'
   );
 $$;
@@ -379,7 +382,7 @@ $$ language 'plpgsql';
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
 BEGIN
-    INSERT INTO public.users (auth_id, first_name, last_name, age, email, experience_level, risk_level, is_verified, email_verified_at, onboarding_complete)
+    INSERT INTO core.users (auth_id, first_name, last_name, age, email, experience_level, risk_level, is_verified, email_verified_at, onboarding_complete)
     VALUES (
         NEW.id,
         COALESCE((NEW.raw_user_meta_data->>'first_name')::TEXT, NULL),
@@ -393,11 +396,11 @@ BEGIN
         FALSE  -- New users must complete onboarding
     )
     ON CONFLICT (auth_id) DO UPDATE SET
-        email = COALESCE(EXCLUDED.email, public.users.email),
-        is_verified = COALESCE(NEW.email_confirmed_at IS NOT NULL, public.users.is_verified),
-        email_verified_at = COALESCE(NEW.email_confirmed_at, public.users.email_verified_at),
+        email = COALESCE(EXCLUDED.email, core.users.email),
+        is_verified = COALESCE(NEW.email_confirmed_at IS NOT NULL, core.users.is_verified),
+        email_verified_at = COALESCE(NEW.email_confirmed_at, core.users.email_verified_at),
         updated_at = NOW();
-    
+
     RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
     RAISE LOG 'Error in handle_new_user: %', SQLERRM;
@@ -426,15 +429,15 @@ $$ LANGUAGE plpgsql;
 -- ============================================================
 
 -- Users policies (with admin support)
-DROP POLICY IF EXISTS "Users can view own profile" ON public.users;
-DROP POLICY IF EXISTS "Users can view profiles" ON public.users;
-DROP POLICY IF EXISTS "Users can update own profile" ON public.users;
-DROP POLICY IF EXISTS "Users can update profiles" ON public.users;
-DROP POLICY IF EXISTS "Admins can delete users" ON public.users;
-DROP POLICY IF EXISTS "Service role can insert user profiles" ON public.users;
+DROP POLICY IF EXISTS "Users can view own profile" ON core.users;
+DROP POLICY IF EXISTS "Users can view profiles" ON core.users;
+DROP POLICY IF EXISTS "Users can update own profile" ON core.users;
+DROP POLICY IF EXISTS "Users can update profiles" ON core.users;
+DROP POLICY IF EXISTS "Admins can delete users" ON core.users;
+DROP POLICY IF EXISTS "Service role can insert user profiles" ON core.users;
 
 CREATE POLICY "Users can view profiles"
-ON public.users FOR SELECT
+ON core.users FOR SELECT
 USING (
   auth_id = auth.uid()
   OR
@@ -442,7 +445,7 @@ USING (
 );
 
 CREATE POLICY "Users can update profiles"
-ON public.users FOR UPDATE
+ON core.users FOR UPDATE
 USING (
   auth_id = auth.uid()
   OR
@@ -450,14 +453,14 @@ USING (
 );
 
 CREATE POLICY "Admins can delete users"
-ON public.users FOR DELETE
+ON core.users FOR DELETE
 USING (
   public.is_current_user_admin()
   AND auth_id != auth.uid()
 );
 
 CREATE POLICY "Service role can insert user profiles"
-ON public.users FOR INSERT
+ON core.users FOR INSERT
 WITH CHECK (true);
 
 -- Chats policies
@@ -468,20 +471,20 @@ DROP POLICY IF EXISTS "Users can delete own chats" ON ai.chats;
 
 CREATE POLICY "Users can view own chats"
 ON ai.chats FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can create own chats"
 ON ai.chats FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own chats"
 ON ai.chats FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()))
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()))
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can delete own chats"
 ON ai.chats FOR DELETE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Chat Messages policies
 DROP POLICY IF EXISTS "Users can view own chat messages" ON ai.chat_messages;
@@ -490,26 +493,26 @@ DROP POLICY IF EXISTS "Users can delete own chat messages" ON ai.chat_messages;
 
 CREATE POLICY "Users can view own chat messages"
 ON ai.chat_messages FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own chat messages"
 ON ai.chat_messages FOR INSERT
 WITH CHECK (
-    user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+    user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid())
     AND (
         chat_id IS NULL
         OR EXISTS (
             SELECT 1
             FROM ai.chats
             WHERE ai.chats.id = chat_id
-              AND ai.chats.user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid())
+              AND ai.chats.user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid())
         )
     )
 );
 
 CREATE POLICY "Users can delete own chat messages"
 ON ai.chat_messages FOR DELETE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Portfolio History policies
 DROP POLICY IF EXISTS "Users can view own portfolio history" ON public.portfolio_history;
@@ -518,15 +521,15 @@ DROP POLICY IF EXISTS "Users can update own portfolio history" ON public.portfol
 
 CREATE POLICY "Users can view own portfolio history"
 ON public.portfolio_history FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own portfolio history"
 ON public.portfolio_history FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own portfolio history"
 ON public.portfolio_history FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Open Positions policies
 DROP POLICY IF EXISTS "Users can view own positions" ON public.open_positions;
@@ -536,19 +539,19 @@ DROP POLICY IF EXISTS "Users can delete own positions" ON public.open_positions;
 
 CREATE POLICY "Users can view own positions"
 ON public.open_positions FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own positions"
 ON public.open_positions FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own positions"
 ON public.open_positions FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can delete own positions"
 ON public.open_positions FOR DELETE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Trades policies
 DROP POLICY IF EXISTS "Users can view own trades" ON public.trades;
@@ -557,15 +560,15 @@ DROP POLICY IF EXISTS "Users can update own trades" ON public.trades;
 
 CREATE POLICY "Users can view own trades"
 ON public.trades FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own trades"
 ON public.trades FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own trades"
 ON public.trades FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Trade Journal policies
 DROP POLICY IF EXISTS "Users can view own journal" ON public.trade_journal;
@@ -575,19 +578,19 @@ DROP POLICY IF EXISTS "Users can delete own journal entries" ON public.trade_jou
 
 CREATE POLICY "Users can view own journal"
 ON public.trade_journal FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own journal entries"
 ON public.trade_journal FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own journal entries"
 ON public.trade_journal FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can delete own journal entries"
 ON public.trade_journal FOR DELETE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Learning Topics policies
 DROP POLICY IF EXISTS "Users can view own learning topics" ON public.learning_topics;
@@ -596,15 +599,15 @@ DROP POLICY IF EXISTS "Users can update own learning topics" ON public.learning_
 
 CREATE POLICY "Users can view own learning topics"
 ON public.learning_topics FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own learning topics"
 ON public.learning_topics FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own learning topics"
 ON public.learning_topics FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Achievements policies
 DROP POLICY IF EXISTS "Users can view own achievements" ON public.achievements;
@@ -612,11 +615,11 @@ DROP POLICY IF EXISTS "Users can insert own achievements" ON public.achievements
 
 CREATE POLICY "Users can view own achievements"
 ON public.achievements FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own achievements"
 ON public.achievements FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Market data is public read
 DROP POLICY IF EXISTS "Anyone can view market indices" ON public.market_indices;
@@ -654,28 +657,28 @@ DROP POLICY IF EXISTS "Users can delete their own eye snapshots" ON public.eye_s
 
 CREATE POLICY "Users can view their own eye snapshots"
 ON public.eye_snapshots FOR SELECT
-USING (auth.uid() IN (SELECT auth_id FROM public.users WHERE id = user_id));
+USING (auth.uid() IN (SELECT auth_id FROM core.users WHERE id = user_id));
 
 CREATE POLICY "Users can insert their own eye snapshots"
 ON public.eye_snapshots FOR INSERT
-WITH CHECK (auth.uid() IN (SELECT auth_id FROM public.users WHERE id = user_id));
+WITH CHECK (auth.uid() IN (SELECT auth_id FROM core.users WHERE id = user_id));
 
 CREATE POLICY "Users can update their own eye snapshots"
 ON public.eye_snapshots FOR UPDATE
-USING (auth.uid() IN (SELECT auth_id FROM public.users WHERE id = user_id));
+USING (auth.uid() IN (SELECT auth_id FROM core.users WHERE id = user_id));
 
 CREATE POLICY "Users can delete their own eye snapshots"
 ON public.eye_snapshots FOR DELETE
-USING (auth.uid() IN (SELECT auth_id FROM public.users WHERE id = user_id));
+USING (auth.uid() IN (SELECT auth_id FROM core.users WHERE id = user_id));
 
 -- ============================================================
 -- Triggers
 -- ============================================================
 
 -- Updated_at triggers
-DROP TRIGGER IF EXISTS update_users_updated_at ON public.users;
+DROP TRIGGER IF EXISTS update_users_updated_at ON core.users;
 CREATE TRIGGER update_users_updated_at
-    BEFORE UPDATE ON public.users
+    BEFORE UPDATE ON core.users
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_chats_updated_at ON ai.chats;

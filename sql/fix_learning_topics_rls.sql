@@ -12,22 +12,22 @@ DROP POLICY IF EXISTS "Users can update own learning topics" ON public.learning_
 -- Recreate policies with proper WITH CHECK clauses for upsert support
 CREATE POLICY "Users can view own learning topics"
 ON public.learning_topics FOR SELECT
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can insert own learning topics"
 ON public.learning_topics FOR INSERT
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 CREATE POLICY "Users can update own learning topics"
 ON public.learning_topics FOR UPDATE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()))
-WITH CHECK (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()))
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Optional: Add DELETE policy if needed
 DROP POLICY IF EXISTS "Users can delete own learning topics" ON public.learning_topics;
 CREATE POLICY "Users can delete own learning topics"
 ON public.learning_topics FOR DELETE
-USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Verify policies
 SELECT 

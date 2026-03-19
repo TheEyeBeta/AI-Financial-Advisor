@@ -179,7 +179,7 @@ User progress tracking per module
 ```sql
 CREATE TABLE public.user_module_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_id UUID NOT NULL REFERENCES public.learning_modules(id) ON DELETE CASCADE,
     progress_percent INTEGER NOT NULL DEFAULT 0 CHECK (progress_percent >= 0 AND progress_percent <= 100),
     started_at TIMESTAMPTZ,
@@ -223,7 +223,7 @@ User quiz attempt tracking
 ```sql
 CREATE TABLE public.quiz_attempts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_id UUID NOT NULL REFERENCES public.learning_modules(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES public.quiz_questions(id) ON DELETE CASCADE,
     selected_answer_index INTEGER NOT NULL,
@@ -264,7 +264,7 @@ User badge unlocks (extends existing achievements table)
 
 CREATE TABLE public.user_badges (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     badge_id UUID NOT NULL REFERENCES public.learning_badges(id) ON DELETE CASCADE,
     unlocked_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, badge_id)
@@ -280,7 +280,7 @@ Stored recommendations for users (cache)
 ```sql
 CREATE TABLE public.module_recommendations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_id UUID NOT NULL REFERENCES public.learning_modules(id) ON DELETE CASCADE,
     recommendation_score DECIMAL(5,2) NOT NULL, -- 0.00 to 100.00
     recommendation_reason TEXT,                  -- Why this was recommended
@@ -310,19 +310,19 @@ CREATE POLICY "Admins can manage modules" ON public.learning_modules FOR ALL USI
 -- User progress: users see only their own
 ALTER TABLE public.user_module_progress ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users view own progress" ON public.user_module_progress FOR SELECT
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 CREATE POLICY "Users update own progress" ON public.user_module_progress FOR ALL
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Quiz attempts: users see only their own
 ALTER TABLE public.quiz_attempts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own quiz attempts" ON public.quiz_attempts FOR ALL
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Recommendations: users see only their own
 ALTER TABLE public.module_recommendations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users view own recommendations" ON public.module_recommendations FOR SELECT
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 ```
 
 ---
@@ -1100,7 +1100,7 @@ CREATE INDEX idx_module_blocks_type ON public.module_blocks(block_type);
 -- User Module Progress
 CREATE TABLE IF NOT EXISTS public.user_module_progress (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_id UUID NOT NULL REFERENCES public.learning_modules(id) ON DELETE CASCADE,
     progress_percent INTEGER NOT NULL DEFAULT 0 CHECK (progress_percent >= 0 AND progress_percent <= 100),
     started_at TIMESTAMPTZ,
@@ -1136,7 +1136,7 @@ CREATE INDEX idx_quiz_questions_module ON public.quiz_questions(module_id);
 -- Quiz Attempts
 CREATE TABLE IF NOT EXISTS public.quiz_attempts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_id UUID NOT NULL REFERENCES public.learning_modules(id) ON DELETE CASCADE,
     question_id UUID NOT NULL REFERENCES public.quiz_questions(id) ON DELETE CASCADE,
     selected_answer_index INTEGER NOT NULL,
@@ -1165,7 +1165,7 @@ CREATE INDEX idx_learning_badges_level ON public.learning_badges(level);
 -- User Badges
 CREATE TABLE IF NOT EXISTS public.user_badges (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     badge_id UUID NOT NULL REFERENCES public.learning_badges(id) ON DELETE CASCADE,
     unlocked_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, badge_id)
@@ -1177,7 +1177,7 @@ CREATE INDEX idx_user_badges_badge ON public.user_badges(badge_id);
 -- Module Recommendations (cache)
 CREATE TABLE IF NOT EXISTS public.module_recommendations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES core.users(id) ON DELETE CASCADE,
     module_id UUID NOT NULL REFERENCES public.learning_modules(id) ON DELETE CASCADE,
     recommendation_score DECIMAL(5,2) NOT NULL,
     recommendation_reason TEXT,
@@ -1201,21 +1201,21 @@ CREATE POLICY "Admins can manage modules" ON public.learning_modules FOR ALL USI
 
 ALTER TABLE public.user_module_progress ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users view own progress" ON public.user_module_progress FOR SELECT
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 CREATE POLICY "Users update own progress" ON public.user_module_progress FOR ALL
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 ALTER TABLE public.quiz_attempts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users manage own quiz attempts" ON public.quiz_attempts FOR ALL
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 ALTER TABLE public.module_recommendations ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users view own recommendations" ON public.module_recommendations FOR SELECT
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 ALTER TABLE public.user_badges ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Users view own badges" ON public.user_badges FOR SELECT
-    USING (user_id IN (SELECT id FROM public.users WHERE auth_id = auth.uid()));
+    USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- Sync Function: user_module_progress → learning_topics
 CREATE OR REPLACE FUNCTION sync_learning_topics()
