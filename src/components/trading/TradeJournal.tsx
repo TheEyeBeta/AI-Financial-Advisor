@@ -18,6 +18,7 @@ import { positionsApi, tradesApi } from "@/services/api";
 import { useAuth } from "@/hooks/use-auth";
 import { format, parseISO } from "date-fns";
 import { useForm, Controller } from "react-hook-form";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { cn } from "@/lib/utils";
@@ -48,15 +49,27 @@ export function TradeJournal({
   openPositions = [],
 }: TradeJournalProps) {
   const isWorkspaceMode = mode === 'workspace';
+  const queryClient = useQueryClient();
   const createEntry = useCreateJournalEntry();
   const { userId } = useAuth();
   const [showForm, setShowForm] = useState(mode === 'workspace');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<JournalFormData>({
     defaultValues: {
       type: 'BUY',
       date: new Date().toISOString().split('T')[0],
     }
   });
+
+  const refreshTradingQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['open-positions', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['trades', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] }),
+    ]);
+  };
 
   const onSubmit = async (data: JournalFormData) => {
     if (!userId) {
@@ -67,6 +80,13 @@ export function TradeJournal({
       });
       return;
     }
+
+    if (isSubmitting) {
+      return;
+    }
+
+    let shouldRefreshTradingData = false;
+    setIsSubmitting(true);
 
     try {
       const tags = data.tags
@@ -89,6 +109,8 @@ export function TradeJournal({
           entry_date: tradeDateIso,
         });
 
+        shouldRefreshTradingData = true;
+
         const trade = await tradesApi.create(userId, {
           symbol,
           type: 'LONG',
@@ -101,6 +123,7 @@ export function TradeJournal({
           pnl: null,
         });
         tradeId = trade.id;
+        shouldRefreshTradingData = true;
       } 
       else if (data.type === 'SELL') {
         const matchingPositions = openPositions
@@ -139,10 +162,14 @@ export function TradeJournal({
               quantity: position.quantity - quantityFromLot,
             });
           }
+
+          shouldRefreshTradingData = true;
         }
 
         const averageEntryPrice = soldQuantity > 0 ? costBasisSold / soldQuantity : data.price;
         const pnl = (data.price - averageEntryPrice) * soldQuantity;
+
+        shouldRefreshTradingData = true;
 
         const trade = await tradesApi.create(userId, {
           symbol,
@@ -156,6 +183,10 @@ export function TradeJournal({
           pnl,
         });
         tradeId = trade.id;
+      }
+
+      if (shouldRefreshTradingData) {
+        await refreshTradingQueries();
       }
 
       await createEntry.mutateAsync({
@@ -182,11 +213,17 @@ export function TradeJournal({
         setShowForm(false);
       }
     } catch (error: unknown) {
+      if (shouldRefreshTradingData) {
+        await refreshTradingQueries();
+      }
+
       toast({
         title: "Error",
         description: getErrorMessage(error) || "Failed to create trade",
         variant: "destructive",
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -203,9 +240,10 @@ export function TradeJournal({
           onClick={() => setShowForm(!showForm)} 
           size="sm" 
           className="h-8 text-xs gap-1.5"
+          disabled={isSubmitting}
         >
           {showForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-          {isWorkspaceMode ? 'Place Trade' : showForm ? 'Cancel' : 'Log Trade'}
+          {isWorkspaceMode && showForm ? 'Cancel' : isWorkspaceMode ? 'Place Trade' : showForm ? 'Cancel' : 'Log Trade'}
         </Button>
       </div>
 
@@ -312,15 +350,16 @@ export function TradeJournal({
               </div>
 
               <div className="flex gap-2 pt-1">
-                <Button type="submit" size="sm" className="h-8 text-xs" disabled={createEntry.isPending}>
-                  {createEntry.isPending ? 'Saving...' : isWorkspaceMode ? 'Place Trade' : 'Save Entry'}
+                <Button type="submit" size="sm" className="h-8 text-xs" disabled={isSubmitting}>
+                  {isSubmitting ? 'Saving...' : isWorkspaceMode ? 'Place Trade' : 'Save Entry'}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   className="h-8 text-xs"
-                  onClick={() => { setShowForm(false); reset(); }}
+                  onClick={() => { if (!isWorkspaceMode) setShowForm(false); reset(); }}
+                  disabled={isSubmitting}
                 >
                   Cancel
                 </Button>
