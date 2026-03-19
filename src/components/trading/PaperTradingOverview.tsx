@@ -19,7 +19,11 @@ export function PaperTradingOverview() {
   const { data: trades = [] } = useClosedTrades();
   const { data: portfolioHistory = [] } = usePortfolioHistory();
   const { isConnected, isConnecting } = useTradeEngineConnection();
-  const livePrices = useTradeEnginePrices(positions.map((position) => position.symbol.toUpperCase()));
+  const normalizedTickers = useMemo(
+    () => positions.map((position) => position.symbol.toUpperCase()),
+    [positions],
+  );
+  const livePrices = useTradeEnginePrices(normalizedTickers);
 
   const summary = useMemo(() => {
     const markedPositions = positions.map((position) => {

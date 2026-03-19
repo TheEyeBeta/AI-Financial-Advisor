@@ -47,6 +47,7 @@ export function TradeJournal({
   isJournalLoading = false,
   openPositions = [],
 }: TradeJournalProps) {
+  const isWorkspaceMode = mode === 'workspace';
   const createEntry = useCreateJournalEntry();
   const { userId } = useAuth();
   const [showForm, setShowForm] = useState(mode === 'workspace');
@@ -177,7 +178,9 @@ export function TradeJournal({
       });
 
       reset();
-      setShowForm(false);
+      if (!isWorkspaceMode) {
+        setShowForm(false);
+      }
     } catch (error: unknown) {
       toast({
         title: "Error",
@@ -191,16 +194,18 @@ export function TradeJournal({
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground/70">
-          {journalEntries.length} journal {journalEntries.length === 1 ? 'entry' : 'entries'}
-        </p>
+        {!isWorkspaceMode && (
+          <p className="text-xs text-muted-foreground/70">
+            {journalEntries.length} journal {journalEntries.length === 1 ? 'entry' : 'entries'}
+          </p>
+        )}
         <Button 
           onClick={() => setShowForm(!showForm)} 
           size="sm" 
           className="h-8 text-xs gap-1.5"
         >
           {showForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-          {showForm ? 'Cancel' : mode === 'workspace' ? 'Place Trade' : 'Log Trade'}
+          {isWorkspaceMode ? 'Place Trade' : showForm ? 'Cancel' : 'Log Trade'}
         </Button>
       </div>
 
@@ -308,7 +313,7 @@ export function TradeJournal({
 
               <div className="flex gap-2 pt-1">
                 <Button type="submit" size="sm" className="h-8 text-xs" disabled={createEntry.isPending}>
-                  {createEntry.isPending ? 'Saving...' : 'Save Entry'}
+                  {createEntry.isPending ? 'Saving...' : isWorkspaceMode ? 'Place Trade' : 'Save Entry'}
                 </Button>
                 <Button
                   type="button"
@@ -326,7 +331,7 @@ export function TradeJournal({
       )}
 
       {/* Journal Entries */}
-      {mode === "workspace" ? null : isJournalLoading ? (
+      {isWorkspaceMode ? null : isJournalLoading ? (
         <div className="space-y-2">
           {[1, 2].map((i) => (
             <div key={i} className="h-24 bg-muted/30 rounded-xl animate-pulse" />
