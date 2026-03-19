@@ -13,7 +13,7 @@ const createDummyClient = () => {
   
   return createClient<Database>(dummyUrl, dummyKey, {
     db: {
-      schema: 'ai',
+      schema: 'public',
     },
     auth: {
       persistSession: false,
@@ -35,7 +35,7 @@ if (!supabaseConfig.isConfigured) {
 export const supabase = supabaseConfig.isConfigured
   ? createClient<Database>(supabaseConfig.supabaseUrl, supabaseConfig.supabaseAnonKey, {
       db: {
-        schema: 'ai',
+        schema: 'public',
       },
       auth: {
         persistSession: true,
@@ -48,6 +48,11 @@ export const supabase = supabaseConfig.isConfigured
   : createDummyClient();
 
 export const aiDb = supabase.schema('ai');
+export const coreDb = supabase.schema('core');
+export const tradingDb = supabase.schema('trading');
+export const marketDb = supabase.schema('market');
+export const academyDb = supabase.schema('academy');
+export const meridianDb = supabase.schema('meridian');
 
 // Re-export from user-helpers for backward compatibility
 export { getCurrentUserId, getCurrentUserProfile, getUserProfile } from './user-helpers';
