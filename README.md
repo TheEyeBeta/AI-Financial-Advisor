@@ -9,6 +9,7 @@ An AI-powered financial education platform with paper trading capabilities.
 - 📈 Portfolio tracking and performance charts
 - 📚 Financial education topics
 - 🔐 User authentication via Supabase
+- 🗂️ Six major database schemas: `core`, `ai`, `trading`, `market`, `academy`, and `meridian`
 
 ## Setup (Local)
 

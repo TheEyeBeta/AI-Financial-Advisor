@@ -1,11 +1,12 @@
 // TypeScript types matching the Supabase multi-schema database structure
 //
-// Schema map:
-//   core    — users, user_profiles, achievements, learning_topics
-//   trading — portfolio_history, open_positions, trades, trade_journal
-//   ai      — chats, chat_messages, iris_context_cache
-//   market  — stock_snapshots, market_indices, trending_stocks, news, news_articles
-//   academy — (see academy-api.ts)
+// Schema map (6 major schemas):
+//   core     — users, achievements, learning_topics, user_profiles
+//   ai       — chats, chat_messages, iris_context_cache
+//   trading  — portfolio_history, open_positions, trades, trade_journal, paper trading
+//   market   — stock_snapshots, market_indices, trending_stocks, news
+//   academy  — lesson/curriculum tables (see academy-api.ts)
+//   meridian — financial plans, goals, risk alerts, intelligence digests
 
 export interface Database {
   public: {
@@ -648,6 +649,12 @@ export interface Database {
         };
       };
     };
+  };
+  academy: {
+    Tables: Record<string, never>;
+  };
+  meridian: {
+    Tables: Record<string, never>;
   };
 }
 

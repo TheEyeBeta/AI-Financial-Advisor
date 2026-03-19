@@ -10,6 +10,13 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- Ensure application schemas exist
+-- Major app schemas:
+--   core     - user and profile data
+--   ai       - advisor chat data
+--   trading  - paper trading and portfolio data
+--   market   - market/news/snapshot data
+--   academy  - curriculum and lesson data
+--   meridian - planning/goals/intelligence data
 CREATE SCHEMA IF NOT EXISTS ai;
 CREATE SCHEMA IF NOT EXISTS core;
 CREATE SCHEMA IF NOT EXISTS trading;
