@@ -14,9 +14,7 @@ import {
 } from "recharts";
 import { usePortfolioHistory, useClosedTrades, useOpenPositions } from "@/hooks/use-data";
 import { format, parseISO, startOfWeek } from "date-fns";
-import { useMemo, useEffect, useState } from "react";
-import { pythonApi } from "@/services/api";
-import type { OpenPosition } from "@/types/database";
+import { useMemo } from "react";
 import { TrendingUp, TrendingDown, Activity, PieChart as PieChartIcon, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,46 +22,11 @@ export function PerformanceCharts() {
   const { data: portfolioHistory = [], isLoading: portfolioLoading } = usePortfolioHistory();
   const { data: trades = [], isLoading: tradesLoading } = useClosedTrades();
   const { data: positions = [], isLoading: positionsLoading } = useOpenPositions();
-  const [livePositions, setLivePositions] = useState<OpenPosition[]>([]);
-  const [currentPortfolioValue, setCurrentPortfolioValue] = useState<number | null>(null);
 
-  // Fetch live prices for open positions
-  useEffect(() => {
-    const updateLivePrices = async () => {
-      if (positions.length === 0) {
-        setLivePositions([]);
-        return;
-      }
-      
-      try {
-        const updated = await Promise.all(
-          positions.map(async (pos) => {
-            try {
-              const currentPrice = await pythonApi.getStockPrice(pos.symbol);
-              return { ...pos, current_price: currentPrice };
-            } catch {
-              return pos;
-            }
-          })
-        );
-        
-        setLivePositions(updated);
-        
-        const totalMarketValue = updated.reduce((sum, pos) => {
-          const currentPrice = pos.current_price || pos.entry_price;
-          return sum + (currentPrice * pos.quantity);
-        }, 0);
-        
-        setCurrentPortfolioValue(totalMarketValue);
-      } catch (error) {
-        console.error('Error updating live prices:', error);
-      }
-    };
-
-    updateLivePrices();
-    const interval = setInterval(updateLivePrices, 30000);
-    return () => clearInterval(interval);
-  }, [positions]);
+  const currentPortfolioValue = useMemo(
+    () => positions.reduce((sum, pos) => sum + ((pos.current_price || pos.entry_price) * pos.quantity), 0),
+    [positions],
+  );
 
   // Calculate equity curve
   const equityData = useMemo(() => {
@@ -86,9 +49,7 @@ export function PerformanceCharts() {
       });
     }
     
-    if (currentPortfolioValue !== null) {
-      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
-    }
+    data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
     
     return data;
   }, [portfolioHistory, currentPortfolioValue]);
@@ -124,9 +85,9 @@ export function PerformanceCharts() {
 
   // Calculate portfolio stats
   const portfolioStats = useMemo(() => {
-    const currentValue = currentPortfolioValue ?? 0;
-    const totalCostBasis = livePositions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
-    const unrealizedPnL = livePositions.reduce((sum, pos) => {
+    const currentValue = currentPortfolioValue;
+    const totalCostBasis = positions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
+    const unrealizedPnL = positions.reduce((sum, pos) => {
       const currentPrice = pos.current_price || pos.entry_price;
       return sum + ((currentPrice - pos.entry_price) * pos.quantity);
     }, 0);
@@ -136,7 +97,7 @@ export function PerformanceCharts() {
     const percentReturn = baseValue > 0 ? ((totalReturn / baseValue) * 100) : 0;
     
     return { currentValue, totalReturn, percentReturn, unrealizedPnL, realizedPnL, totalPnL: unrealizedPnL + realizedPnL };
-  }, [portfolioHistory, currentPortfolioValue, livePositions, trades]);
+  }, [portfolioHistory, currentPortfolioValue, positions, trades]);
 
   if (portfolioLoading || tradesLoading || positionsLoading) {
     return (
@@ -165,9 +126,7 @@ export function PerformanceCharts() {
               {portfolioStats.totalReturn >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
               <span>{portfolioStats.totalReturn >= 0 ? '+' : ''}${portfolioStats.totalReturn.toFixed(2)} ({portfolioStats.percentReturn.toFixed(2)}%)</span>
             </div>
-            {currentPortfolioValue !== null && (
-              <div className="text-[10px] text-muted-foreground/50 mt-1">Live · Updates every 30s</div>
-            )}
+            <div className="text-[10px] text-muted-foreground/50 mt-1">Live · Updates every 30s</div>
           </CardContent>
         </Card>
 
@@ -206,9 +165,7 @@ export function PerformanceCharts() {
         <CardContent className="pt-4 pb-3">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Equity Curve</span>
-            {currentPortfolioValue !== null && (
-              <span className="text-[10px] text-muted-foreground/50">(Live)</span>
-            )}
+            <span className="text-[10px] text-muted-foreground/50">(Live)</span>
           </div>
           <div className="h-[180px]">
             {equityData.length === 0 ? (

@@ -3,8 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useOpenPositions, useDeletePosition } from "@/hooks/use-data";
-import { useTradeEnginePrices, useTradeEngineConnection } from "@/hooks/use-trade-engine";
-import { useMemo } from "react";
+import { useTradeEngineConnection } from "@/hooks/use-trade-engine";
 import type { OpenPosition } from "@/types/database";
 import { cn } from "@/lib/utils";
 
@@ -12,26 +11,8 @@ export function OpenPositions() {
   const { data: positions = [], isLoading } = useOpenPositions();
   const deletePosition = useDeletePosition();
   
-  // Get unique tickers from positions
-  const tickers = useMemo(
-    () => positions.map((pos) => pos.symbol),
-    [positions]
-  );
-  
-  // Use WebSocket for real-time price updates
   const { isConnected, isConnecting } = useTradeEngineConnection();
-  const livePrices = useTradeEnginePrices(tickers);
-
-  // Merge live prices with positions
-  const displayPositions = useMemo(() => {
-    return positions.map((pos) => {
-      const liveData = livePrices[pos.symbol.toUpperCase()];
-      if (liveData) {
-        return { ...pos, current_price: liveData.price };
-      }
-      return pos;
-    });
-  }, [positions, livePrices]);
+  const displayPositions = positions;
 
   const calculatePnL = (position: OpenPosition) => {
     const currentPrice = position.current_price || position.entry_price;
@@ -141,8 +122,7 @@ export function OpenPositions() {
                 const { pnl, pnlPercent } = calculatePnL(position);
                 const isProfit = pnl >= 0;
                 const currentPrice = position.current_price || position.entry_price;
-                const liveData = livePrices[position.symbol.toUpperCase()];
-                const hasLivePrice = !!liveData;
+                const hasLivePrice = position.current_price !== null && position.current_price !== undefined;
 
                 return (
                   <div 
@@ -181,13 +161,6 @@ export function OpenPositions() {
                           ${currentPrice.toFixed(2)}
                         </div>
                         <div className="text-[10px] text-muted-foreground/50 flex items-center justify-end gap-1">
-                          {hasLivePrice && liveData.change_percent !== undefined && (
-                            <span className={cn(
-                              liveData.change_percent >= 0 ? "text-profit/70" : "text-loss/70"
-                            )}>
-                              {liveData.change_percent >= 0 ? "+" : ""}{liveData.change_percent.toFixed(2)}%
-                            </span>
-                          )}
                           <span>{hasLivePrice ? "live" : "stored"}</span>
                         </div>
                       </div>

@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useMemo } from "react";
 import { Activity, DollarSign, LineChart, Trophy, Wallet } from "lucide-react";
 import { usePortfolioHistory, useClosedTrades, useOpenPositions } from "@/hooks/use-data";
-import { useTradeEngineConnection, useTradeEnginePrices } from "@/hooks/use-trade-engine";
+import { useTradeEngineConnection } from "@/hooks/use-trade-engine";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(value: number) {
@@ -19,21 +19,15 @@ export function PaperTradingOverview() {
   const { data: trades = [] } = useClosedTrades();
   const { data: portfolioHistory = [] } = usePortfolioHistory();
   const { isConnected, isConnecting } = useTradeEngineConnection();
-  const normalizedTickers = useMemo(
-    () => positions.map((position) => position.symbol.toUpperCase()),
-    [positions],
-  );
-  const livePrices = useTradeEnginePrices(normalizedTickers);
 
   const summary = useMemo(() => {
     const markedPositions = positions.map((position) => {
-      const normalizedSymbol = position.symbol.toUpperCase();
-      const livePrice = livePrices[normalizedSymbol]?.price ?? position.current_price ?? position.entry_price;
+      const snapshotPrice = position.current_price ?? position.entry_price;
       return {
         ...position,
-        markedPrice: livePrice,
-        marketValue: livePrice * position.quantity,
-        unrealizedPnL: (livePrice - position.entry_price) * position.quantity,
+        markedPrice: snapshotPrice,
+        marketValue: snapshotPrice * position.quantity,
+        unrealizedPnL: (snapshotPrice - position.entry_price) * position.quantity,
       };
     });
 
@@ -59,7 +53,7 @@ export function PaperTradingOverview() {
       winRate,
       tradesCount: trades.length,
     };
-  }, [livePrices, portfolioHistory, positions, trades]);
+  }, [portfolioHistory, positions, trades]);
 
   const cards = [
     {
