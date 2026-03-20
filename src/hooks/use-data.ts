@@ -129,15 +129,17 @@ export function useCreateJournalEntry() {
   return useMutation({
     mutationFn: (entry: Omit<TradeJournalEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'trade_id'> & { trade_id?: string | null }) =>
       journalApi.create(userId!, entry),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['trade-journal', userId] });
-      // Invalidate related queries so all components refresh
-      queryClient.invalidateQueries({ queryKey: ['open-positions', userId] });
-      queryClient.invalidateQueries({ queryKey: ['trades', userId] });
-      queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] });
-      queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
-      // Sync Dashboard: every BUY/SELL logged via TradeJournal changes win-rate and profit-factor
-      queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['trade-journal', userId] }),
+        // Invalidate related queries so all components refresh
+        queryClient.invalidateQueries({ queryKey: ['open-positions', userId] }),
+        queryClient.invalidateQueries({ queryKey: ['trades', userId] }),
+        queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] }),
+        queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] }),
+        // Sync Dashboard: every BUY/SELL logged via TradeJournal changes win-rate and profit-factor
+        queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] }),
+      ]);
     },
   });
 }

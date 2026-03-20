@@ -1,42 +1,76 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { OpenPositions } from "@/components/trading/OpenPositions";
-import { TradeHistory } from "@/components/trading/TradeHistory";
 import { TradeJournal } from "@/components/trading/TradeJournal";
-import { PerformanceCharts } from "@/components/trading/PerformanceCharts";
 import { useAuth } from "@/hooks/use-auth";
+import { PaperTradingOverview } from "@/components/trading/PaperTradingOverview";
+import { TradingReviewTabs } from "@/components/trading/TradingReviewTabs";
+import { TradeEngineStatus } from "@/components/trading/TradeEngineStatus";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useOpenPositions, useTradeJournal } from "@/hooks/use-data";
 
 const PaperTrading = () => {
   const { userProfile } = useAuth();
+  const { data: journalEntries = [], isLoading: isJournalLoading } = useTradeJournal();
+  const { data: openPositions = [] } = useOpenPositions();
   const heading = userProfile?.first_name
-    ? `${userProfile.first_name}, ready to trade?`
-    : "Ready to trade?";
+    ? `${userProfile.first_name}, run your paper trading desk`
+    : "Run your paper trading desk";
   const sectionAnimation = "animate-in fade-in slide-in-from-bottom-2 duration-300";
 
   return (
     <AppLayout title="Paper Trading">
       <div className="max-w-6xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="animate-in fade-in duration-300">
-          <h1 className="text-2xl font-semibold text-foreground">{heading}</h1>
-          <p className="text-sm text-muted-foreground/70 mt-0.5">
-            Practice trading with virtual money and sharpen your execution.
-          </p>
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between animate-in fade-in duration-300">
+          <div>
+            <h1 className="text-2xl font-semibold text-foreground">{heading}</h1>
+            <p className="text-sm text-muted-foreground/70 mt-0.5 max-w-2xl">
+              Monitor account health, simulate trades, and review outcomes from one portfolio cockpit.
+            </p>
+          </div>
+          <TradeEngineStatus compact showSignals={false} />
         </div>
 
-        <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
-          <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '50ms' }}>
+        <div className={sectionAnimation} style={{ animationDelay: "50ms" }}>
+          <PaperTradingOverview />
+        </div>
+
+        <div className="grid gap-4 grid-cols-1 xl:grid-cols-[1.05fr_1.4fr]">
+          <Card
+            className={`${sectionAnimation} border-border/50 bg-card/50 backdrop-blur-sm`}
+            style={{ animationDelay: "100ms" }}
+          >
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Trade Ticket</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Enter a simulated BUY or SELL, then optionally capture your rationale before saving.
+              </p>
+            </CardHeader>
+            <CardContent>
+              <TradeJournal
+                mode="workspace"
+                openPositions={openPositions}
+              />
+            </CardContent>
+          </Card>
+
+          <div className={sectionAnimation} style={{ animationDelay: "150ms" }}>
             <OpenPositions />
           </div>
-          <div className={sectionAnimation} style={{ animationDelay: '100ms' }}>
-            <TradeHistory />
-          </div>
-          <div className={sectionAnimation} style={{ animationDelay: '150ms' }}>
-            <TradeJournal />
-          </div>
-          <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '200ms' }}>
-            <PerformanceCharts />
-          </div>
         </div>
+
+        <section className={`${sectionAnimation} space-y-3`} style={{ animationDelay: "200ms" }}>
+          <div>
+            <h2 className="text-lg font-semibold">Review & Learn</h2>
+            <p className="text-sm text-muted-foreground">
+              Analyze performance, inspect execution history, and revisit your trade journal in one place.
+            </p>
+          </div>
+          <TradingReviewTabs
+            journalEntries={journalEntries}
+            isJournalLoading={isJournalLoading}
+            openPositions={openPositions}
+          />
+        </section>
       </div>
     </AppLayout>
   );

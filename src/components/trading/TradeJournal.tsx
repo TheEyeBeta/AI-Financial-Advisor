@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Calendar, DollarSign, FileText, BookOpen, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -13,14 +13,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { useTradeJournal, useCreateJournalEntry, useOpenPositions } from "@/hooks/use-data";
+import { useCreateJournalEntry } from "@/hooks/use-data";
 import { positionsApi, tradesApi } from "@/services/api";
 import { useAuth } from "@/hooks/use-auth";
 import { format, parseISO } from "date-fns";
 import { useForm, Controller } from "react-hook-form";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { cn } from "@/lib/utils";
+import type { OpenPosition, TradeJournalEntry } from "@/types/database";
 
 interface JournalFormData {
   symbol: string;
@@ -33,18 +35,85 @@ interface JournalFormData {
   tags: string;
 }
 
-export function TradeJournal() {
-  const { data: journalEntries = [], isLoading } = useTradeJournal();
-  const { data: openPositions = [] } = useOpenPositions();
+type WorkspaceTradeJournalProps = {
+  mode: 'workspace';
+  openPositions: OpenPosition[];
+};
+
+type JournalTradeJournalProps = {
+  mode: 'journal';
+  journalEntries: TradeJournalEntry[];
+  isJournalLoading: boolean;
+  openPositions: OpenPosition[];
+};
+
+type TradeJournalProps = WorkspaceTradeJournalProps | JournalTradeJournalProps;
+
+function getSubmissionFingerprint(userId: string, data: JournalFormData) {
+  return JSON.stringify({
+    userId,
+    symbol: data.symbol.trim().toUpperCase(),
+    type: data.type,
+    date: data.date,
+    quantity: data.quantity,
+    price: data.price,
+  });
+}
+
+function getStoredPartialFingerprints() {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    return JSON.parse(window.localStorage.getItem('paper-trading-partial-submissions') ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+}
+
+function storePartialFingerprint(fingerprint: string) {
+  if (typeof window === 'undefined') return;
+
+  const fingerprints = Array.from(new Set([...getStoredPartialFingerprints(), fingerprint]));
+  window.localStorage.setItem('paper-trading-partial-submissions', JSON.stringify(fingerprints));
+}
+
+function clearPartialFingerprint(fingerprint: string) {
+  if (typeof window === 'undefined') return;
+
+  const fingerprints = getStoredPartialFingerprints().filter((item) => item !== fingerprint);
+  window.localStorage.setItem('paper-trading-partial-submissions', JSON.stringify(fingerprints));
+}
+
+export function TradeJournal(props: TradeJournalProps) {
+  const { mode, openPositions } = props;
+  const journalEntries = props.mode === 'journal' ? props.journalEntries : [];
+  const isJournalLoading = props.mode === 'journal' ? props.isJournalLoading : false;
+  const isWorkspaceMode = mode === 'workspace';
+  const queryClient = useQueryClient();
   const createEntry = useCreateJournalEntry();
   const { userId } = useAuth();
-  const [showForm, setShowForm] = useState(false);
+  const [showForm, setShowForm] = useState(mode === 'workspace');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setShowForm(isWorkspaceMode);
+  }, [isWorkspaceMode]);
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<JournalFormData>({
     defaultValues: {
       type: 'BUY',
       date: new Date().toISOString().split('T')[0],
     }
   });
+
+  const refreshTradingQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['open-positions', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['trades', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] }),
+      queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] }),
+    ]);
+  };
 
   const onSubmit = async (data: JournalFormData) => {
     if (!userId) {
@@ -55,6 +124,25 @@ export function TradeJournal() {
       });
       return;
     }
+
+    if (isSubmitting) {
+      return;
+    }
+
+    const submissionFingerprint = getSubmissionFingerprint(userId, data);
+
+    if (getStoredPartialFingerprints().includes(submissionFingerprint)) {
+      toast({
+        title: 'Review Required',
+        description: 'A previous attempt may already have applied this trade. Review positions and history before retrying.',
+        variant: 'default',
+      });
+      return;
+    }
+
+    let shouldRefreshTradingData = false;
+    let journalSaveFailed = false;
+    setIsSubmitting(true);
 
     try {
       const tags = data.tags
@@ -77,6 +165,8 @@ export function TradeJournal() {
           entry_date: tradeDateIso,
         });
 
+        shouldRefreshTradingData = true;
+
         const trade = await tradesApi.create(userId, {
           symbol,
           type: 'LONG',
@@ -89,6 +179,7 @@ export function TradeJournal() {
           pnl: null,
         });
         tradeId = trade.id;
+        shouldRefreshTradingData = true;
       } 
       else if (data.type === 'SELL') {
         const matchingPositions = openPositions
@@ -127,10 +218,14 @@ export function TradeJournal() {
               quantity: position.quantity - quantityFromLot,
             });
           }
+
+          shouldRefreshTradingData = true;
         }
 
         const averageEntryPrice = soldQuantity > 0 ? costBasisSold / soldQuantity : data.price;
         const pnl = (data.price - averageEntryPrice) * soldQuantity;
+
+        shouldRefreshTradingData = true;
 
         const trade = await tradesApi.create(userId, {
           symbol,
@@ -146,17 +241,24 @@ export function TradeJournal() {
         tradeId = trade.id;
       }
 
-      await createEntry.mutateAsync({
-        symbol,
-        type: data.type,
-        date: data.date,
-        quantity: data.quantity,
-        price: data.price,
-        strategy: data.strategy || null,
-        notes: data.notes || null,
-        tags: tags.length > 0 ? tags : null,
-        trade_id: tradeId,
-      });
+      try {
+        await createEntry.mutateAsync({
+          symbol,
+          type: data.type,
+          date: data.date,
+          quantity: data.quantity,
+          price: data.price,
+          strategy: data.strategy || null,
+          notes: data.notes || null,
+          tags: tags.length > 0 ? tags : null,
+          trade_id: tradeId,
+        });
+      } catch (error) {
+        journalSaveFailed = true;
+        throw error;
+      }
+
+      clearPartialFingerprint(submissionFingerprint);
 
       toast({
         title: "Success",
@@ -166,13 +268,26 @@ export function TradeJournal() {
       });
 
       reset();
-      setShowForm(false);
+      if (!isWorkspaceMode) {
+        setShowForm(false);
+      }
     } catch (error: unknown) {
+      if (shouldRefreshTradingData) {
+        storePartialFingerprint(submissionFingerprint);
+        await refreshTradingQueries();
+      }
+
+      const description = journalSaveFailed && shouldRefreshTradingData
+        ? `Trade recorded but journal save failed — do not retry writes. ${getErrorMessage(error)}`
+        : getErrorMessage(error) || "Failed to create trade";
+
       toast({
-        title: "Error",
-        description: getErrorMessage(error) || "Failed to create trade",
-        variant: "destructive",
+        title: journalSaveFailed && shouldRefreshTradingData ? "Partial Success" : "Error",
+        description,
+        variant: journalSaveFailed && shouldRefreshTradingData ? "default" : "destructive",
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -180,16 +295,19 @@ export function TradeJournal() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <p className="text-xs text-muted-foreground/70">
-          {journalEntries.length} journal {journalEntries.length === 1 ? 'entry' : 'entries'}
-        </p>
+        {!isWorkspaceMode && (
+          <p className="text-xs text-muted-foreground/70">
+            {journalEntries.length} journal {journalEntries.length === 1 ? 'entry' : 'entries'}
+          </p>
+        )}
         <Button 
           onClick={() => setShowForm(!showForm)} 
           size="sm" 
           className="h-8 text-xs gap-1.5"
+          disabled={isSubmitting}
         >
           {showForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-          {showForm ? 'Cancel' : 'Log Trade'}
+          {isWorkspaceMode && showForm ? 'Cancel' : isWorkspaceMode ? 'Place Trade' : showForm ? 'Cancel' : 'Log Trade'}
         </Button>
       </div>
 
@@ -296,15 +414,16 @@ export function TradeJournal() {
               </div>
 
               <div className="flex gap-2 pt-1">
-                <Button type="submit" size="sm" className="h-8 text-xs" disabled={createEntry.isPending}>
-                  {createEntry.isPending ? 'Saving...' : 'Save Entry'}
+                <Button type="submit" size="sm" className="h-8 text-xs" disabled={isSubmitting}>
+                  {isSubmitting ? 'Saving...' : isWorkspaceMode ? 'Place Trade' : 'Save Entry'}
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   className="h-8 text-xs"
-                  onClick={() => { setShowForm(false); reset(); }}
+                  onClick={() => { if (!isWorkspaceMode) setShowForm(false); reset(); }}
+                  disabled={isSubmitting}
                 >
                   Cancel
                 </Button>
@@ -315,7 +434,7 @@ export function TradeJournal() {
       )}
 
       {/* Journal Entries */}
-      {isLoading ? (
+      {isWorkspaceMode ? null : isJournalLoading ? (
         <div className="space-y-2">
           {[1, 2].map((i) => (
             <div key={i} className="h-24 bg-muted/30 rounded-xl animate-pulse" />
