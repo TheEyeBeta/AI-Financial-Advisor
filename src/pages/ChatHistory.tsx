@@ -104,7 +104,7 @@ const ChatHistory = () => {
             </p>
           </div>
           <Button 
-            onClick={() => navigate('/advisor')} 
+            onClick={() => navigate('/advisor?new=1')} 
             size="sm" 
             className="gap-1.5 rounded-full px-4"
           >
@@ -123,7 +123,7 @@ const ChatHistory = () => {
             <p className="text-sm text-muted-foreground/70 text-center mb-6 max-w-xs">
               Start chatting with your AI advisor to see your history here
             </p>
-            <Button onClick={() => navigate('/advisor')} className="rounded-full px-6">
+            <Button onClick={() => navigate('/advisor?new=1')} className="rounded-full px-6">
               Start a conversation
             </Button>
           </div>

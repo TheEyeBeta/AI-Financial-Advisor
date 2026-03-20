@@ -10,6 +10,7 @@ const Advisor = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
   const chatFromUrl = searchParams.get('chat');
+  const isExplicitNewChat = searchParams.get('new') === '1';
   
   const { userId, isAuthenticated, userProfile } = useAuth();
   const { data: chats = [], isLoading: chatsLoading } = useChats();
@@ -48,24 +49,36 @@ const Advisor = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, isAuthenticated, userId]);
 
-  // Handle chat from URL param
+  // Handle chat/new intent from URL params
   useEffect(() => {
     if (chatFromUrl && chatFromUrl !== currentChatId) {
+      isNewChatRef.current = false;
       setCurrentChatId(chatFromUrl);
       setShowTopics(false);
-      // Clear the URL param after using it
+      // Clear the URL params after using them
+      setSearchParams({});
+      return;
+    }
+
+    if (isExplicitNewChat) {
+      isNewChatRef.current = true;
+      setCurrentChatId(null);
+      setShowTopics(true);
+      setPendingMessage(null);
+      setStreamingResponseContent(null);
+      // Clear the URL params after using them
       setSearchParams({});
     }
-  }, [chatFromUrl, currentChatId, setSearchParams]);
+  }, [chatFromUrl, currentChatId, isExplicitNewChat, setSearchParams]);
 
   // On load, set the most recent chat as current (or null for new chat)
   useEffect(() => {
-    if (!chatsLoading && chats.length > 0 && !currentChatId && !chatFromUrl && !isNewChatRef.current) {
+    if (!chatsLoading && chats.length > 0 && !currentChatId && !chatFromUrl && !isExplicitNewChat && !isNewChatRef.current) {
       // Use the most recent chat
       setCurrentChatId(chats[0].id);
       setShowTopics(false);
     }
-  }, [chats, chatsLoading, currentChatId, chatFromUrl]);
+  }, [chats, chatsLoading, currentChatId, chatFromUrl, isExplicitNewChat]);
 
   // Show topics when starting fresh
   useEffect(() => {
