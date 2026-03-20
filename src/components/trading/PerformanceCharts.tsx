@@ -51,7 +51,7 @@ export function PerformanceCharts() {
       });
     }
     
-    if (portfolioHistory.length > 0 || currentPortfolioValue > 0 || hasOpenPositions) {
+    if (hasOpenPositions) {
       data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
     }
     
