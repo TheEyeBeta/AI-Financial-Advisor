@@ -43,7 +43,7 @@ export function PaperTradingOverview() {
     const totalReturn = unrealizedPnL + realizedPnL;
     const openCostBasis = positions.reduce((sum, position) => sum + position.entry_price * position.quantity, 0);
     const closedTradeCostBasis = trades.reduce((sum, trade) => sum + trade.entry_price * trade.quantity, 0);
-    const fallbackBaseValue = openCostBasis > 0 ? openCostBasis : closedTradeCostBasis;
+    const fallbackBaseValue = openCostBasis + closedTradeCostBasis;
     const baseValue = portfolioHistory[0]?.value ?? fallbackBaseValue;
     const totalReturnPct = baseValue > 0 ? (totalReturn / baseValue) * 100 : 0;
     const wins = trades.filter((trade) => (trade.pnl || 0) > 0).length;

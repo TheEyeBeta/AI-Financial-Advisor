@@ -48,8 +48,6 @@ const PaperTrading = () => {
             <CardContent>
               <TradeJournal
                 mode="workspace"
-                journalEntries={journalEntries}
-                isJournalLoading={isJournalLoading}
                 openPositions={openPositions}
               />
             </CardContent>

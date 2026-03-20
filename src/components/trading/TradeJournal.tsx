@@ -35,19 +35,59 @@ interface JournalFormData {
   tags: string;
 }
 
-interface TradeJournalProps {
-  mode?: 'workspace' | 'journal';
-  journalEntries?: TradeJournalEntry[];
-  isJournalLoading?: boolean;
-  openPositions?: OpenPosition[];
+type WorkspaceTradeJournalProps = {
+  mode: 'workspace';
+  openPositions: OpenPosition[];
+};
+
+type JournalTradeJournalProps = {
+  mode: 'journal';
+  journalEntries: TradeJournalEntry[];
+  isJournalLoading: boolean;
+  openPositions: OpenPosition[];
+};
+
+type TradeJournalProps = WorkspaceTradeJournalProps | JournalTradeJournalProps;
+
+function getSubmissionFingerprint(userId: string, data: JournalFormData) {
+  return JSON.stringify({
+    userId,
+    symbol: data.symbol.trim().toUpperCase(),
+    type: data.type,
+    date: data.date,
+    quantity: data.quantity,
+    price: data.price,
+  });
 }
 
-export function TradeJournal({
-  mode = 'workspace',
-  journalEntries = [],
-  isJournalLoading = false,
-  openPositions = [],
-}: TradeJournalProps) {
+function getStoredPartialFingerprints() {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    return JSON.parse(window.localStorage.getItem('paper-trading-partial-submissions') ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+}
+
+function storePartialFingerprint(fingerprint: string) {
+  if (typeof window === 'undefined') return;
+
+  const fingerprints = Array.from(new Set([...getStoredPartialFingerprints(), fingerprint]));
+  window.localStorage.setItem('paper-trading-partial-submissions', JSON.stringify(fingerprints));
+}
+
+function clearPartialFingerprint(fingerprint: string) {
+  if (typeof window === 'undefined') return;
+
+  const fingerprints = getStoredPartialFingerprints().filter((item) => item !== fingerprint);
+  window.localStorage.setItem('paper-trading-partial-submissions', JSON.stringify(fingerprints));
+}
+
+export function TradeJournal(props: TradeJournalProps) {
+  const { mode, openPositions } = props;
+  const journalEntries = props.mode === 'journal' ? props.journalEntries : [];
+  const isJournalLoading = props.mode === 'journal' ? props.isJournalLoading : false;
   const isWorkspaceMode = mode === 'workspace';
   const queryClient = useQueryClient();
   const createEntry = useCreateJournalEntry();
@@ -86,6 +126,17 @@ export function TradeJournal({
     }
 
     if (isSubmitting) {
+      return;
+    }
+
+    const submissionFingerprint = getSubmissionFingerprint(userId, data);
+
+    if (getStoredPartialFingerprints().includes(submissionFingerprint)) {
+      toast({
+        title: 'Review Required',
+        description: 'A previous attempt may already have applied this trade. Review positions and history before retrying.',
+        variant: 'default',
+      });
       return;
     }
 
@@ -207,6 +258,8 @@ export function TradeJournal({
         throw error;
       }
 
+      clearPartialFingerprint(submissionFingerprint);
+
       toast({
         title: "Success",
         description: data.type === 'BUY' 
@@ -220,6 +273,7 @@ export function TradeJournal({
       }
     } catch (error: unknown) {
       if (shouldRefreshTradingData) {
+        storePartialFingerprint(submissionFingerprint);
         await refreshTradingQueries();
       }
 
