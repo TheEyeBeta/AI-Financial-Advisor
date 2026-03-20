@@ -1,5 +1,6 @@
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import {
   Users, Shield, Database, MessageSquare, TrendingUp,
   Activity, Search, Download, Trash2, RefreshCw,
   BarChart3, UserCheck, UserX, Clock, Heart, Server,
-  Wifi, WifiOff, Loader2, Play, Terminal
+  Wifi, WifiOff, Loader2, Play, Terminal, ArrowUpRight, Sparkles, ShieldCheck, AlertTriangle
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
@@ -68,6 +69,44 @@ interface ActivityLog {
   action: string;
   timestamp: string;
 }
+
+const EXPERIENCE_STYLES: Record<string, string> = {
+  beginner: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+  intermediate: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
+  advanced: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20",
+};
+
+const formatPercentage = (value: number, total: number) => {
+  if (!total) return 0;
+  return Math.round((value / total) * 100);
+};
+
+const getOverallTone = (overall?: string) => {
+  switch (overall) {
+    case "healthy":
+      return {
+        badgeClassName: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
+        panelClassName: "border-emerald-500/30 bg-emerald-500/5",
+        icon: Wifi,
+        label: "All systems operational",
+      };
+    case "degraded":
+      return {
+        badgeClassName: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
+        panelClassName: "border-amber-500/30 bg-amber-500/5",
+        icon: AlertTriangle,
+        label: "Degraded performance detected",
+      };
+    default:
+      return {
+        badgeClassName: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20",
+        panelClassName: "border-rose-500/30 bg-rose-500/5",
+        icon: WifiOff,
+        label: "Action required",
+      };
+  }
+};
+
 
 export default function Admin() {
   const { userProfile } = useAuth();
@@ -331,392 +370,440 @@ export default function Admin() {
     advanced: users.filter((u) => u.experience_level === "advanced").length,
   };
 
+  const verificationRate = formatPercentage(stats.verifiedUsers, stats.totalUsers);
+  const adminCoverage = formatPercentage(stats.adminUsers, stats.totalUsers);
+  const overallTone = getOverallTone(systemHealth?.overall);
+  const OverallStatusIcon = overallTone.icon;
+  const latestActivity = recentActivity[0];
+  const userMix = [
+    { label: "Beginner", value: stats.beginners, color: "bg-emerald-500" },
+    { label: "Intermediate", value: stats.intermediate, color: "bg-amber-500" },
+    { label: "Advanced", value: stats.advanced, color: "bg-rose-500" },
+  ];
+
   return (
     <AppLayout title="Admin Panel">
       <div className="space-y-6">
-        {/* Header with Refresh */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-            <p className="text-muted-foreground">Manage users, view analytics, and monitor system health</p>
-          </div>
-          <Button onClick={handleRefresh} disabled={refreshing} variant="outline" className="gap-2">
-            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
-        </div>
+        <section className="relative overflow-hidden rounded-3xl border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm sm:p-8">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.14),transparent_38%)]" />
+          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+            <div className="max-w-3xl space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="gap-1.5 rounded-full px-3 py-1 text-xs font-medium">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Admin workspace
+                </Badge>
+                {systemHealth && (
+                  <Badge variant="outline" className={`gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${overallTone.badgeClassName}`}>
+                    <OverallStatusIcon className="h-3.5 w-3.5" />
+                    {overallTone.label}
+                  </Badge>
+                )}
+              </div>
 
-        {/* Connection Test */}
+              <div className="space-y-2">
+                <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Admin command center</h1>
+                <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+                  A cleaner operations view for managing members, monitoring product health, and checking platform activity without hopping between tools.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-2xl border bg-background/80 p-4 backdrop-blur-sm">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Verification rate</p>
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-2xl font-semibold">{verificationRate}%</p>
+                      <p className="text-xs text-muted-foreground">{stats.verifiedUsers} of {stats.totalUsers || 0} users verified</p>
+                    </div>
+                    <UserCheck className="h-8 w-8 text-primary/70" />
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-background/80 p-4 backdrop-blur-sm">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Admin coverage</p>
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="text-2xl font-semibold">{adminCoverage}%</p>
+                      <p className="text-xs text-muted-foreground">{stats.adminUsers} admins available</p>
+                    </div>
+                    <Shield className="h-8 w-8 text-primary/70" />
+                  </div>
+                </div>
+                <div className="rounded-2xl border bg-background/80 p-4 backdrop-blur-sm">
+                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Latest activity</p>
+                  <div className="mt-3 flex items-end justify-between gap-3">
+                    <div>
+                      <p className="line-clamp-1 text-sm font-semibold">{latestActivity?.action || "No recent events"}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {latestActivity ? format(new Date(latestActivity.timestamp), "MMM d, h:mm a") : "Waiting for data"}
+                      </p>
+                    </div>
+                    <Sparkles className="h-8 w-8 text-primary/70" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2 xl:w-[320px] xl:grid-cols-1">
+              <Button onClick={handleRefresh} disabled={refreshing} className="gap-2 rounded-xl px-4 shadow-sm">
+                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+                Refresh dashboard
+              </Button>
+              <Button onClick={exportUsers} variant="outline" className="gap-2 rounded-xl px-4">
+                <Download className="h-4 w-4" />
+                Export users
+              </Button>
+              <div className="rounded-2xl border bg-background/80 p-4 text-sm backdrop-blur-sm sm:col-span-2 xl:col-span-1">
+                <div className="flex items-center gap-2 font-medium">
+                  <ArrowUpRight className="h-4 w-4 text-primary" />
+                  Recommended focus
+                </div>
+                <p className="mt-2 text-muted-foreground">
+                  Review verification gaps, spot activity drops, and check system health before making account-level changes.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <SupabaseConnectionTest />
 
-        {/* Stats Overview */}
-        <div className="grid gap-4 grid-cols-2 lg:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Total Users</CardTitle>
-              <Users className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.totalUsers}</div>
-              <p className="text-xs text-muted-foreground">
-                {stats.verifiedUsers} verified ({stats.totalUsers > 0 ? Math.round((stats.verifiedUsers / stats.totalUsers) * 100) : 0}%)
-              </p>
-            </CardContent>
-          </Card>
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {[
+            {
+              title: "Total users",
+              value: stats.totalUsers,
+              description: `${verificationRate}% verified accounts`,
+              icon: Users,
+            },
+            {
+              title: "Chats",
+              value: chatStats.totalChats,
+              description: `${chatStats.totalMessages} messages · ${chatStats.activeToday} active today`,
+              icon: MessageSquare,
+            },
+            {
+              title: "Trading activity",
+              value: tradingStats.totalPositions,
+              description: `${tradingStats.totalTrades} trades · ${tradingStats.totalJournalEntries} journal logs`,
+              icon: TrendingUp,
+            },
+            {
+              title: "Admins",
+              value: stats.adminUsers,
+              description: "Permissioned operators",
+              icon: Shield,
+            },
+          ].map((item) => (
+            <Card key={item.title} className="rounded-2xl border-border/60 shadow-sm">
+              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+                <div className="space-y-1">
+                  <CardDescription>{item.title}</CardDescription>
+                  <CardTitle className="text-3xl">{item.value}</CardTitle>
+                </div>
+                <div className="rounded-xl bg-primary/10 p-2 text-primary">
+                  <item.icon className="h-5 w-5" />
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground">{item.description}</p>
+              </CardContent>
+            </Card>
+          ))}
+        </section>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Chats</CardTitle>
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{chatStats.totalChats}</div>
-              <p className="text-xs text-muted-foreground">
-                {chatStats.totalMessages} messages • {chatStats.activeToday} active today
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Trading Activity</CardTitle>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{tradingStats.totalPositions}</div>
-              <p className="text-xs text-muted-foreground">
-                {tradingStats.totalTrades} trades • {tradingStats.totalJournalEntries} journal entries
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle className="text-sm font-medium">Admins</CardTitle>
-              <Shield className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.adminUsers}</div>
-              <p className="text-xs text-muted-foreground">
-                System administrators
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Tabs for different sections */}
         <Tabs defaultValue="users" className="space-y-4">
-          <TabsList>
-            <TabsTrigger value="users" className="gap-2">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/60 p-1 md:grid-cols-4">
+            <TabsTrigger value="users" className="gap-2 rounded-xl py-2.5">
               <Users className="h-4 w-4" />
               Users
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="gap-2">
+            <TabsTrigger value="analytics" className="gap-2 rounded-xl py-2.5">
               <BarChart3 className="h-4 w-4" />
               Analytics
             </TabsTrigger>
-            <TabsTrigger value="activity" className="gap-2">
+            <TabsTrigger value="activity" className="gap-2 rounded-xl py-2.5">
               <Activity className="h-4 w-4" />
               Activity
             </TabsTrigger>
-            <TabsTrigger value="system-health" className="gap-2">
+            <TabsTrigger value="system-health" className="gap-2 rounded-xl py-2.5">
               <Heart className="h-4 w-4" />
               System Health
             </TabsTrigger>
           </TabsList>
 
-          {/* Users Tab */}
           <TabsContent value="users" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div>
-                    <CardTitle>User Management</CardTitle>
-                    <CardDescription>View and manage all registered users</CardDescription>
+            <Card className="rounded-3xl border-border/60 shadow-sm">
+              <CardHeader className="space-y-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="space-y-1">
+                    <CardTitle>User management</CardTitle>
+                    <CardDescription>
+                      Search, review, and update account roles from a denser but more readable table.
+                    </CardDescription>
                   </div>
-                  <div className="flex gap-2">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+                    <div className="relative w-full sm:w-[280px]">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                       <Input
-                        placeholder="Search users..."
+                        placeholder="Search by name or email"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-8 w-[200px]"
+                        className="h-10 rounded-xl border-border/70 bg-background pl-9"
                       />
                     </div>
-                    <Button onClick={exportUsers} variant="outline" size="icon">
+                    <Button onClick={exportUsers} variant="outline" className="gap-2 rounded-xl">
                       <Download className="h-4 w-4" />
+                      Export CSV
                     </Button>
                   </div>
                 </div>
-              </CardHeader>
-              <CardContent>
-                {loading ? (
-                  <div className="text-sm text-muted-foreground py-4">Loading users...</div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>User</TableHead>
-                          <TableHead>Email</TableHead>
-                          <TableHead>Experience</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Role</TableHead>
-                          <TableHead>Joined</TableHead>
-                          <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {filteredUsers.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={7} className="text-center text-muted-foreground py-8">
-                              {searchQuery ? "No users match your search" : "No users found"}
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          filteredUsers.map((user) => (
-                            <TableRow key={user.id}>
-                              <TableCell>
-                                <div className="font-medium">
-                                  {user.first_name || user.last_name
-                                    ? `${user.first_name || ""} ${user.last_name || ""}`.trim()
-                                    : "No name"}
-                                </div>
-                              </TableCell>
-                              <TableCell className="font-mono text-sm">{user.email || "N/A"}</TableCell>
-                              <TableCell>
-                                <Badge variant="outline" className="capitalize">
-                                  {user.experience_level || "unknown"}
-                                </Badge>
-                              </TableCell>
-                              <TableCell>
-                                {user.is_verified ? (
-                                  <Badge className="bg-green-500/10 text-green-700 dark:text-green-400">
-                                    <UserCheck className="h-3 w-3 mr-1" />
-                                    Verified
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="secondary">
-                                    <UserX className="h-3 w-3 mr-1" />
-                                    Unverified
-                                  </Badge>
-                                )}
-                              </TableCell>
-                              <TableCell>
-                                {user.userType === 'Admin' ? (
-                                  <Badge className="bg-blue-500/10 text-blue-700 dark:text-blue-400">
-                                    <Shield className="h-3 w-3 mr-1" />
-                                    Admin
-                                  </Badge>
-                                ) : (
-                                  <Badge variant="outline">User</Badge>
-                                )}
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {format(new Date(user.created_at), "MMM d, yyyy")}
-                              </TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-2">
-                                  {user.id !== userProfile?.id && (
-                                    <>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => toggleAdminStatus(user.id, user.userType)}
-                                      >
-                                        {user.userType === 'Admin' ? "Demote" : "Promote"}
-                                      </Button>
-                                      <AlertDialog>
-                                        <AlertDialogTrigger asChild>
-                                          <Button variant="destructive" size="sm">
-                                            <Trash2 className="h-4 w-4" />
-                                          </Button>
-                                        </AlertDialogTrigger>
-                                        <AlertDialogContent>
-                                          <AlertDialogHeader>
-                                            <AlertDialogTitle>Delete User?</AlertDialogTitle>
-                                            <AlertDialogDescription>
-                                              This will permanently delete {user.email || "this user"} and all their data including chats, trades, and journal entries. This cannot be undone.
-                                            </AlertDialogDescription>
-                                          </AlertDialogHeader>
-                                          <AlertDialogFooter>
-                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                            <AlertDialogAction onClick={() => deleteUser(user.id)}>
-                                              Delete
-                                            </AlertDialogAction>
-                                          </AlertDialogFooter>
-                                        </AlertDialogContent>
-                                      </AlertDialog>
-                                    </>
-                                  )}
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div className="rounded-2xl border bg-muted/20 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Verified</p>
+                    <p className="mt-2 text-2xl font-semibold">{stats.verifiedUsers}</p>
+                    <p className="text-xs text-muted-foreground">Accounts ready for feature access</p>
                   </div>
+                  <div className="rounded-2xl border bg-muted/20 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Unverified</p>
+                    <p className="mt-2 text-2xl font-semibold">{stats.totalUsers - stats.verifiedUsers}</p>
+                    <p className="text-xs text-muted-foreground">Candidates for onboarding outreach</p>
+                  </div>
+                  <div className="rounded-2xl border bg-muted/20 p-4">
+                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Search results</p>
+                    <p className="mt-2 text-2xl font-semibold">{filteredUsers.length}</p>
+                    <p className="text-xs text-muted-foreground">Visible records in the current view</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {loading ? (
+                  <div className="rounded-2xl border border-dashed p-8 text-sm text-muted-foreground">Loading users…</div>
+                ) : (
+                  <>
+                    <div className="overflow-hidden rounded-2xl border">
+                      <div className="overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/30">
+                              <TableHead>User</TableHead>
+                              <TableHead>Email</TableHead>
+                              <TableHead>Experience</TableHead>
+                              <TableHead>Status</TableHead>
+                              <TableHead>Role</TableHead>
+                              <TableHead>Joined</TableHead>
+                              <TableHead className="text-right">Actions</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredUsers.length === 0 ? (
+                              <TableRow>
+                                <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
+                                  {searchQuery ? "No users match your search." : "No users found yet."}
+                                </TableCell>
+                              </TableRow>
+                            ) : (
+                              filteredUsers.map((user) => {
+                                const fullName = user.first_name || user.last_name
+                                  ? `${user.first_name || ""} ${user.last_name || ""}`.trim()
+                                  : "No name";
+
+                                return (
+                                  <TableRow key={user.id} className="hover:bg-muted/20">
+                                    <TableCell>
+                                      <div className="space-y-1">
+                                        <div className="font-medium">{fullName}</div>
+                                        <div className="text-xs text-muted-foreground">ID: {user.id.slice(0, 8)}…</div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="font-mono text-sm">{user.email || "N/A"}</TableCell>
+                                    <TableCell>
+                                      <Badge variant="outline" className={`capitalize ${EXPERIENCE_STYLES[user.experience_level || ""] || ""}`}>
+                                        {user.experience_level || "unknown"}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell>
+                                      {user.is_verified ? (
+                                        <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+                                          <UserCheck className="mr-1 h-3 w-3" />
+                                          Verified
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="secondary">
+                                          <UserX className="mr-1 h-3 w-3" />
+                                          Unverified
+                                        </Badge>
+                                      )}
+                                    </TableCell>
+                                    <TableCell>
+                                      {user.userType === 'Admin' ? (
+                                        <Badge className="bg-blue-500/10 text-blue-700 dark:text-blue-300">
+                                          <Shield className="mr-1 h-3 w-3" />
+                                          Admin
+                                        </Badge>
+                                      ) : (
+                                        <Badge variant="outline">User</Badge>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="text-sm text-muted-foreground">
+                                      {format(new Date(user.created_at), "MMM d, yyyy")}
+                                    </TableCell>
+                                    <TableCell className="text-right">
+                                      <div className="flex justify-end gap-2">
+                                        {user.id !== userProfile?.id && (
+                                          <>
+                                            <Button
+                                              variant="outline"
+                                              size="sm"
+                                              className="rounded-lg"
+                                              onClick={() => toggleAdminStatus(user.id, user.userType)}
+                                            >
+                                              {user.userType === 'Admin' ? "Demote" : "Promote"}
+                                            </Button>
+                                            <AlertDialog>
+                                              <AlertDialogTrigger asChild>
+                                                <Button variant="destructive" size="sm" className="rounded-lg">
+                                                  <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                              </AlertDialogTrigger>
+                                              <AlertDialogContent>
+                                                <AlertDialogHeader>
+                                                  <AlertDialogTitle>Delete user?</AlertDialogTitle>
+                                                  <AlertDialogDescription>
+                                                    This permanently deletes {user.email || "this user"} and all related chats, trades, and journal entries.
+                                                  </AlertDialogDescription>
+                                                </AlertDialogHeader>
+                                                <AlertDialogFooter>
+                                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                                  <AlertDialogAction onClick={() => deleteUser(user.id)}>
+                                                    Delete
+                                                  </AlertDialogAction>
+                                                </AlertDialogFooter>
+                                              </AlertDialogContent>
+                                            </AlertDialog>
+                                          </>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Tip: use search to narrow the list before applying role changes or deletions.
+                    </p>
+                  </>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
 
-          {/* Analytics Tab */}
           <TabsContent value="analytics" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              {/* User Experience Distribution */}
-              <Card>
+            <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
+              <Card className="rounded-3xl border-border/60 shadow-sm">
                 <CardHeader>
-                  <CardTitle>User Experience Levels</CardTitle>
-                  <CardDescription>Distribution of users by experience</CardDescription>
+                  <CardTitle>User experience mix</CardTitle>
+                  <CardDescription>How your member base is distributed across skill levels.</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 rounded-full bg-green-500" />
-                        <span className="text-sm">Beginner</span>
+                <CardContent className="space-y-5">
+                  {userMix.map((segment) => (
+                    <div key={segment.label} className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-sm font-medium">
+                          <div className={`h-3 w-3 rounded-full ${segment.color}`} />
+                          {segment.label}
+                        </div>
+                        <div className="text-right">
+                          <span className="text-sm font-semibold">{segment.value}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{formatPercentage(segment.value, stats.totalUsers)}%</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{stats.beginners}</span>
-                        <span className="text-xs text-muted-foreground">
-                          ({stats.totalUsers > 0 ? Math.round((stats.beginners / stats.totalUsers) * 100) : 0}%)
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-2 rounded-full bg-muted overflow-hidden">
-                      <div 
-                        className="h-full bg-green-500 transition-all" 
-                        style={{ width: `${stats.totalUsers > 0 ? (stats.beginners / stats.totalUsers) * 100 : 0}%` }}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 rounded-full bg-yellow-500" />
-                        <span className="text-sm">Intermediate</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{stats.intermediate}</span>
-                        <span className="text-xs text-muted-foreground">
-                          ({stats.totalUsers > 0 ? Math.round((stats.intermediate / stats.totalUsers) * 100) : 0}%)
-                        </span>
+                      <div className="h-2 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={`h-full rounded-full ${segment.color}`}
+                          style={{ width: `${formatPercentage(segment.value, stats.totalUsers)}%` }}
+                        />
                       </div>
                     </div>
-                    <div className="h-2 rounded-full bg-muted overflow-hidden">
-                      <div 
-                        className="h-full bg-yellow-500 transition-all" 
-                        style={{ width: `${stats.totalUsers > 0 ? (stats.intermediate / stats.totalUsers) * 100 : 0}%` }}
-                      />
+                  ))}
+                  <Separator />
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border bg-muted/20 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Verified users</p>
+                      <p className="mt-2 text-2xl font-semibold">{stats.verifiedUsers}</p>
                     </div>
-
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="h-3 w-3 rounded-full bg-red-500" />
-                        <span className="text-sm">Advanced</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{stats.advanced}</span>
-                        <span className="text-xs text-muted-foreground">
-                          ({stats.totalUsers > 0 ? Math.round((stats.advanced / stats.totalUsers) * 100) : 0}%)
-                        </span>
-                      </div>
-                    </div>
-                    <div className="h-2 rounded-full bg-muted overflow-hidden">
-                      <div 
-                        className="h-full bg-red-500 transition-all" 
-                        style={{ width: `${stats.totalUsers > 0 ? (stats.advanced / stats.totalUsers) * 100 : 0}%` }}
-                      />
+                    <div className="rounded-2xl border bg-muted/20 p-4">
+                      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Active chatters today</p>
+                      <p className="mt-2 text-2xl font-semibold">{chatStats.activeToday}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Platform Statistics */}
-              <Card>
+              <Card className="rounded-3xl border-border/60 shadow-sm">
                 <CardHeader>
-                  <CardTitle>Platform Statistics</CardTitle>
-                  <CardDescription>Overall platform usage metrics</CardDescription>
+                  <CardTitle>Platform pulse</CardTitle>
+                  <CardDescription>Snapshot of the highest-signal operational metrics.</CardDescription>
                 </CardHeader>
-                <CardContent>
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
+                <CardContent className="space-y-3">
+                  {[
+                    { icon: MessageSquare, label: "Total conversations", subtext: "AI chat sessions", value: chatStats.totalChats },
+                    { icon: Activity, label: "Total messages", subtext: "User and AI exchanges", value: chatStats.totalMessages },
+                    { icon: TrendingUp, label: "Open positions", subtext: "Active paper trades", value: tradingStats.totalPositions },
+                    { icon: Database, label: "Journal entries", subtext: "Trade documentation", value: tradingStats.totalJournalEntries },
+                  ].map((item) => (
+                    <div key={item.label} className="flex items-center justify-between rounded-2xl border bg-muted/20 p-4">
                       <div className="flex items-center gap-3">
-                        <MessageSquare className="h-5 w-5 text-primary" />
+                        <div className="rounded-xl bg-primary/10 p-2 text-primary">
+                          <item.icon className="h-5 w-5" />
+                        </div>
                         <div>
-                          <div className="font-medium">Total Conversations</div>
-                          <div className="text-xs text-muted-foreground">AI chat sessions</div>
+                          <div className="font-medium">{item.label}</div>
+                          <div className="text-xs text-muted-foreground">{item.subtext}</div>
                         </div>
                       </div>
-                      <div className="text-2xl font-bold">{chatStats.totalChats}</div>
+                      <div className="text-2xl font-semibold">{item.value}</div>
                     </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <Activity className="h-5 w-5 text-primary" />
-                        <div>
-                          <div className="font-medium">Total Messages</div>
-                          <div className="text-xs text-muted-foreground">User + AI messages</div>
-                        </div>
-                      </div>
-                      <div className="text-2xl font-bold">{chatStats.totalMessages}</div>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <TrendingUp className="h-5 w-5 text-primary" />
-                        <div>
-                          <div className="font-medium">Open Positions</div>
-                          <div className="text-xs text-muted-foreground">Active paper trades</div>
-                        </div>
-                      </div>
-                      <div className="text-2xl font-bold">{tradingStats.totalPositions}</div>
-                    </div>
-
-                    <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-3">
-                        <Database className="h-5 w-5 text-primary" />
-                        <div>
-                          <div className="font-medium">Journal Entries</div>
-                          <div className="text-xs text-muted-foreground">Trade documentation</div>
-                        </div>
-                      </div>
-                      <div className="text-2xl font-bold">{tradingStats.totalJournalEntries}</div>
-                    </div>
-                  </div>
+                  ))}
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
 
-          {/* Activity Tab */}
           <TabsContent value="activity" className="space-y-4">
-            <Card>
+            <Card className="rounded-3xl border-border/60 shadow-sm">
               <CardHeader>
-                <CardTitle>Recent Activity</CardTitle>
-                <CardDescription>Latest actions across the platform</CardDescription>
+                <CardTitle>Recent activity</CardTitle>
+                <CardDescription>Most recent platform events, ordered by time.</CardDescription>
               </CardHeader>
               <CardContent>
                 {recentActivity.length === 0 ? (
-                  <div className="text-center text-muted-foreground py-8">
-                    No recent activity
+                  <div className="rounded-2xl border border-dashed p-10 text-center text-muted-foreground">
+                    No recent activity.
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {recentActivity.map((activity) => (
-                      <div key={activity.id} className="flex items-center gap-4 p-3 rounded-lg bg-muted/30">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                          <MessageSquare className="h-5 w-5 text-primary" />
+                  <div className="space-y-3">
+                    {recentActivity.map((activity, index) => (
+                      <div key={activity.id} className="flex flex-col gap-3 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-start">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                          <MessageSquare className="h-5 w-5" />
                         </div>
-                        <div className="flex-1">
-                          <div className="font-medium">{activity.action}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {format(new Date(activity.timestamp), "MMM d, yyyy 'at' h:mm a")}
+                        <div className="flex-1 space-y-1">
+                          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="font-medium">{activity.action}</p>
+                            <Badge variant="outline" className="w-fit rounded-full px-2.5 text-[11px]">
+                              Event {index + 1}
+                            </Badge>
                           </div>
+                          <p className="text-sm text-muted-foreground">{activity.user_email}</p>
+                          <p className="text-xs text-muted-foreground">{format(new Date(activity.timestamp), "MMM d, yyyy 'at' h:mm a")}</p>
                         </div>
-                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <Clock className="mt-0.5 h-4 w-4 text-muted-foreground" />
                       </div>
                     ))}
                   </div>
@@ -725,50 +812,37 @@ export default function Admin() {
             </Card>
           </TabsContent>
 
-          {/* System Health Tab */}
           <TabsContent value="system-health" className="space-y-4">
-            {/* Connection Status Cards */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">System Health Monitor</h2>
-                <p className="text-sm text-muted-foreground">
-                  Connection status for Supabase, DataAPI, and Railway backend
-                </p>
+                <h2 className="text-lg font-semibold">System health monitor</h2>
+                <p className="text-sm text-muted-foreground">Live connection status for Supabase, DataAPI, and the backend API.</p>
               </div>
-              <Button onClick={fetchSystemHealth} disabled={healthLoading} variant="outline" size="sm" className="gap-2">
+              <Button onClick={fetchSystemHealth} disabled={healthLoading} variant="outline" size="sm" className="gap-2 rounded-xl">
                 <RefreshCw className={`h-4 w-4 ${healthLoading ? "animate-spin" : ""}`} />
-                Check Health
+                Check health
               </Button>
             </div>
 
-            {/* Overall Status Banner */}
             {systemHealth && (
-              <div className={`rounded-lg border p-4 ${
-                systemHealth.overall === "healthy" ? "border-green-500/50 bg-green-500/5" :
-                systemHealth.overall === "degraded" ? "border-yellow-500/50 bg-yellow-500/5" :
-                "border-red-500/50 bg-red-500/5"
-              }`}>
-                <div className="flex items-center gap-3">
-                  {systemHealth.overall === "healthy" ? (
-                    <Wifi className="h-5 w-5 text-green-500" />
-                  ) : systemHealth.overall === "degraded" ? (
-                    <Wifi className="h-5 w-5 text-yellow-500" />
-                  ) : (
-                    <WifiOff className="h-5 w-5 text-red-500" />
-                  )}
-                  <div>
-                    <div className="font-semibold capitalize">
-                      System {systemHealth.overall}
+              <div className={`rounded-3xl border p-5 ${overallTone.panelClassName}`}>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="rounded-2xl bg-background/80 p-2.5">
+                      <OverallStatusIcon className="h-5 w-5" />
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      Last checked: {systemHealth.timestamp ? new Date(systemHealth.timestamp).toLocaleString() : "Never"}
+                    <div>
+                      <p className="font-semibold capitalize">System {systemHealth.overall}</p>
+                      <p className="text-sm text-muted-foreground">Last checked: {systemHealth.timestamp ? new Date(systemHealth.timestamp).toLocaleString() : "Never"}</p>
                     </div>
                   </div>
+                  <Badge variant="outline" className={`w-fit rounded-full px-3 py-1 ${overallTone.badgeClassName}`}>
+                    {overallTone.label}
+                  </Badge>
                 </div>
               </div>
             )}
 
-            {/* Service Status Cards */}
             <div className="grid gap-4 md:grid-cols-3">
               {/* Supabase */}
               <Card>
