@@ -113,13 +113,7 @@ export function PaperTradingOverview() {
             'font-medium',
             isConnected ? 'text-profit' : 'text-muted-foreground'
           )}>
-            {isConnected
-              ? summary.hasSnapshotPrices
-                ? 'Feed online · Using snapshots'
-                : 'Feed online · Using entry prices'
-              : summary.hasSnapshotPrices
-                ? 'Prices from latest snapshots'
-                : 'Using entry prices'}
+            {isConnected ? 'Live feed connected' : summary.hasSnapshotPrices ? 'Prices from latest snapshots' : 'Using entry prices'}
           </div>
         </CardContent>
       </Card>

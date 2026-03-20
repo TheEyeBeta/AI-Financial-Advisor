@@ -52,7 +52,7 @@ export function PerformanceCharts() {
     }
     
     if (hasOpenPositions) {
-      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLatest: true });
+      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
     }
     
     return data;
