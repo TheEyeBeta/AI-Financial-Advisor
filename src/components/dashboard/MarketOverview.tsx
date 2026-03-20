@@ -5,6 +5,8 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 
+const TOP_STOCKS_ROUTE = "/top-stocks";
+
 export function MarketOverview() {
   const { data: indices = [], isLoading: indicesLoading } = useMarketIndices();
   const { data: trending = [], isLoading: trendingLoading } = useTrendingStocks();
@@ -32,7 +34,7 @@ export function MarketOverview() {
           <div>
             <p className="text-xs text-muted-foreground/70 uppercase tracking-wide">Markets</p>
             <p className="mt-1 text-xs text-muted-foreground/60">
-              A quick snapshot of major indexes and trending stocks so users can see the market tone before reviewing their portfolio.
+              A quick snapshot of major indexes and trending stocks so you can see the market tone before reviewing your portfolio.
             </p>
           </div>
           <div className="flex items-center gap-1.5 text-[10px] text-profit">
@@ -43,7 +45,7 @@ export function MarketOverview() {
             Open
           </div>
         </div>
-        
+
         <div className="space-y-2">
           {indices.length === 0 ? (
             <div className="py-6 text-center">
@@ -69,7 +71,7 @@ export function MarketOverview() {
                     <div
                       className={cn(
                         "flex items-center gap-0.5 text-xs font-medium min-w-[60px] justify-end",
-                        index.is_positive ? "text-profit" : "text-loss"
+                        index.is_positive ? "text-profit" : "text-loss",
                       )}
                     >
                       {index.is_positive ? (
@@ -114,7 +116,7 @@ export function MarketOverview() {
             variant="ghost"
             size="sm"
             className="gap-2 text-xs"
-            onClick={() => navigate("/top-stocks")}
+            onClick={() => navigate(TOP_STOCKS_ROUTE)}
           >
             Explore market movers
             <ArrowRight className="h-3.5 w-3.5" />

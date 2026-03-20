@@ -1,7 +1,7 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { BookOpen, ChevronRight, GraduationCap, Trophy } from "lucide-react";
+import { AlertCircle, BookOpen, ChevronRight, GraduationCap, Trophy } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -12,7 +12,7 @@ export function AcademyProgress() {
   const { authUserId } = useAuth();
   const navigate = useNavigate();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["academy-dashboard-progress", authUserId],
     enabled: !!authUserId,
     queryFn: async () => {
@@ -27,6 +27,16 @@ export function AcademyProgress() {
     },
   });
 
+  useEffect(() => {
+    if (isError) {
+      console.error("Failed to load academy dashboard progress.", {
+        authUserId,
+        queryKey: ["academy-dashboard-progress", authUserId],
+        error,
+      });
+    }
+  }, [authUserId, error, isError]);
+
   const summary = useMemo(() => {
     const tiers = data?.tiers ?? [];
     const lessons = data?.lessons ?? [];
@@ -36,7 +46,10 @@ export function AcademyProgress() {
     const completedLessonIds = new Set(
       progress.filter((entry) => entry.status === "completed").map((entry) => entry.lesson_id),
     );
-    const enrolledTierIds = new Set(enrollments.map((entry) => entry.tier_id));
+    const unlockedTierIds = new Set([
+      TIER_IDS.BEGINNER,
+      ...enrollments.map((entry) => entry.tier_id),
+    ]);
 
     const totalLessons = lessons.length;
     const completedLessons = completedLessonIds.size;
@@ -48,7 +61,7 @@ export function AcademyProgress() {
       const completedInTier = tierLessons.filter((lesson) => completedLessonIds.has(lesson.id)).length;
       const totalInTier = tierLessons.length;
       const tierPercent = totalInTier > 0 ? Math.round((completedInTier / totalInTier) * 100) : 0;
-      const unlocked = tier.id === TIER_IDS.BEGINNER || enrolledTierIds.has(tier.id);
+      const unlocked = unlockedTierIds.has(tier.id);
 
       return {
         id: tier.id,
@@ -62,6 +75,10 @@ export function AcademyProgress() {
     });
 
     const nextLesson = lessons.find((lesson) => {
+      if (!unlockedTierIds.has(lesson.tier_id)) {
+        return false;
+      }
+
       const lessonProgress = progress.find((entry) => entry.lesson_id === lesson.id);
       return lessonProgress?.status !== "completed";
     });
@@ -88,6 +105,23 @@ export function AcademyProgress() {
               <div key={i} className="h-24 bg-muted/30 rounded-xl animate-pulse" />
             ))}
           </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (isError) {
+    return (
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardContent className="flex flex-col items-center px-4 py-8 text-center">
+          <AlertCircle className="mb-3 h-8 w-8 text-destructive/70" />
+          <p className="text-sm font-medium text-foreground">We couldn’t load your Academy progress.</p>
+          <p className="mt-1 text-xs text-muted-foreground/70">
+            Please try again from the Academy page while we refresh your learning summary.
+          </p>
+          <Button variant="outline" size="sm" className="mt-4" onClick={() => navigate("/academy")}>
+            Open Academy
+          </Button>
         </CardContent>
       </Card>
     );
