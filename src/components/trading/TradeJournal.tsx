@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Calendar, DollarSign, FileText, BookOpen, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -54,6 +54,10 @@ export function TradeJournal({
   const { userId } = useAuth();
   const [showForm, setShowForm] = useState(mode === 'workspace');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    setShowForm(isWorkspaceMode);
+  }, [isWorkspaceMode]);
   const { register, handleSubmit, reset, control, formState: { errors } } = useForm<JournalFormData>({
     defaultValues: {
       type: 'BUY',
@@ -86,6 +90,7 @@ export function TradeJournal({
     }
 
     let shouldRefreshTradingData = false;
+    let journalSaveFailed = false;
     setIsSubmitting(true);
 
     try {
@@ -185,21 +190,22 @@ export function TradeJournal({
         tradeId = trade.id;
       }
 
-      if (shouldRefreshTradingData) {
-        await refreshTradingQueries();
+      try {
+        await createEntry.mutateAsync({
+          symbol,
+          type: data.type,
+          date: data.date,
+          quantity: data.quantity,
+          price: data.price,
+          strategy: data.strategy || null,
+          notes: data.notes || null,
+          tags: tags.length > 0 ? tags : null,
+          trade_id: tradeId,
+        });
+      } catch (error) {
+        journalSaveFailed = true;
+        throw error;
       }
-
-      await createEntry.mutateAsync({
-        symbol,
-        type: data.type,
-        date: data.date,
-        quantity: data.quantity,
-        price: data.price,
-        strategy: data.strategy || null,
-        notes: data.notes || null,
-        tags: tags.length > 0 ? tags : null,
-        trade_id: tradeId,
-      });
 
       toast({
         title: "Success",
@@ -217,10 +223,14 @@ export function TradeJournal({
         await refreshTradingQueries();
       }
 
+      const description = journalSaveFailed && shouldRefreshTradingData
+        ? `Trade recorded but journal save failed — do not retry writes. ${getErrorMessage(error)}`
+        : getErrorMessage(error) || "Failed to create trade";
+
       toast({
-        title: "Error",
-        description: getErrorMessage(error) || "Failed to create trade",
-        variant: "destructive",
+        title: journalSaveFailed && shouldRefreshTradingData ? "Partial Success" : "Error",
+        description,
+        variant: journalSaveFailed && shouldRefreshTradingData ? "default" : "destructive",
       });
     } finally {
       setIsSubmitting(false);
