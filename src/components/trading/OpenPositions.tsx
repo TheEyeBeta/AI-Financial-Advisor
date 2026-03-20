@@ -15,14 +15,14 @@ export function OpenPositions() {
   const displayPositions = positions;
 
   const calculatePnL = (position: OpenPosition) => {
-    const currentPrice = position.current_price || position.entry_price;
+    const currentPrice = position.current_price ?? position.entry_price;
     const pnl = (currentPrice - position.entry_price) * position.quantity;
     const pnlPercent = ((currentPrice - position.entry_price) / position.entry_price) * 100;
     return { pnl, pnlPercent };
   };
 
   const totalValue = displayPositions.reduce(
-    (sum, pos) => sum + (pos.current_price || pos.entry_price) * pos.quantity,
+    (sum, pos) => sum + (pos.current_price ?? pos.entry_price) * pos.quantity,
     0
   );
   const totalPnL = displayPositions.reduce(
@@ -121,8 +121,8 @@ export function OpenPositions() {
               {displayPositions.map((position, index) => {
                 const { pnl, pnlPercent } = calculatePnL(position);
                 const isProfit = pnl >= 0;
-                const currentPrice = position.current_price || position.entry_price;
-                const hasLivePrice = position.current_price !== null && position.current_price !== undefined;
+                const currentPrice = position.current_price ?? position.entry_price;
+                const hasMarkedPrice = position.current_price !== null && position.current_price !== undefined;
 
                 return (
                   <div 
@@ -140,7 +140,7 @@ export function OpenPositions() {
                           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 bg-primary/5">
                             {position.type}
                           </Badge>
-                          {hasLivePrice && (
+                          {hasMarkedPrice && (
                             <span className="flex items-center gap-0.5">
                               <span className="h-1.5 w-1.5 rounded-full bg-profit animate-pulse" />
                             </span>
@@ -156,12 +156,12 @@ export function OpenPositions() {
                       <div className="text-right hidden sm:block">
                         <div className={cn(
                           "text-sm font-mono transition-colors",
-                          hasLivePrice && "text-foreground"
+                          hasMarkedPrice && "text-foreground"
                         )}>
                           ${currentPrice.toFixed(2)}
                         </div>
                         <div className="text-[10px] text-muted-foreground/50 flex items-center justify-end gap-1">
-                          <span>{hasLivePrice ? "live" : "stored"}</span>
+                          <span>{hasMarkedPrice ? "snapshot" : "entry"}</span>
                         </div>
                       </div>
                       

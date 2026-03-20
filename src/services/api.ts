@@ -303,11 +303,12 @@ export const positionsApi = {
       );
 
       return positions.map((position) => {
-        const snapshotPrice = snapshotPriceByTicker.get(position.symbol.toUpperCase());
+        const normalizedSymbol = position.symbol.trim().toUpperCase();
+        const snapshotPrice = snapshotPriceByTicker.get(normalizedSymbol);
 
         return snapshotPrice !== undefined
-          ? { ...position, current_price: snapshotPrice }
-          : position;
+          ? { ...position, symbol: normalizedSymbol, current_price: snapshotPrice }
+          : { ...position, symbol: normalizedSymbol, current_price: null };
       });
     } catch (snapshotError) {
       console.warn('[positionsApi.getAll] Failed to hydrate position prices from stock snapshots:', snapshotError);

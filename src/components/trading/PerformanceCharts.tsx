@@ -24,9 +24,11 @@ export function PerformanceCharts() {
   const { data: positions = [], isLoading: positionsLoading } = useOpenPositions();
 
   const currentPortfolioValue = useMemo(
-    () => positions.reduce((sum, pos) => sum + ((pos.current_price || pos.entry_price) * pos.quantity), 0),
+    () => positions.reduce((sum, pos) => sum + ((pos.current_price ?? pos.entry_price) * pos.quantity), 0),
     [positions],
   );
+
+  const hasOpenPositions = positions.length > 0;
 
   // Calculate equity curve
   const equityData = useMemo(() => {
@@ -49,10 +51,12 @@ export function PerformanceCharts() {
       });
     }
     
-    data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
+    if (portfolioHistory.length > 0 || currentPortfolioValue > 0 || hasOpenPositions) {
+      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
+    }
     
     return data;
-  }, [portfolioHistory, currentPortfolioValue]);
+  }, [hasOpenPositions, portfolioHistory, currentPortfolioValue]);
 
   // Calculate win/loss distribution
   const winLossData = useMemo(() => {
@@ -88,7 +92,7 @@ export function PerformanceCharts() {
     const currentValue = currentPortfolioValue;
     const totalCostBasis = positions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
     const unrealizedPnL = positions.reduce((sum, pos) => {
-      const currentPrice = pos.current_price || pos.entry_price;
+      const currentPrice = pos.current_price ?? pos.entry_price;
       return sum + ((currentPrice - pos.entry_price) * pos.quantity);
     }, 0);
     const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
@@ -126,7 +130,7 @@ export function PerformanceCharts() {
               {portfolioStats.totalReturn >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
               <span>{portfolioStats.totalReturn >= 0 ? '+' : ''}${portfolioStats.totalReturn.toFixed(2)} ({portfolioStats.percentReturn.toFixed(2)}%)</span>
             </div>
-            <div className="text-[10px] text-muted-foreground/50 mt-1">Live · Updates every 30s</div>
+            <div className="text-[10px] text-muted-foreground/50 mt-1">Snapshot-backed pricing</div>
           </CardContent>
         </Card>
 
@@ -165,7 +169,7 @@ export function PerformanceCharts() {
         <CardContent className="pt-4 pb-3">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Equity Curve</span>
-            <span className="text-[10px] text-muted-foreground/50">(Live)</span>
+            <span className="text-[10px] text-muted-foreground/50">(Snapshot)</span>
           </div>
           <div className="h-[180px]">
             {equityData.length === 0 ? (

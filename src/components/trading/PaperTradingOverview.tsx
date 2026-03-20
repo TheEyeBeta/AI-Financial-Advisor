@@ -18,7 +18,7 @@ export function PaperTradingOverview() {
   const { data: positions = [] } = useOpenPositions();
   const { data: trades = [] } = useClosedTrades();
   const { data: portfolioHistory = [] } = usePortfolioHistory();
-  const { isConnected, isConnecting } = useTradeEngineConnection();
+  const { isConnected } = useTradeEngineConnection();
 
   const summary = useMemo(() => {
     const markedPositions = positions.map((position) => {
@@ -52,6 +52,7 @@ export function PaperTradingOverview() {
       openPositions: positions.length,
       winRate,
       tradesCount: trades.length,
+      hasSnapshotPrices: markedPositions.some((position) => position.current_price !== null && position.current_price !== undefined),
     };
   }, [portfolioHistory, positions, trades]);
 
@@ -59,7 +60,7 @@ export function PaperTradingOverview() {
     {
       label: 'Portfolio Value',
       value: formatCurrency(summary.marketValue),
-      helper: isConnected ? 'Live marked prices' : isConnecting ? 'Connecting to live feed' : 'Using stored prices where needed',
+      helper: summary.hasSnapshotPrices ? 'Marked prices (snapshot)' : 'Using entry prices where needed',
       icon: Wallet,
     },
     {
@@ -110,9 +111,9 @@ export function PaperTradingOverview() {
           </div>
           <div className={cn(
             'font-medium',
-            isConnected ? 'text-profit' : isConnecting ? 'text-yellow-500' : 'text-muted-foreground'
+            isConnected ? 'text-profit' : 'text-muted-foreground'
           )}>
-            {isConnected ? 'Live feed connected' : isConnecting ? 'Connecting live feed…' : 'Live feed offline'}
+            {isConnected ? 'Live feed connected' : summary.hasSnapshotPrices ? 'Prices from latest snapshots' : 'Using entry prices'}
           </div>
         </CardContent>
       </Card>
