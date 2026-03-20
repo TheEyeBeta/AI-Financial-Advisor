@@ -276,7 +276,44 @@ export const positionsApi = {
       .order('entry_date', { ascending: false });
 
     if (error) throw error;
-    return data || [];
+
+    const positions = data || [];
+    if (positions.length === 0) {
+      return positions;
+    }
+
+    const uniqueSymbols = Array.from(
+      new Set(
+        positions
+          .map((position) => position.symbol?.trim().toUpperCase())
+          .filter((symbol): symbol is string => Boolean(symbol))
+      )
+    );
+
+    if (uniqueSymbols.length === 0) {
+      return positions;
+    }
+
+    try {
+      const snapshots = await stockSnapshotsApi.getByTickers(uniqueSymbols);
+      const snapshotPriceByTicker = new Map(
+        snapshots
+          .filter((snapshot) => typeof snapshot.last_price === 'number')
+          .map((snapshot) => [snapshot.ticker.toUpperCase(), snapshot.last_price as number])
+      );
+
+      return positions.map((position) => {
+        const normalizedSymbol = position.symbol.trim().toUpperCase();
+        const snapshotPrice = snapshotPriceByTicker.get(normalizedSymbol);
+
+        return snapshotPrice !== undefined
+          ? { ...position, symbol: normalizedSymbol, current_price: snapshotPrice }
+          : { ...position, symbol: normalizedSymbol, current_price: null };
+      });
+    } catch (snapshotError) {
+      console.warn('[positionsApi.getAll] Failed to hydrate position prices from stock snapshots:', snapshotError);
+      return positions;
+    }
   },
 
   async create(userId: string, position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<OpenPosition> {

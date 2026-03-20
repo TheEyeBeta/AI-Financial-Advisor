@@ -2,7 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useMemo } from "react";
 import { Activity, DollarSign, LineChart, Trophy, Wallet } from "lucide-react";
 import { usePortfolioHistory, useClosedTrades, useOpenPositions } from "@/hooks/use-data";
-import { useTradeEngineConnection, useTradeEnginePrices } from "@/hooks/use-trade-engine";
+import { useTradeEngineConnection } from "@/hooks/use-trade-engine";
 import { cn } from "@/lib/utils";
 
 function formatCurrency(value: number) {
@@ -18,22 +18,16 @@ export function PaperTradingOverview() {
   const { data: positions = [] } = useOpenPositions();
   const { data: trades = [] } = useClosedTrades();
   const { data: portfolioHistory = [] } = usePortfolioHistory();
-  const { isConnected, isConnecting } = useTradeEngineConnection();
-  const normalizedTickers = useMemo(
-    () => positions.map((position) => position.symbol.toUpperCase()),
-    [positions],
-  );
-  const livePrices = useTradeEnginePrices(normalizedTickers);
+  const { isConnected } = useTradeEngineConnection();
 
   const summary = useMemo(() => {
     const markedPositions = positions.map((position) => {
-      const normalizedSymbol = position.symbol.toUpperCase();
-      const livePrice = livePrices[normalizedSymbol]?.price ?? position.current_price ?? position.entry_price;
+      const snapshotPrice = position.current_price ?? position.entry_price;
       return {
         ...position,
-        markedPrice: livePrice,
-        marketValue: livePrice * position.quantity,
-        unrealizedPnL: (livePrice - position.entry_price) * position.quantity,
+        markedPrice: snapshotPrice,
+        marketValue: snapshotPrice * position.quantity,
+        unrealizedPnL: (snapshotPrice - position.entry_price) * position.quantity,
       };
     });
 
@@ -58,14 +52,15 @@ export function PaperTradingOverview() {
       openPositions: positions.length,
       winRate,
       tradesCount: trades.length,
+      hasSnapshotPrices: markedPositions.some((position) => position.current_price !== null && position.current_price !== undefined),
     };
-  }, [livePrices, portfolioHistory, positions, trades]);
+  }, [portfolioHistory, positions, trades]);
 
   const cards = [
     {
       label: 'Portfolio Value',
       value: formatCurrency(summary.marketValue),
-      helper: isConnected ? 'Live marked prices' : isConnecting ? 'Connecting to live feed' : 'Using stored prices where needed',
+      helper: summary.hasSnapshotPrices ? 'Marked prices (snapshot)' : 'Using entry prices where needed',
       icon: Wallet,
     },
     {
@@ -116,9 +111,9 @@ export function PaperTradingOverview() {
           </div>
           <div className={cn(
             'font-medium',
-            isConnected ? 'text-profit' : isConnecting ? 'text-yellow-500' : 'text-muted-foreground'
+            isConnected ? 'text-profit' : 'text-muted-foreground'
           )}>
-            {isConnected ? 'Live feed connected' : isConnecting ? 'Connecting live feed…' : 'Live feed offline'}
+            {isConnected ? 'Live feed connected' : summary.hasSnapshotPrices ? 'Prices from latest snapshots' : 'Using entry prices'}
           </div>
         </CardContent>
       </Card>
