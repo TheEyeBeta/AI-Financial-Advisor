@@ -32,7 +32,7 @@ export function PerformanceCharts() {
 
   // Calculate equity curve
   const equityData = useMemo(() => {
-    const data: Array<{ date: string; value: number; fullDate: string; isLive?: boolean }> = [];
+    const data: Array<{ date: string; value: number; fullDate: string; isLatest?: boolean }> = [];
     
     if (portfolioHistory.length > 0) {
       const sorted = [...portfolioHistory].sort((a, b) => 
@@ -52,7 +52,7 @@ export function PerformanceCharts() {
     }
     
     if (hasOpenPositions) {
-      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
+      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLatest: true });
     }
     
     return data;
