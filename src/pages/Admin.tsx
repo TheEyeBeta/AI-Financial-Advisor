@@ -77,8 +77,17 @@ const EXPERIENCE_STYLES: Record<string, string> = {
   default: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20",
 };
 
-const getExperienceStyle = (experienceLevel: string | null) =>
-  EXPERIENCE_STYLES[experienceLevel || ""] || EXPERIENCE_STYLES.default;
+const getExperienceStyle = (experienceLevel: string | null) => {
+  const normalizedExperienceLevel = experienceLevel?.trim().toLowerCase() || "default";
+  return EXPERIENCE_STYLES[normalizedExperienceLevel] || EXPERIENCE_STYLES.default;
+};
+
+const safeFormatDate = (timestamp: unknown, dateFormat: string, fallback = "Waiting for data") => {
+  if (timestamp === null || timestamp === undefined || timestamp === "") return fallback;
+
+  const date = timestamp instanceof Date ? timestamp : new Date(timestamp as string | number);
+  return Number.isNaN(date.getTime()) ? fallback : format(date, dateFormat);
+};
 
 const formatPercentage = (value: number, total: number) => {
   if (!total) return 0;
@@ -439,7 +448,7 @@ export default function Admin() {
                     <div>
                       <p className="line-clamp-1 text-sm font-semibold">{latestActivity?.action || "No recent events"}</p>
                       <p className="text-xs text-muted-foreground">
-                        {latestActivity ? format(new Date(latestActivity.timestamp), "MMM d, h:mm a") : "Waiting for data"}
+                        {safeFormatDate(latestActivity?.timestamp, "MMM d, h:mm a")}
                       </p>
                     </div>
                     <Sparkles className="h-8 w-8 text-primary/70" />
@@ -651,7 +660,7 @@ export default function Admin() {
                                       )}
                                     </TableCell>
                                     <TableCell className="text-sm text-muted-foreground">
-                                      {format(new Date(user.created_at), "MMM d, yyyy")}
+                                      {safeFormatDate(user.created_at, "MMM d, yyyy")}
                                     </TableCell>
                                     <TableCell className="text-right">
                                       <div className="flex justify-end gap-2">
@@ -667,7 +676,13 @@ export default function Admin() {
                                             </Button>
                                             <AlertDialog>
                                               <AlertDialogTrigger asChild>
-                                                <Button variant="destructive" size="sm" className="rounded-lg">
+                                                <Button
+                                                  variant="destructive"
+                                                  size="sm"
+                                                  className="rounded-lg"
+                                                  aria-label={`Delete user ${user.email || fullName}`}
+                                                  title={`Delete user ${user.email || fullName}`}
+                                                >
                                                   <Trash2 className="h-4 w-4" />
                                                 </Button>
                                               </AlertDialogTrigger>
@@ -805,7 +820,7 @@ export default function Admin() {
                             </Badge>
                           </div>
                           <p className="text-sm text-muted-foreground">{activity.user_email}</p>
-                          <p className="text-xs text-muted-foreground">{format(new Date(activity.timestamp), "MMM d, yyyy 'at' h:mm a")}</p>
+                          <p className="text-xs text-muted-foreground">{safeFormatDate(activity.timestamp, "MMM d, yyyy 'at' h:mm a")}</p>
                         </div>
                         <Clock className="mt-0.5 h-4 w-4 text-muted-foreground" />
                       </div>
