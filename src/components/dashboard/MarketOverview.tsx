@@ -1,11 +1,14 @@
-import { TrendingUp, TrendingDown, Activity } from "lucide-react";
+import { TrendingUp, TrendingDown, Activity, ArrowRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { useMarketIndices, useTrendingStocks } from "@/hooks/use-data";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { useNavigate } from "react-router-dom";
 
 export function MarketOverview() {
   const { data: indices = [], isLoading: indicesLoading } = useMarketIndices();
   const { data: trending = [], isLoading: trendingLoading } = useTrendingStocks();
+  const navigate = useNavigate();
 
   if (indicesLoading || trendingLoading) {
     return (
@@ -25,8 +28,13 @@ export function MarketOverview() {
   return (
     <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
       <CardContent className="pt-5 pb-4">
-        <div className="flex items-center justify-between mb-4">
-          <p className="text-xs text-muted-foreground/70 uppercase tracking-wide">Markets</p>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <p className="text-xs text-muted-foreground/70 uppercase tracking-wide">Markets</p>
+            <p className="mt-1 text-xs text-muted-foreground/60">
+              A quick snapshot of major indexes and trending stocks so users can see the market tone before reviewing their portfolio.
+            </p>
+          </div>
           <div className="flex items-center gap-1.5 text-[10px] text-profit">
             <span className="relative flex h-1.5 w-1.5">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-profit opacity-75" />
@@ -100,6 +108,18 @@ export function MarketOverview() {
             </div>
           </div>
         )}
+
+        <div className="mt-4 flex justify-end">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-2 text-xs"
+            onClick={() => navigate("/top-stocks")}
+          >
+            Explore market movers
+            <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </CardContent>
     </Card>
   );

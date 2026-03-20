@@ -2,6 +2,7 @@ import { AppLayout } from "@/components/layout/AppLayout";
 import { PortfolioPerformance } from "@/components/dashboard/PortfolioPerformance";
 import { TradeStatistics } from "@/components/dashboard/TradeStatistics";
 import { MarketOverview } from "@/components/dashboard/MarketOverview";
+import { AcademyProgress } from "@/components/dashboard/AcademyProgress";
 import { OpenPositions } from "@/components/trading/OpenPositions";
 import { TradeHistory } from "@/components/trading/TradeHistory";
 import { useAuth } from "@/hooks/use-auth";
@@ -107,9 +108,12 @@ const Dashboard = () => {
             <MarketOverview />
           </div>
           <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '250ms' }}>
-            <OpenPositions />
+            <AcademyProgress />
           </div>
           <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '300ms' }}>
+            <OpenPositions />
+          </div>
+          <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '350ms' }}>
             <TradeHistory />
           </div>
         </div>
