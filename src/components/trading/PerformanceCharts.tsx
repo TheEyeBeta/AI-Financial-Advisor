@@ -32,7 +32,7 @@ export function PerformanceCharts() {
 
   // Calculate equity curve
   const equityData = useMemo(() => {
-    const data: Array<{ date: string; value: number; fullDate: string; isLive?: boolean }> = [];
+    const data: Array<{ date: string; value: number; fullDate: string; isLatest?: boolean }> = [];
     
     if (portfolioHistory.length > 0) {
       const sorted = [...portfolioHistory].sort((a, b) => 
