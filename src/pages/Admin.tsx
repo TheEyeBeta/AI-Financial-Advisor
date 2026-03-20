@@ -448,7 +448,7 @@ export default function Admin() {
                     <div>
                       <p className="line-clamp-1 text-sm font-semibold">{latestActivity?.action || "No recent events"}</p>
                       <p className="text-xs text-muted-foreground">
-                        {safeFormatDate(latestActivity?.timestamp, "MMM d, h:mm a")}
+                        {safeFormatDate(latestActivity?.timestamp, "MMM d, h:mm a", "—")}
                       </p>
                     </div>
                     <Sparkles className="h-8 w-8 text-primary/70" />
