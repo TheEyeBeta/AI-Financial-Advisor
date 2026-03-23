@@ -34,10 +34,10 @@ OPENAI_MODEL = (os.getenv("OPENAI_MODEL") or "").strip() or None  # Backward-com
 if OPENAI_MODEL == "gpt-4.5":
     # Prevent stale config from forcing a retired model.
     OPENAI_MODEL = None
-OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", OPENAI_MODEL or "gpt-4.1")
-OPENAI_CLASSIFIER_MODEL = os.getenv("OPENAI_CLASSIFIER_MODEL", OPENAI_MODEL or "gpt-4.1-nano")
+OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", OPENAI_MODEL or "gpt-5")
+OPENAI_CLASSIFIER_MODEL = os.getenv("OPENAI_CLASSIFIER_MODEL", OPENAI_MODEL or "gpt-5-mini")
 OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", OPENAI_MODEL or "gpt-4o-mini")
-OPENAI_QUANT_MODEL = os.getenv("OPENAI_QUANT_MODEL", OPENAI_MODEL or "gpt-4.1")
+OPENAI_QUANT_MODEL = os.getenv("OPENAI_QUANT_MODEL", OPENAI_MODEL or "gpt-5")
 try:
     OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
 except ValueError:
@@ -48,7 +48,7 @@ PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-online"  # Cost-effective fallback model
 MAX_CHAT_MESSAGE_CONTENT_LENGTH = 50000
 TEST_MODE_DISCLAIMER = "Test mode only. Not financial advice."
-REASONING_MODEL_PREFIXES = ("o1", "o3", "o4")
+REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
 MIN_REASONING_MAX_OUTPUT_TOKENS = 1200
 RETRY_REASONING_MAX_OUTPUT_TOKENS = 1800
 
