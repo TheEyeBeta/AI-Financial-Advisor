@@ -140,9 +140,9 @@ class RateLimitService:
                 requests_per_minute=60,
                 requests_per_hour=500,
                 requests_per_day=2000,
-                tokens_per_minute=10000,
-                tokens_per_hour=50000,
-                tokens_per_day=200000,
+                tokens_per_minute=40000,
+                tokens_per_hour=150000,
+                tokens_per_day=600000,
             ),
             "/api/ai/analyze-quantitative": RateLimitConfig(
                 requests_per_minute=30,
