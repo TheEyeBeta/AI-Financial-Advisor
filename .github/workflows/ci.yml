@@ -2,9 +2,9 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, staging]
   pull_request:
-    branches: [main, develop]
+    branches: [main, develop, staging]
 
 env:
   NODE_VERSION: '20'
@@ -32,14 +32,39 @@ jobs:
           # Skip optional dep postinstall (Railway CLI binary download, Vercel CLI)
           npm_config_ignore_scripts: true
 
+      - name: Setup Python (for OpenAPI export)
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install backend deps (for OpenAPI export)
+        run: pip install -q fastapi pydantic httpx python-dotenv apscheduler pyjwt supabase sentry-sdk
+
+      - name: OpenAPI drift detection
+        run: |
+          python backend/websearch_service/export_openapi.py
+          npm run generate:api-types
+          git diff --exit-code docs/openapi.json src/lib/generated/ || {
+            echo "::error::OpenAPI spec or generated types are out of date. Run 'python backend/websearch_service/export_openapi.py && npm run generate:api-types' and commit the result."
+            exit 1
+          }
+
       - name: Run ESLint (zero warnings)
         run: npm run lint:ci
 
       - name: Run TypeScript type check
         run: npm run type-check
 
-      - name: Run unit tests
-        run: npm test
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+
+      - name: Upload frontend coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: coverage/
+          retention-days: 7
 
       - name: Build application
         run: npm run build
@@ -60,6 +85,20 @@ jobs:
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: advisor_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d advisor_ci"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout code
@@ -78,9 +117,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Validate Alembic migrations
+        working-directory: ./backend/websearch_service
+        env:
+          ALEMBIC_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/advisor_ci
+        run: |
+          alembic -c alembic.ini upgrade head
+          alembic -c alembic.ini check
+
       - name: Run tests with coverage
         working-directory: ./backend/websearch_service
-        run: pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+        run: pytest tests/ -v --cov=app --cov-branch --cov-fail-under=80 --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage reports
         if: always()

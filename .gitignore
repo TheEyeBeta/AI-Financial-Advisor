@@ -6,6 +6,8 @@ node_modules/
 # Testing
 coverage/
 .nyc_output
+playwright-report/
+test-results/
 
 # Production
 dist/
@@ -82,4 +84,23 @@ htmlcov/
 .DS_Store
 Thumbs.db
 .vercel
+.railway/
 .env*.local
+
+# Certificates and keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Secret directories
+secrets/
+credentials/
+private/
+
+# Additional env patterns
+.env.production
+.env.staging
+.env.test

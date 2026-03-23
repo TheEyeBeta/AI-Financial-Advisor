@@ -85,7 +85,7 @@ def create_app() -> FastAPI:
         # SECURITY: Only allow the methods the API actually uses.
         allow_methods=["GET", "POST", "OPTIONS"],
         # SECURITY: Enumerate allowed headers instead of wildcard.
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Admin-Key"],
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
         expose_headers=["X-RateLimit-Limit-Minute", "X-RateLimit-Remaining-Minute", "X-RateLimit-Reset-Minute",
                         "X-RateLimit-Limit-Hour", "X-RateLimit-Remaining-Hour", "X-RateLimit-Reset-Hour",
                         "X-RateLimit-Limit-Day", "X-RateLimit-Remaining-Day", "X-RateLimit-Reset-Day"],

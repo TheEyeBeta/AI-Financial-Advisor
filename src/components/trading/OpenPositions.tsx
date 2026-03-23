@@ -7,9 +7,21 @@ import { useTradeEngineConnection } from "@/hooks/use-trade-engine";
 import type { OpenPosition } from "@/types/database";
 import { cn } from "@/lib/utils";
 
-export function OpenPositions() {
-  const { data: positions = [], isLoading } = useOpenPositions();
+interface OpenPositionsProps {
+  positions?: OpenPosition[];
+  isLoading?: boolean;
+  allowClose?: boolean;
+}
+
+export function OpenPositions({
+  positions: positionsProp,
+  isLoading: isLoadingProp,
+  allowClose = true,
+}: OpenPositionsProps = {}) {
+  const { data: fallbackPositions = [], isLoading: fallbackLoading } = useOpenPositions();
   const deletePosition = useDeletePosition();
+  const positions = positionsProp ?? fallbackPositions;
+  const isLoading = isLoadingProp ?? fallbackLoading;
   
   const { isConnected, isConnecting } = useTradeEngineConnection();
   const displayPositions = positions;
@@ -175,15 +187,17 @@ export function OpenPositions() {
                         </div>
                       </div>
                       
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => handleClosePosition(position.id)}
-                        disabled={deletePosition.isPending}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
+                      {allowClose && (
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                          onClick={() => handleClosePosition(position.id)}
+                          disabled={deletePosition.isPending}
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                 );

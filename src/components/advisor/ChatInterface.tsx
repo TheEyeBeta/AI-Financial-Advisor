@@ -1,6 +1,6 @@
-import { useRef, useEffect, useState } from "react";
-import { Bot, User, Plus, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useRef, useState } from "react";
+import { Bot, User } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 
 interface Message {
@@ -11,117 +11,136 @@ interface Message {
 
 interface ChatInterfaceProps {
   messages: Message[];
-  onNewChat?: () => void;
-  isLoading?: boolean;
   isThinking?: boolean;
-  chatTitle?: string;
   onStreamingComplete?: () => void;
 }
 
-// Format AI response with better readability
 function formatMessage(content: string): React.ReactNode {
-  // Clean up common model artifacts
   const cleaned = content
-    // Remove leading/trailing quotes that some models add
-    .replace(/^["']|["']$/g, '')
-    // Normalize excessive blank lines
-    .replace(/\n{3,}/g, '\n\n')
-    // Join numbered list items separated by blank lines
-    .replace(/(\d+\.\s[^\n]+)\n\n+(?=\d+\.\s)/g, '$1\n')
-    // Join bullet list items separated by blank lines
-    .replace(/([-•*]\s[^\n]+)\n\n+(?=[-•*]\s)/g, '$1\n');
+    .replace(/^["']|["']$/g, "")
+    .replace(/â€¢|Ã¢â‚¬Â¢/g, "-")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/(\d+\.\s[^\n]+)\n\n+(?=\d+\.\s)/g, "$1\n")
+    .replace(/([-\u2022*]\s[^\n]+)\n\n+(?=[-\u2022*]\s)/g, "$1\n");
 
-  // Split content into paragraphs
   const paragraphs = cleaned.split(/\n\n+/);
 
-  return paragraphs.map((para, pIndex) => {
-    const trimmed = para.trim();
+  return paragraphs.map((paragraph, paragraphIndex) => {
+    const trimmed = paragraph.trim();
     if (!trimmed) return null;
 
-    // Check if it's a numbered list
     if (/^\d+\.\s/.test(trimmed)) {
       const items = trimmed.split(/\n(?=\d+\.\s)/);
       return (
-        <ol key={pIndex} className="list-decimal list-outside space-y-1.5 my-2.5 ml-6">
-          {items.map((item, iIndex) => (
-            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90 pl-1">
-              {formatInlineText(item.replace(/^\d+\.\s*/, ''))}
+        <ol key={paragraphIndex} className="my-3 ml-5 list-decimal space-y-1.5">
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex} className="pl-1 text-sm leading-7 text-foreground/90">
+              {formatInlineText(item.replace(/^\d+\.\s*/, ""), `ol-${paragraphIndex}-${itemIndex}`)}
             </li>
           ))}
         </ol>
       );
     }
 
-    // Check if it's a bullet list
-    if (/^[-•*]\s/.test(trimmed)) {
-      const items = trimmed.split(/\n(?=[-•*]\s)/);
+    if (/^[-\u2022*]\s/.test(trimmed)) {
+      const items = trimmed.split(/\n(?=[-\u2022*]\s)/);
       return (
-        <ul key={pIndex} className="list-disc list-outside space-y-1.5 my-2.5 ml-6">
-          {items.map((item, iIndex) => (
-            <li key={iIndex} className="text-sm leading-relaxed text-foreground/90 pl-1">
-              {formatInlineText(item.replace(/^[-•*]\s*/, ''))}
+        <ul key={paragraphIndex} className="my-3 ml-5 list-disc space-y-1.5">
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex} className="pl-1 text-sm leading-7 text-foreground/90">
+              {formatInlineText(item.replace(/^[-\u2022*]\s*/, ""), `ul-${paragraphIndex}-${itemIndex}`)}
             </li>
           ))}
         </ul>
       );
     }
 
-    // Check for disclaimer line - style it distinctly
-    if (trimmed === 'Test mode only. Not financial advice.') {
-      return (
-        <p key={pIndex} className="text-xs text-muted-foreground/70 italic mt-3 pt-2 border-t border-border/30">
-          {trimmed}
-        </p>
-      );
-    }
-
-    // Regular paragraph
     return (
-      <p key={pIndex} className="text-sm leading-relaxed my-2 first:mt-0 last:mb-0 text-foreground/90">
-        {formatInlineText(trimmed)}
+      <p key={paragraphIndex} className="my-2 text-sm leading-7 text-foreground/90 first:mt-0 last:mb-0">
+        {formatInlineText(trimmed, `p-${paragraphIndex}`)}
       </p>
     );
   });
 }
 
-// Format inline text (bold, italic, links, etc.)
-function formatInlineText(text: string): React.ReactNode {
-  // Split on bold (**text**), italic (*text*), and inline code (`text`)
+function formatInlineText(text: string, keyPrefix: string): React.ReactNode {
   const parts = text.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g);
 
   return parts.map((part, index) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={index} className="font-semibold text-foreground">{part.slice(2, -2)}</strong>;
+    const key = `${keyPrefix}-${index}`;
+
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={key} className="font-semibold text-foreground">
+          {part.slice(2, -2)}
+        </strong>
+      );
     }
-    if (part.startsWith('*') && part.endsWith('*') && !part.startsWith('**')) {
-      return <em key={index} className="italic">{part.slice(1, -1)}</em>;
+
+    if (part.startsWith("*") && part.endsWith("*") && !part.startsWith("**")) {
+      return (
+        <em key={key} className="italic">
+          {part.slice(1, -1)}
+        </em>
+      );
     }
-    if (part.startsWith('`') && part.endsWith('`')) {
-      return <code key={index} className="text-xs bg-muted/80 px-1.5 py-0.5 rounded font-mono">{part.slice(1, -1)}</code>;
+
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return (
+        <code key={key} className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+          {part.slice(1, -1)}
+        </code>
+      );
     }
-    return part;
+
+    return renderLinkedText(part, key);
   });
 }
 
-// Animated "Thinking..." indicator
+function renderLinkedText(text: string, keyPrefix: string) {
+  const urlPattern = /(https?:\/\/[^\s]+)/g;
+  const chunks = text.split(urlPattern);
+
+  return chunks.map((chunk, index) => {
+    const key = `${keyPrefix}-chunk-${index}`;
+    if (!/^https?:\/\//.test(chunk)) {
+      return <span key={key}>{chunk}</span>;
+    }
+
+    const match = chunk.match(/^(https?:\/\/[^\s]+?)([.,!?;:]*)$/);
+    const href = match?.[1] ?? chunk;
+    const trailing = match?.[2] ?? "";
+
+    return (
+      <span key={key}>
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-primary underline decoration-primary/30 underline-offset-4 transition-colors hover:text-primary/80"
+        >
+          {href}
+        </a>
+        {trailing}
+      </span>
+    );
+  });
+}
+
 function ThinkingText() {
   const [dots, setDots] = useState(0);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      setDots(d => (d + 1) % 4);
+      setDots((value) => (value + 1) % 4);
     }, 400);
+
     return () => clearInterval(interval);
   }, []);
 
-  return (
-    <span className="text-sm text-muted-foreground italic">
-      Thinking{'.'.repeat(dots)}
-    </span>
-  );
+  return <span className="text-sm text-muted-foreground">Thinking{".".repeat(dots)}</span>;
 }
 
-// Typewriter effect for streaming AI responses
 function StreamingMessage({ content, onComplete }: { content: string; onComplete?: () => void }) {
   const [displayed, setDisplayed] = useState("");
   const [done, setDone] = useState(false);
@@ -133,7 +152,6 @@ function StreamingMessage({ content, onComplete }: { content: string; onComplete
 
     const interval = setInterval(() => {
       if (index < content.length) {
-        // Add characters in small chunks for natural feel
         const chunkSize = Math.floor(Math.random() * 3) + 1;
         const nextIndex = Math.min(index + chunkSize, content.length);
         setDisplayed(content.slice(0, nextIndex));
@@ -149,112 +167,81 @@ function StreamingMessage({ content, onComplete }: { content: string; onComplete
   }, [content, onComplete]);
 
   if (done) {
-    return <div className="prose prose-sm dark:prose-invert max-w-none">{formatMessage(content)}</div>;
+    return <div>{formatMessage(content)}</div>;
   }
 
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none">
+    <div>
       {formatMessage(displayed)}
-      <span className="inline-block w-0.5 h-4 bg-primary/70 animate-pulse ml-0.5 align-text-bottom" />
+      <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-primary/70 align-text-bottom" />
     </div>
   );
 }
 
-export function ChatInterface({ messages, onNewChat, isLoading: _isLoading = false, isThinking = false, chatTitle, onStreamingComplete }: ChatInterfaceProps) {
+export function ChatInterface({ messages, isThinking = false, onStreamingComplete }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isThinking]);
 
   return (
-    <div className="flex flex-col">
-      {/* Compact header */}
-      {onNewChat && messages.length > 1 && (
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2">
-            <Sparkles className="h-4 w-4 text-primary" />
-            <span className="font-medium text-sm text-foreground">
-              {chatTitle || 'New Chat'}
-            </span>
-          </div>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={onNewChat}
-            className="h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            New
-          </Button>
-        </div>
-      )}
-      
-      <div className="space-y-4">
-        {messages.map((message, index) => (
-          <div
-            key={index}
-            className={cn(
-              "flex gap-3 animate-in fade-in duration-200",
-              message.role === "user" ? "flex-row-reverse" : "flex-row"
-            )}
-          >
-            {/* Compact Avatar */}
+    <div className="mx-auto w-full max-w-3xl">
+      <div className="space-y-6">
+        {messages.map((message, index) => {
+          const isUser = message.role === "user";
+
+          return (
             <div
+              key={index}
               className={cn(
-                "flex h-7 w-7 shrink-0 items-center justify-center rounded-full",
-                message.role === "user"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-muted"
+                "flex gap-3 animate-in fade-in duration-200",
+                isUser ? "justify-end" : "justify-start",
               )}
             >
-              {message.role === "user" ? (
-                <User className="h-4 w-4" />
-              ) : (
-                <Bot className="h-4 w-4 text-primary" />
+              {!isUser && (
+                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <Bot className="h-4 w-4" />
+                </div>
               )}
-            </div>
-            
-            {/* Clean Message Bubble */}
-            <div
-              className={cn(
-                "max-w-[80%] rounded-2xl px-4 py-2.5",
-                message.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-br-sm"
-                  : "bg-muted/50 text-foreground rounded-bl-sm"
-              )}
-            >
-              {message.role === "assistant" ? (
-                message.isStreaming ? (
+
+              <div
+                className={cn(
+                  "max-w-[85%] rounded-[24px] px-4 py-3",
+                  isUser
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted/45 text-foreground",
+                )}
+              >
+                {isUser ? (
+                  <p className="text-sm leading-7">{message.content}</p>
+                ) : message.isStreaming ? (
                   <StreamingMessage content={message.content} onComplete={onStreamingComplete} />
                 ) : (
-                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                    {formatMessage(message.content)}
-                  </div>
-                )
-              ) : (
-                <p className="text-sm">
-                  {message.content}
-                </p>
+                  <div>{formatMessage(message.content)}</div>
+                )}
+              </div>
+
+              {isUser && (
+                <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+                  <User className="h-4 w-4" />
+                </div>
               )}
             </div>
-          </div>
-        ))}
-        
+          );
+        })}
+
         {isThinking && (
           <div className="flex gap-3 animate-in fade-in duration-200">
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-muted">
-              <Bot className="h-4 w-4 text-primary animate-pulse" />
+            <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <Bot className="h-4 w-4 animate-pulse" />
             </div>
-            <div className="rounded-2xl rounded-bl-sm bg-muted/50 px-4 py-2.5">
+            <div className="rounded-[24px] bg-muted/45 px-4 py-3">
               <ThinkingText />
             </div>
           </div>
         )}
+
         <div ref={messagesEndRef} />
       </div>
     </div>

@@ -194,3 +194,71 @@ async def optional_auth(request: Request) -> Optional[AuthenticatedUser]:
         return await require_auth(request)
     except HTTPException:
         return None
+
+
+# ── Service-role JWT dependency (replaces static X-Admin-Key) ─────────────────
+
+async def verify_service_role(request: Request) -> dict:
+    """
+    FastAPI dependency — validates a Supabase service-role JWT.
+
+    This replaces the old static X-Admin-Key authentication for admin/automated
+    endpoints.  The caller must present a JWT (``Authorization: Bearer <token>``)
+    signed with the project's JWT secret whose ``role`` claim is
+    ``service_role``.
+
+    Returns the full decoded JWT payload on success.
+    Raises ``HTTPException(401/403)`` on failure.
+    """
+    if not _auth_required():
+        logger.warning(
+            "AUTH_REQUIRED=false — service-role verification is DISABLED. "
+            "This must never be set in production."
+        )
+        return {"sub": "dev-mode-bypass", "role": "service_role"}
+
+    token = _extract_bearer_token(request)
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication token. Include 'Authorization: Bearer <service-role-jwt>' header.",
+        )
+
+    jwt_secret = _get_jwt_secret()
+    if not jwt_secret:
+        raise HTTPException(
+            status_code=500,
+            detail="SUPABASE_JWT_SECRET is not configured on the backend. "
+                   "Cannot verify service-role tokens.",
+        )
+
+    try:
+        import jwt as pyjwt
+
+        payload = pyjwt.decode(
+            token,
+            jwt_secret,
+            algorithms=["HS256"],
+            options={"require": ["role", "iat"]},
+        )
+    except ImportError:
+        raise HTTPException(
+            status_code=500,
+            detail="JWT validation library not installed. Install PyJWT.",
+        )
+    except Exception as exc:
+        logger.warning("Service-role JWT validation failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired service-role token.",
+        ) from exc
+
+    role = payload.get("role")
+    if role != "service_role":
+        logger.warning("JWT role=%s is not service_role — access denied.", role)
+        raise HTTPException(
+            status_code=403,
+            detail="This endpoint requires a service_role JWT.",
+        )
+
+    return payload

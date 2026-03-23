@@ -1,0 +1,19 @@
+"""Harden news policies."""
+
+from __future__ import annotations
+
+from migration_helpers import execute_sql_file
+
+
+revision = "0009"
+down_revision = "0008"
+branch_labels = None
+depends_on = None
+
+
+def upgrade() -> None:
+    execute_sql_file("sql", "harden_news_policies.sql")
+
+
+def downgrade() -> None:
+    raise NotImplementedError("Downgrading harden_news_policies.sql is not supported.")

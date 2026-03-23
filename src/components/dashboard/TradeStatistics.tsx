@@ -3,8 +3,35 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useTradeStatistics } from "@/hooks/use-data";
 import { cn } from "@/lib/utils";
 
-export function TradeStatistics() {
-  const { data: stats, isLoading } = useTradeStatistics();
+export interface TradeStatisticsSummary {
+  winRate: number;
+  avgProfit: number;
+  avgLoss: number;
+  profitFactor: number;
+  totalTrades: number;
+  winningTrades: number;
+  losingTrades: number;
+}
+
+interface TradeStatisticsProps {
+  stats?: TradeStatisticsSummary;
+  isLoading?: boolean;
+}
+
+const emptyStats: TradeStatisticsSummary = {
+  winRate: 0,
+  avgProfit: 0,
+  avgLoss: 0,
+  profitFactor: 0,
+  totalTrades: 0,
+  winningTrades: 0,
+  losingTrades: 0,
+};
+
+export function TradeStatistics({ stats: statsProp, isLoading: isLoadingProp }: TradeStatisticsProps = {}) {
+  const { data: fallbackStats, isLoading: fallbackLoading } = useTradeStatistics();
+  const stats = statsProp ?? fallbackStats ?? emptyStats;
+  const isLoading = isLoadingProp ?? fallbackLoading;
 
   if (isLoading) {
     return (
@@ -21,7 +48,7 @@ export function TradeStatistics() {
     );
   }
 
-  const hasTrades = stats && stats.totalTrades > 0;
+  const hasTrades = stats.totalTrades > 0;
 
   const displayStats = [
     {
@@ -71,7 +98,7 @@ export function TradeStatistics() {
                     "h-3.5 w-3.5",
                     stat.trend === "positive" ? "text-profit/70" :
                     stat.trend === "negative" ? "text-loss/70" :
-                    "text-muted-foreground/30"
+                    "text-muted-foreground/30",
                   )}
                 />
               </div>
@@ -81,7 +108,7 @@ export function TradeStatistics() {
                     "text-xl font-bold",
                     stat.trend === "positive" ? "text-profit" :
                     stat.trend === "negative" ? "text-loss" :
-                    "text-muted-foreground/50"
+                    "text-muted-foreground/50",
                   )}
                 >
                   {stat.value}

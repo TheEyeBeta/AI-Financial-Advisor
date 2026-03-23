@@ -6,7 +6,9 @@
 -- resets all limits to zero, allowing unlimited AI API spend.
 -- ============================================================
 
-CREATE TABLE IF NOT EXISTS public.rate_limit_state (
+CREATE SCHEMA IF NOT EXISTS core;
+
+CREATE TABLE IF NOT EXISTS core.rate_limit_state (
     identifier   TEXT        NOT NULL,   -- "user:<uuid>" or "ip:<addr>"
     endpoint     TEXT        NOT NULL,   -- "/api/chat", "/api/search", etc.
     window_type  TEXT        NOT NULL,   -- "minute", "hour", "day"
@@ -21,15 +23,15 @@ CREATE TABLE IF NOT EXISTS public.rate_limit_state (
 
 -- Index for cleanup of expired windows
 CREATE INDEX IF NOT EXISTS idx_rate_limit_state_window_start
-    ON public.rate_limit_state (window_start);
+    ON core.rate_limit_state (window_start);
 
 -- Index for blocked lookups
 CREATE INDEX IF NOT EXISTS idx_rate_limit_state_blocked
-    ON public.rate_limit_state (blocked_until)
+    ON core.rate_limit_state (blocked_until)
     WHERE blocked_until IS NOT NULL;
 
 -- Auto-update updated_at
-CREATE OR REPLACE FUNCTION update_rate_limit_timestamp()
+CREATE OR REPLACE FUNCTION core.update_rate_limit_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
     NEW.updated_at = now();
@@ -37,14 +39,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS rate_limit_state_updated ON public.rate_limit_state;
+DROP TRIGGER IF EXISTS rate_limit_state_updated ON core.rate_limit_state;
 CREATE TRIGGER rate_limit_state_updated
-    BEFORE UPDATE ON public.rate_limit_state
+    BEFORE UPDATE ON core.rate_limit_state
     FOR EACH ROW
-    EXECUTE FUNCTION update_rate_limit_timestamp();
+    EXECUTE FUNCTION core.update_rate_limit_timestamp();
 
 -- RLS: Only service role can access this table (backend only)
-ALTER TABLE public.rate_limit_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE core.rate_limit_state ENABLE ROW LEVEL SECURITY;
 
 -- No user-facing policies — only service_role bypasses RLS
 -- This prevents any client-side manipulation of rate limits

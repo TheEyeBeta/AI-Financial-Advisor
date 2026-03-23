@@ -10,17 +10,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
 
 interface SignUpDialogProps {
@@ -28,15 +19,9 @@ interface SignUpDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type SignUpStep = "credentials" | "experience";
-
 export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
-  const { signUp: _signUp } = useAuth();
-  const _navigate = useNavigate();
-  const [step, setStep] = useState<SignUpStep>("credentials");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Step 1: Credentials
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [age, setAge] = useState<string>("");
@@ -44,13 +29,18 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
 
-  // Step 2: Experience
-  const [experienceLevel, setExperienceLevel] = useState<string>("beginner");
+  const resetForm = () => {
+    setFirstName("");
+    setLastName("");
+    setAge("");
+    setEmail("");
+    setPassword("");
+    setConfirmPassword("");
+  };
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Validation
+
     if (!firstName || !lastName || !age || !email || !password) {
       toast({
         title: "Error",
@@ -90,7 +80,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
 
     setIsLoading(true);
     try {
-      // Sign up with email/password
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -99,7 +88,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
             first_name: firstName,
             last_name: lastName,
             age: ageNum,
-            experience_level: experienceLevel,
           },
           emailRedirectTo: `${window.location.origin}/auth/callback?verified=true`,
         },
@@ -107,26 +95,31 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
 
       if (authError) throw authError;
 
-      if (authData.user) {
-        // User profile is created automatically by database trigger (handle_new_user)
-        // The trigger uses auth_id to reference auth.users(id)
-        // No manual upsert needed - trigger handles it with the metadata we passed
+      // Supabase returns a fake user with empty identities when the email
+      // already exists (to prevent enumeration). Detect this case so the
+      // user gets accurate feedback instead of a false "Account Created!".
+      if (
+        authData.user &&
+        (!authData.user.identities || authData.user.identities.length === 0)
+      ) {
+        toast({
+          title: "Account already exists",
+          description:
+            "An account with this email already exists. Please sign in instead, or use a different email.",
+          variant: "destructive",
+        });
+        return;
+      }
 
+      if (authData.user) {
         toast({
           title: "Account Created!",
-          description: "Please check your email to verify your account. We've sent you a confirmation link.",
+          description:
+            "Please check your email to verify your account. We've sent you a confirmation link.",
         });
 
-        // Close dialog and show verification message
         onOpenChange(false);
-        setStep("credentials");
-        setFirstName("");
-        setLastName("");
-        setAge("");
-        setEmail("");
-        setPassword("");
-        setConfirmPassword("");
-        setExperienceLevel("beginner");
+        resetForm();
       }
     } catch (error: unknown) {
       const errorMessage = getErrorMessage(error) || "Failed to create account";
@@ -139,67 +132,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
       setIsLoading(false);
     }
   };
-
-
-  if (step === "experience") {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Tell us about your experience</DialogTitle>
-            <DialogDescription>
-              Help us personalize your learning journey. You can change this later in settings.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={(e) => { e.preventDefault(); handleExperienceSubmit(); }}>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label htmlFor="experience">Finance Experience Level</Label>
-                <Select
-                  value={experienceLevel}
-                  onValueChange={setExperienceLevel}
-                >
-                  <SelectTrigger id="experience">
-                    <SelectValue placeholder="Select your experience level" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="beginner">Beginner</SelectItem>
-                    <SelectItem value="intermediate">Intermediate</SelectItem>
-                    <SelectItem value="advanced">Advanced</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  This helps us tailor content and recommendations to your level.
-                </p>
-              </div>
-            </div>
-            <div className="flex justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setStep("credentials");
-                  setExperienceLevel("beginner");
-                }}
-              >
-                Back
-              </Button>
-              <Button type="submit" disabled={isLoading}>
-                {isLoading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  "Complete Sign Up"
-                )}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-    );
-  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -295,26 +227,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
               />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="signup-experience">Finance Experience Level *</Label>
-              <Select
-                value={experienceLevel}
-                onValueChange={setExperienceLevel}
-              >
-                <SelectTrigger id="signup-experience">
-                  <SelectValue placeholder="Select your experience level" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="beginner">Beginner</SelectItem>
-                  <SelectItem value="intermediate">Intermediate</SelectItem>
-                  <SelectItem value="advanced">Advanced</SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                You can change this later in your profile settings
-              </p>
             </div>
 
             <Button type="submit" className="w-full" disabled={isLoading}>

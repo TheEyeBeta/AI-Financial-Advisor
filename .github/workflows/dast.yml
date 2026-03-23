@@ -1,0 +1,58 @@
+name: DAST — OWASP ZAP Baseline Scan
+
+on:
+  schedule:
+    # Weekly scan: every Monday at 06:00 UTC
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: "Override target URL (leave blank to use STAGING_URL secret)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  zap-scan:
+    name: ZAP Baseline Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Determine target URL
+        id: target
+        run: |
+          URL="${{ inputs.target_url || '' }}"
+          if [ -z "$URL" ]; then
+            URL="${{ secrets.STAGING_URL }}"
+          fi
+          if [ -z "$URL" ]; then
+            echo "::error::No target URL. Set the STAGING_URL secret or provide an input."
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Run OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.14.0
+        with:
+          target: ${{ steps.target.outputs.url }}
+          rules_file_name: ".github/zap-rules.tsv"
+          artifact_name: "zap-report"
+          # Fail the step only on HIGH alerts (exit code 2)
+          cmd_options: "-I -l WARN"
+          allow_issue_writing: true
+          issue_title: "DAST: OWASP ZAP found potential vulnerabilities"
+          fail_action: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload ZAP HTML report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
+          retention-days: 30

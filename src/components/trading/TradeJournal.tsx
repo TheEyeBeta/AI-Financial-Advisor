@@ -1,32 +1,24 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Plus, Calendar, DollarSign, FileText, BookOpen, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { useCreateJournalEntry } from "@/hooks/use-data";
-import { positionsApi, tradesApi } from "@/services/api";
 import { useAuth } from "@/hooks/use-auth";
 import { format, parseISO } from "date-fns";
-import { useForm, Controller } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { cn } from "@/lib/utils";
+import { rebuildPaperTradingState } from "@/services/paper-trading-sync";
 import type { OpenPosition, TradeJournalEntry } from "@/types/database";
 
 interface JournalFormData {
   symbol: string;
-  type: 'BUY' | 'SELL';
   date: string;
   quantity: number;
   price: number;
@@ -35,9 +27,23 @@ interface JournalFormData {
   tags: string;
 }
 
+type JournalEntryType = "BUY" | "SELL";
+
+type JournalEntryDraft = {
+  symbol: string;
+  type: JournalEntryType;
+  date: string;
+  quantity: number;
+  price: number;
+  strategy: string | null;
+  notes: string | null;
+  tags: string[] | null;
+};
+
 type WorkspaceTradeJournalProps = {
   mode: 'workspace';
   openPositions: OpenPosition[];
+  journalEntries: TradeJournalEntry[];
 };
 
 type JournalTradeJournalProps = {
@@ -49,7 +55,11 @@ type JournalTradeJournalProps = {
 
 type TradeJournalProps = WorkspaceTradeJournalProps | JournalTradeJournalProps;
 
-function getSubmissionFingerprint(userId: string, data: JournalFormData) {
+function getTodayDateString() {
+  return new Date().toISOString().split("T")[0];
+}
+
+function getSubmissionFingerprint(userId: string, data: Pick<JournalEntryDraft, "symbol" | "type" | "date" | "quantity" | "price">) {
   return JSON.stringify({
     userId,
     symbol: data.symbol.trim().toUpperCase(),
@@ -85,28 +95,27 @@ function clearPartialFingerprint(fingerprint: string) {
 }
 
 export function TradeJournal(props: TradeJournalProps) {
-  const { mode, openPositions } = props;
-  const journalEntries = props.mode === 'journal' ? props.journalEntries : [];
+  const { mode, openPositions, journalEntries } = props;
   const isJournalLoading = props.mode === 'journal' ? props.isJournalLoading : false;
   const isWorkspaceMode = mode === 'workspace';
+  const openPositionByEntryId = new Map(openPositions.map((position) => [position.id, position]));
   const queryClient = useQueryClient();
   const createEntry = useCreateJournalEntry();
   const { userId } = useAuth();
-  const [showForm, setShowForm] = useState(mode === 'workspace');
+  const [showForm, setShowForm] = useState(false);
+  const [showAllEntries, setShowAllEntries] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  useEffect(() => {
-    setShowForm(isWorkspaceMode);
-  }, [isWorkspaceMode]);
-  const { register, handleSubmit, reset, control, formState: { errors } } = useForm<JournalFormData>({
+  const { register, handleSubmit, reset, formState: { errors } } = useForm<JournalFormData>({
     defaultValues: {
-      type: 'BUY',
-      date: new Date().toISOString().split('T')[0],
+      date: getTodayDateString(),
     }
   });
+  const hasMoreEntries = journalEntries.length > 5;
+  const visibleJournalEntries = !isWorkspaceMode && !showAllEntries ? journalEntries.slice(0, 5) : journalEntries;
 
   const refreshTradingQueries = async () => {
     await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['trade-journal', userId] }),
       queryClient.invalidateQueries({ queryKey: ['open-positions', userId] }),
       queryClient.invalidateQueries({ queryKey: ['trades', userId] }),
       queryClient.invalidateQueries({ queryKey: ['closed-trades', userId] }),
@@ -115,21 +124,35 @@ export function TradeJournal(props: TradeJournalProps) {
     ]);
   };
 
-  const onSubmit = async (data: JournalFormData) => {
+  const submitJournalEntry = async (
+    draft: JournalEntryDraft,
+    options?: {
+      successDescription?: string;
+      onSuccess?: () => void;
+    },
+  ) => {
     if (!userId) {
       toast({
         title: "Error",
         description: "User not authenticated",
         variant: "destructive",
       });
-      return;
+      return false;
     }
 
     if (isSubmitting) {
-      return;
+      return false;
     }
 
-    const submissionFingerprint = getSubmissionFingerprint(userId, data);
+    const normalizedEntry: JournalEntryDraft = {
+      ...draft,
+      symbol: draft.symbol.trim().toUpperCase(),
+      strategy: draft.strategy?.trim() ? draft.strategy.trim() : null,
+      notes: draft.notes?.trim() ? draft.notes.trim() : null,
+      tags: draft.tags?.map((tag) => tag.trim()).filter((tag) => tag.length > 0) ?? null,
+    };
+
+    const submissionFingerprint = getSubmissionFingerprint(userId, normalizedEntry);
 
     if (getStoredPartialFingerprints().includes(submissionFingerprint)) {
       toast({
@@ -137,215 +160,195 @@ export function TradeJournal(props: TradeJournalProps) {
         description: 'A previous attempt may already have applied this trade. Review positions and history before retrying.',
         variant: 'default',
       });
-      return;
+      return false;
     }
 
-    let shouldRefreshTradingData = false;
-    let journalSaveFailed = false;
+    let createdEntry: TradeJournalEntry | null = null;
     setIsSubmitting(true);
 
     try {
-      const tags = data.tags
-        ? data.tags.split(',').map(tag => tag.trim()).filter(tag => tag.length > 0)
-        : [];
-
-      const symbol = data.symbol.trim().toUpperCase();
-      const tradeDateIso = new Date(`${data.date}T12:00:00.000Z`).toISOString();
-      let tradeId: string | null = null;
-
-      // If BUY, create an open position
-      if (data.type === 'BUY') {
-        await positionsApi.create(userId, {
-          symbol,
-          name: symbol,
-          quantity: data.quantity,
-          entry_price: data.price,
-          current_price: data.price,
-          type: 'LONG',
-          entry_date: tradeDateIso,
-        });
-
-        shouldRefreshTradingData = true;
-
-        const trade = await tradesApi.create(userId, {
-          symbol,
-          type: 'LONG',
-          action: 'OPENED',
-          quantity: data.quantity,
-          entry_price: data.price,
-          exit_price: null,
-          entry_date: tradeDateIso,
-          exit_date: null,
-          pnl: null,
-        });
-        tradeId = trade.id;
-        shouldRefreshTradingData = true;
-      } 
-      else if (data.type === 'SELL') {
+      if (normalizedEntry.type === 'SELL') {
         const matchingPositions = openPositions
-          .filter((pos) => pos.symbol.toUpperCase() === symbol && pos.type === 'LONG')
+          .filter((pos) => pos.symbol.toUpperCase() === normalizedEntry.symbol && pos.type === 'LONG')
           .sort((a, b) => new Date(a.entry_date).getTime() - new Date(b.entry_date).getTime());
 
         const totalAvailableQuantity = matchingPositions.reduce((sum, pos) => sum + pos.quantity, 0);
 
         if (matchingPositions.length === 0 || totalAvailableQuantity <= 0) {
-          throw new Error(`No open ${symbol} position available to sell.`);
+          throw new Error(`No open ${normalizedEntry.symbol} position available to sell.`);
         }
 
-        if (data.quantity > totalAvailableQuantity) {
+        if (normalizedEntry.quantity > totalAvailableQuantity) {
           throw new Error(
-            `Cannot sell ${data.quantity} shares of ${symbol}. You only have ${totalAvailableQuantity} shares open.`
+            `Cannot sell ${normalizedEntry.quantity} shares of ${normalizedEntry.symbol}. You only have ${totalAvailableQuantity} shares open.`
           );
         }
-
-        let remainingToSell = data.quantity;
-        let soldQuantity = 0;
-        let costBasisSold = 0;
-        const oldestEntryDate = matchingPositions[0].entry_date;
-
-        for (const position of matchingPositions) {
-          if (remainingToSell <= 0) break;
-
-          const quantityFromLot = Math.min(position.quantity, remainingToSell);
-          soldQuantity += quantityFromLot;
-          costBasisSold += quantityFromLot * position.entry_price;
-          remainingToSell -= quantityFromLot;
-
-          if (quantityFromLot === position.quantity) {
-            await positionsApi.delete(position.id, userId);
-          } else {
-            await positionsApi.update(position.id, userId, {
-              quantity: position.quantity - quantityFromLot,
-            });
-          }
-
-          shouldRefreshTradingData = true;
-        }
-
-        const averageEntryPrice = soldQuantity > 0 ? costBasisSold / soldQuantity : data.price;
-        const pnl = (data.price - averageEntryPrice) * soldQuantity;
-
-        shouldRefreshTradingData = true;
-
-        const trade = await tradesApi.create(userId, {
-          symbol,
-          type: 'LONG',
-          action: 'CLOSED',
-          quantity: soldQuantity,
-          entry_price: averageEntryPrice,
-          exit_price: data.price,
-          entry_date: oldestEntryDate,
-          exit_date: tradeDateIso,
-          pnl,
-        });
-        tradeId = trade.id;
       }
 
-      try {
-        await createEntry.mutateAsync({
-          symbol,
-          type: data.type,
-          date: data.date,
-          quantity: data.quantity,
-          price: data.price,
-          strategy: data.strategy || null,
-          notes: data.notes || null,
-          tags: tags.length > 0 ? tags : null,
-          trade_id: tradeId,
-        });
-      } catch (error) {
-        journalSaveFailed = true;
-        throw error;
-      }
+      createdEntry = await createEntry.mutateAsync({
+        symbol: normalizedEntry.symbol,
+        type: normalizedEntry.type,
+        date: normalizedEntry.date,
+        quantity: normalizedEntry.quantity,
+        price: normalizedEntry.price,
+        strategy: normalizedEntry.strategy,
+        notes: normalizedEntry.notes,
+        tags: normalizedEntry.tags && normalizedEntry.tags.length > 0 ? normalizedEntry.tags : null,
+        trade_id: null,
+      });
+
+      await rebuildPaperTradingState(userId, [...journalEntries, createdEntry]);
+      await refreshTradingQueries();
 
       clearPartialFingerprint(submissionFingerprint);
 
       toast({
         title: "Success",
-        description: data.type === 'BUY' 
-          ? "Position opened and journal entry created!" 
-          : "Position closed and journal entry created!",
+        description: options?.successDescription
+          ?? (normalizedEntry.type === 'BUY'
+            ? "Position opened and journal entry created!"
+            : "Position closed and journal entry created!"),
       });
 
-      reset();
-      if (!isWorkspaceMode) {
-        setShowForm(false);
-      }
+      options?.onSuccess?.();
+      return true;
     } catch (error: unknown) {
-      if (shouldRefreshTradingData) {
+      if (createdEntry) {
         storePartialFingerprint(submissionFingerprint);
         await refreshTradingQueries();
       }
 
-      const description = journalSaveFailed && shouldRefreshTradingData
-        ? `Trade recorded but journal save failed — do not retry writes. ${getErrorMessage(error)}`
+      const description = createdEntry
+        ? `Journal entry saved but account rebuild failed - do not retry writes. ${getErrorMessage(error)}`
         : getErrorMessage(error) || "Failed to create trade";
 
       toast({
-        title: journalSaveFailed && shouldRefreshTradingData ? "Partial Success" : "Error",
+        title: createdEntry ? "Partial Success" : "Error",
         description,
-        variant: journalSaveFailed && shouldRefreshTradingData ? "default" : "destructive",
+        variant: createdEntry ? "default" : "destructive",
       });
+      return false;
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const onSubmit = async (data: JournalFormData) => {
+    const didCreate = await submitJournalEntry({
+      symbol: data.symbol,
+      type: "BUY",
+      date: data.date,
+      quantity: data.quantity,
+      price: data.price,
+      strategy: data.strategy || null,
+      notes: data.notes || null,
+      tags: data.tags
+        ? data.tags.split(",").map((tag) => tag.trim()).filter((tag) => tag.length > 0)
+        : null,
+    });
+
+    if (!didCreate) {
+      return;
+    }
+
+    reset({ date: getTodayDateString() });
+    if (!isWorkspaceMode) {
+      setShowForm(false);
+    }
+  };
+
+  const handleSecondaryAction = () => {
+    reset();
+
+    if (!isWorkspaceMode) {
+      setShowForm(false);
+    }
+  };
+
+  const handleCloseTrade = async (entry: TradeJournalEntry) => {
+    const openPosition = openPositionByEntryId.get(entry.id);
+    if (!openPosition) {
+      return;
+    }
+
+    const closePrice = Number((openPosition.current_price ?? openPosition.entry_price).toFixed(2));
+    const shouldClose = window.confirm(
+      `Close the remaining ${openPosition.quantity} shares of ${openPosition.symbol} at $${closePrice.toFixed(2)}?`,
+    );
+
+    if (!shouldClose) {
+      return;
+    }
+
+    await submitJournalEntry(
+      {
+        symbol: openPosition.symbol,
+        type: "SELL",
+        date: getTodayDateString(),
+        quantity: openPosition.quantity,
+        price: closePrice,
+        strategy: null,
+        notes: null,
+        tags: null,
+      },
+      {
+        successDescription: `${openPosition.symbol} trade closed.`,
+      },
+    );
+  };
+
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        {!isWorkspaceMode && (
+      {!isWorkspaceMode && (
+        <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground/70">
             {journalEntries.length} journal {journalEntries.length === 1 ? 'entry' : 'entries'}
           </p>
-        )}
-        <Button 
-          onClick={() => setShowForm(!showForm)} 
-          size="sm" 
-          className="h-8 text-xs gap-1.5"
-          disabled={isSubmitting}
-        >
-          {showForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
-          {isWorkspaceMode && showForm ? 'Cancel' : isWorkspaceMode ? 'Place Trade' : showForm ? 'Cancel' : 'Log Trade'}
-        </Button>
-      </div>
+          <Button 
+            onClick={() => setShowForm(!showForm)} 
+            size="sm" 
+            className="h-8 text-xs gap-1.5"
+            disabled={isSubmitting}
+          >
+            {showForm ? <X className="h-3 w-3" /> : <Plus className="h-3 w-3" />}
+            {showForm ? 'Cancel' : 'Log Trade'}
+          </Button>
+        </div>
+      )}
 
       {/* Form */}
-      {showForm && (
-        <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in slide-in-from-top-2 duration-200">
-          <CardContent className="pt-5 pb-4">
+      {(isWorkspaceMode || showForm) && (
+        <div className={cn(
+          "animate-in fade-in slide-in-from-top-2 duration-200",
+          isWorkspaceMode
+            ? "space-y-5"
+            : "rounded-xl border border-border/50 bg-card/50 px-5 pt-5 pb-4 backdrop-blur-sm"
+        )}>
+          {!isWorkspaceMode && (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border/40 bg-muted/20 px-3 py-2">
+              <div>
+                <p className="text-sm font-medium text-foreground">Buy entry</p>
+                <p className="text-xs text-muted-foreground/70">Close the position later from Journal.</p>
+              </div>
+              <Badge variant="outline" className="border-profit/30 bg-profit/5 text-profit">
+                Buy only
+              </Badge>
+            </div>
+          )}
+          <div className={cn(!isWorkspaceMode && "pt-0")}>
             <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 md:grid-cols-3">
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="symbol" className="text-xs">Symbol</Label>
                   <Input
                     id="symbol"
                     placeholder="AAPL"
-                    className="h-9 text-sm"
+                    className="h-10 text-sm uppercase"
+                    autoComplete="off"
                     {...register('symbol', { required: 'Required' })}
                   />
                   {errors.symbol && <p className="text-[10px] text-destructive">{errors.symbol.message}</p>}
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Action</Label>
-                  <Controller
-                    name="type"
-                    control={control}
-                    rules={{ required: true }}
-                    render={({ field }) => (
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <SelectTrigger className="h-9 text-sm">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="BUY">Buy</SelectItem>
-                          <SelectItem value="SELL">Sell</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                  />
                 </div>
 
                 <div className="space-y-1.5">
@@ -353,7 +356,7 @@ export function TradeJournal(props: TradeJournalProps) {
                   <Input
                     id="date"
                     type="date"
-                    className="h-9 text-sm"
+                    className="h-10 text-sm"
                     {...register('date', { required: true })}
                   />
                 </div>
@@ -364,7 +367,7 @@ export function TradeJournal(props: TradeJournalProps) {
                     id="quantity"
                     type="number"
                     placeholder="0"
-                    className="h-9 text-sm"
+                    className="h-10 text-sm"
                     {...register('quantity', { required: true, valueAsNumber: true, min: 1 })}
                   />
                 </div>
@@ -376,7 +379,7 @@ export function TradeJournal(props: TradeJournalProps) {
                     type="number"
                     step="0.01"
                     placeholder="0.00"
-                    className="h-9 text-sm"
+                    className="h-10 text-sm"
                     {...register('price', { required: true, valueAsNumber: true, min: 0.01 })}
                   />
                 </div>
@@ -386,7 +389,7 @@ export function TradeJournal(props: TradeJournalProps) {
                   <Input
                     id="tags"
                     placeholder="momentum, tech"
-                    className="h-9 text-sm"
+                    className="h-10 text-sm"
                     {...register('tags')}
                   />
                 </div>
@@ -397,7 +400,7 @@ export function TradeJournal(props: TradeJournalProps) {
                 <Input
                   id="strategy"
                   placeholder="Why are you making this trade?"
-                  className="h-9 text-sm"
+                  className="h-10 text-sm"
                   {...register('strategy')}
                 />
               </div>
@@ -407,13 +410,13 @@ export function TradeJournal(props: TradeJournalProps) {
                 <Textarea
                   id="notes"
                   placeholder="Additional observations..."
-                  rows={2}
+                  rows={3}
                   className="text-sm resize-none"
                   {...register('notes')}
                 />
               </div>
 
-              <div className="flex gap-2 pt-1">
+              <div className="flex flex-wrap items-center gap-3 pt-1">
                 <Button type="submit" size="sm" className="h-8 text-xs" disabled={isSubmitting}>
                   {isSubmitting ? 'Saving...' : isWorkspaceMode ? 'Place Trade' : 'Save Entry'}
                 </Button>
@@ -422,15 +425,15 @@ export function TradeJournal(props: TradeJournalProps) {
                   variant="ghost"
                   size="sm"
                   className="h-8 text-xs"
-                  onClick={() => { if (!isWorkspaceMode) setShowForm(false); reset(); }}
+                  onClick={handleSecondaryAction}
                   disabled={isSubmitting}
                 >
-                  Cancel
+                  {isWorkspaceMode ? 'Reset' : 'Cancel'}
                 </Button>
               </div>
             </form>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       )}
 
       {/* Journal Entries */}
@@ -450,81 +453,113 @@ export function TradeJournal(props: TradeJournalProps) {
         </Card>
       ) : (
         <div className="space-y-2">
-          {journalEntries.map((entry, index) => (
-            <Card 
-              key={entry.id} 
-              className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-colors animate-in fade-in"
-              style={{ animationDelay: `${index * 30}ms` }}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className={cn(
-                      "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
-                      entry.type === "BUY" ? "bg-profit/10" : "bg-loss/10"
-                    )}>
-                      <span className={cn(
-                        "text-xs font-bold",
-                        entry.type === "BUY" ? "text-profit" : "text-loss"
+          {visibleJournalEntries.map((entry, index) => {
+            const openPosition = entry.type === "BUY" ? openPositionByEntryId.get(entry.id) : undefined;
+
+            return (
+              <Card 
+                key={entry.id} 
+                className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-colors animate-in fade-in"
+                style={{ animationDelay: `${index * 30}ms` }}
+              >
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className={cn(
+                        "h-9 w-9 rounded-lg flex items-center justify-center shrink-0",
+                        entry.type === "BUY" ? "bg-profit/10" : "bg-loss/10"
                       )}>
-                        {entry.type === "BUY" ? "B" : "S"}
-                      </span>
+                        <span className={cn(
+                          "text-xs font-bold",
+                          entry.type === "BUY" ? "text-profit" : "text-loss"
+                        )}>
+                          {entry.type === "BUY" ? "B" : "S"}
+                        </span>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm">{entry.symbol}</span>
+                          <Badge 
+                            variant="outline" 
+                            className={cn(
+                              "text-[10px] px-1.5 py-0 h-4",
+                              entry.type === "BUY" ? "text-profit border-profit/30" : "text-loss border-loss/30"
+                            )}
+                          >
+                            {entry.type}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-3 text-xs text-muted-foreground/60 mt-0.5">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="h-3 w-3" />
+                            {format(parseISO(entry.date), "MMM d, yyyy")}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <DollarSign className="h-3 w-3" />
+                            {entry.quantity} shares @ ${entry.price.toFixed(2)}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">{entry.symbol}</span>
-                        <Badge 
-                          variant="outline" 
-                          className={cn(
-                            "text-[10px] px-1.5 py-0 h-4",
-                            entry.type === "BUY" ? "text-profit border-profit/30" : "text-loss border-loss/30"
-                          )}
+                    
+                    <div className="flex flex-wrap items-center justify-end gap-2">
+                      {entry.tags && entry.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1 justify-end">
+                          {entry.tags.map((tag, i) => (
+                            <Badge key={i} variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-muted/50">
+                              {tag}
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
+                      {openPosition && (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                          onClick={() => void handleCloseTrade(entry)}
+                          disabled={isSubmitting}
                         >
-                          {entry.type}
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-3 text-xs text-muted-foreground/60 mt-0.5">
-                        <span className="flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {format(parseISO(entry.date), "MMM d, yyyy")}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <DollarSign className="h-3 w-3" />
-                          {entry.quantity} shares @ ${entry.price.toFixed(2)}
-                        </span>
-                      </div>
+                          <X className="h-3.5 w-3.5" />
+                          Close
+                        </Button>
+                      )}
                     </div>
                   </div>
-                  
-                  {entry.tags && entry.tags.length > 0 && (
-                    <div className="flex flex-wrap gap-1 justify-end">
-                      {entry.tags.map((tag, i) => (
-                        <Badge key={i} variant="secondary" className="text-[10px] px-1.5 py-0 h-4 bg-muted/50">
-                          {tag}
-                        </Badge>
-                      ))}
+
+                  {(entry.strategy || entry.notes) && (
+                    <div className="mt-3 pt-3 border-t border-border/30 space-y-2">
+                      {entry.strategy && (
+                        <div className="flex items-start gap-2">
+                          <FileText className="h-3.5 w-3.5 text-primary/70 mt-0.5 shrink-0" />
+                          <p className="text-xs text-muted-foreground">{entry.strategy}</p>
+                        </div>
+                      )}
+                      {entry.notes && (
+                        <div className="rounded-lg bg-muted/30 p-2.5">
+                          <p className="text-xs text-muted-foreground/80">{entry.notes}</p>
+                        </div>
+                      )}
                     </div>
                   )}
-                </div>
-
-                {(entry.strategy || entry.notes) && (
-                  <div className="mt-3 pt-3 border-t border-border/30 space-y-2">
-                    {entry.strategy && (
-                      <div className="flex items-start gap-2">
-                        <FileText className="h-3.5 w-3.5 text-primary/70 mt-0.5 shrink-0" />
-                        <p className="text-xs text-muted-foreground">{entry.strategy}</p>
-                      </div>
-                    )}
-                    {entry.notes && (
-                      <div className="rounded-lg bg-muted/30 p-2.5">
-                        <p className="text-xs text-muted-foreground/80">{entry.notes}</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
+          {hasMoreEntries && (
+            <div className="flex justify-center pt-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs"
+                onClick={() => setShowAllEntries((current) => !current)}
+              >
+                {showAllEntries ? "Show less" : `Show more (${journalEntries.length - visibleJournalEntries.length} more)`}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

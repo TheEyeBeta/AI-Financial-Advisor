@@ -30,9 +30,10 @@ An AI-powered financial education platform with paper trading capabilities.
    cp config/env.example .env
    ```
 4. Run SQL setup in Supabase SQL Editor:
-   - `sql/schema.sql`
-   - `sql/add_news_table.sql` (adds canonical `public.news` table)
-   - `sql/harden_news_policies.sql` (recommended before production go-live)
+   - `sql/schema.sql` (core runtime bootstrap for `core`, `ai`, `trading`, and `market`)
+   - `sql/fix_rls_policies_schema.sql` (aligns RLS with the runtime multi-schema layout)
+   - `sql/fix_ai_chat_grants.sql` (restores PostgREST access to `ai.chats` and `ai.chat_messages`)
+   - `sql/verify_runtime_schema_readiness.sql` (production-readiness verification)
 5. Start the frontend development server:
    ```bash
    npm run dev
@@ -49,8 +50,8 @@ An AI-powered financial education platform with paper trading capabilities.
 
 2. Create virtual environment:
    ```bash
-   python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   python3 -m venv .venv
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
 3. Install dependencies:
@@ -73,11 +74,31 @@ An AI-powered financial education platform with paper trading capabilities.
    npm run start:backend
    # or manually:
    cd backend/websearch_service
-   source venv/bin/activate
+   source .venv/bin/activate
    uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    ```
 
 The backend will be available at `http://localhost:8000` with API docs at `http://localhost:8000/docs`
+
+### Backend Setup With Railway Variables (Optional)
+
+This is a local-only developer workflow. It does not change Vercel behavior.
+
+1. Link the backend directory to your Railway project and service:
+   ```bash
+   npm run railway:backend:link-project
+   npm run railway:backend:link-service
+   ```
+2. Start the backend locally with Railway-managed environment variables:
+   ```bash
+   npm run start:backend:railway
+   ```
+3. If you want an interactive shell with the same Railway variables:
+   ```bash
+   npm run railway:backend:shell
+   ```
+
+This uses the linked Railway service from `backend/websearch_service` and still serves the API locally on `http://127.0.0.1:8000`.
 
 ### Running Both Services
 
@@ -105,6 +126,8 @@ See [deployment/DEPLOYMENT.md](./deployment/DEPLOYMENT.md) for detailed deployme
 - `TAVILY_API_KEY` - Required for web search
 - `PERPLEXITY_API_KEY` - Optional fallback when OpenAI hits rate limits
 - `CORS_ORIGINS` - Your Vercel frontend URL (e.g. `https://your-app.vercel.app`)
+- `TRUSTED_HOSTS` - Exact backend/frontend hostnames allowed in production
+- `SENTRY_DSN` - Optional backend error reporting DSN
 
 ## Deploying to Vercel
 
@@ -149,8 +172,8 @@ npm run dev
 
 # Start backend (in separate terminal)
 cd backend/websearch_service
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```

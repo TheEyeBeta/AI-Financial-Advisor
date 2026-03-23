@@ -1,21 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { chatApi, chatsApi } from '@/services/chat-api';
+import { newsApi } from '@/services/news-api';
+import { stockRankingApi } from '@/services/stock-ranking-api';
+import { tradeEngineApi } from '@/services/trade-engine-api';
+import { portfolioApi, positionsApi, tradesApi, journalApi } from '@/services/trading-api';
+import { achievementsApi, learningApi, marketApi } from '@/services/user-data-api';
+import { pythonApi } from '@/services/python-api';
 import { useAuth } from './use-auth';
 import { useDataSource, sourceParam } from './use-data-source';
-import {
-  portfolioApi,
-  positionsApi,
-  tradesApi,
-  journalApi,
-  chatsApi,
-  chatApi,
-  learningApi,
-  achievementsApi,
-  marketApi,
-  newsApi,
-  pythonApi,
-  tradeEngineApi,
-  stockRankingApi,
-} from '@/services/api';
 import type {
   OpenPosition,
   TradeJournalEntry,

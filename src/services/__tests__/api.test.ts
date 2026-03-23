@@ -1,12 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import {
-  tradesApi,
-  chatsApi,
-  chatApi,
-  portfolioApi,
-  newsApi,
-  learningApi,
-} from '../api';
+import { chatApi, chatsApi } from '../chat-api';
+import { newsApi } from '../news-api';
+import { portfolioApi, tradesApi } from '../trading-api';
+import { learningApi } from '../user-data-api';
 
 // Mock supabase with a more robust mock
 const createChainableMock = (finalResult: { data: unknown; error: unknown }) => {
@@ -532,7 +528,7 @@ describe('newsApi', () => {
     it('throws when the canonical news table is missing', async () => {
       const missingTableError = {
         code: '42P01',
-        message: 'relation "public.news" does not exist',
+        message: 'relation "market.news" does not exist',
       };
 
       const canonicalChain = createChainableMock({ data: null, error: missingTableError });
