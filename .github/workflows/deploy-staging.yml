@@ -7,6 +7,10 @@ on:
     branches: [staging]
   workflow_dispatch:
 
+concurrency:
+  group: deploy-staging-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: '20'
   PYTHON_VERSION: '3.12'
@@ -65,7 +69,7 @@ jobs:
   e2e:
     name: Run Full E2E Suite
     runs-on: ubuntu-latest
-    if: ${{ always() }}
+    if: needs.deploy-backend.result == 'success'
     needs: deploy-backend
     permissions:
       contents: read
