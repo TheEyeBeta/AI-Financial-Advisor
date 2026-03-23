@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -14,7 +15,13 @@ from pydantic import BaseModel, Field
 from ..services.audit import audit_log
 from ..services.auth import AuthenticatedUser, require_auth
 from ..services.rate_limit import rate_limiter
-from ..services.meridian_context import build_iris_context, refresh_iris_context_cache, run_meridian_onboard
+from ..services.meridian_context import (
+    build_iris_context,
+    refresh_all_users_context,
+    refresh_iris_context_cache,
+    run_meridian_onboard,
+    update_knowledge_tier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1154,6 +1161,48 @@ async def meridian_onboard(
         raise HTTPException(status_code=500, detail="Onboarding failed.")
 
 
+class MeridianRefreshRequest(BaseModel):
+    user_id: str
+
+
+@router.post("/api/meridian/refresh-context")
+async def meridian_refresh_context(
+    body: MeridianRefreshRequest,
+    auth_user: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Refresh the IRIS context cache for the authenticated user."""
+    # Users can only refresh their own context
+    if body.user_id != auth_user.auth_id:
+        raise HTTPException(status_code=403, detail="Cannot refresh another user's context.")
+    try:
+        await refresh_iris_context_cache(auth_user.auth_id)
+        return {"success": True}
+    except Exception as exc:
+        logger.exception("Meridian context refresh failed for user_id=%s: %s", auth_user.auth_id, exc)
+        return {"success": False, "error": str(exc)}
+
+
+@router.post("/api/meridian/refresh-all")
+async def meridian_refresh_all(
+    raw_request: Request,
+) -> Dict[str, Any]:
+    """
+    Daily cron endpoint: refreshes ai.iris_context_cache for ALL users.
+    Protected by a shared secret (MERIDIAN_CRON_SECRET) rather than user auth,
+    since this runs as a scheduled job, not a user action.
+
+    Schedule: 0 2 * * * (daily at 02:00 UTC)
+    """
+    cron_secret = os.getenv("MERIDIAN_CRON_SECRET")
+    if not cron_secret:
+        raise HTTPException(status_code=501, detail="Cron secret not configured.")
+    provided = raw_request.headers.get("x-cron-secret", "")
+    if provided != cron_secret:
+        raise HTTPException(status_code=403, detail="Invalid cron secret.")
+    result = await refresh_all_users_context()
+    return {"success": True, **result}
+
+
 @router.post("/api/chat")
 async def chat_completion(
     request: ChatRequest,
@@ -1340,6 +1389,13 @@ async def chat_completion(
                 "reasoning_effort": reasoning_effort,
             },
         )
+
+        # Step 6: Persist detected knowledge tier (non-blocking, fire-and-forget)
+        tier_from_classifier = {"beginner": 1, "intermediate": 2, "advanced": 3}.get(
+            (classification.get("user_level") or "").lower()
+        )
+        if tier_from_classifier and verified_user_id:
+            asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
 
         return {"response": final_answer}
     finally:

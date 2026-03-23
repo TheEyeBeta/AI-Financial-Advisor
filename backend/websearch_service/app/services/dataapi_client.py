@@ -108,19 +108,33 @@ class DataAPIClient:
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         headers = await self._headers()
-        async with httpx.AsyncClient(timeout=self.timeout) as http:
-            resp = await http.get(f"{self.base_url}{path}", headers=headers, params=params)
-            resp.raise_for_status()
-        return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as http:
+                resp = await http.get(f"{self.base_url}{path}", headers=headers, params=params)
+                resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            logger.error("DataAPI GET %s failed: %d %s", path, exc.response.status_code, exc.response.text[:500])
+            raise
+        except Exception:
+            logger.exception("DataAPI GET %s failed (connection/timeout)", path)
+            raise
 
     async def _post(self, path: str, json_body: dict[str, Any] | None = None, extra_headers: dict[str, str] | None = None) -> Any:
         headers = await self._headers()
         if extra_headers:
             headers.update(extra_headers)
-        async with httpx.AsyncClient(timeout=self.timeout) as http:
-            resp = await http.post(f"{self.base_url}{path}", headers=headers, json=json_body)
-            resp.raise_for_status()
-        return resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as http:
+                resp = await http.post(f"{self.base_url}{path}", headers=headers, json=json_body)
+                resp.raise_for_status()
+            return resp.json()
+        except httpx.HTTPStatusError as exc:
+            logger.error("DataAPI POST %s failed: %d %s", path, exc.response.status_code, exc.response.text[:500])
+            raise
+        except Exception:
+            logger.exception("DataAPI POST %s failed (connection/timeout)", path)
+            raise
 
     # -- Market Data --
 

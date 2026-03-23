@@ -187,7 +187,36 @@ docker-compose -f deployment/docker-compose.yml down
 
 ### GitHub Actions
 
-The repository includes two workflows:
+### Staging Flow
+
+The staging branch is `staging`.
+
+1. Pushes to `staging` are the pre-production integration path.
+2. Vercel should be configured to create preview deployments for `staging` pushes and pull requests.
+3. Railway should use a separate staging service with its own environment variables.
+4. Supabase should use a separate staging project so schema changes and test data stay isolated from production.
+5. `.github/workflows/deploy-staging.yml` deploys the Railway staging backend on `staging` pushes and runs the full E2E suite against the staging frontend URL.
+6. PRs targeting `staging` reuse the same workflow and post the E2E result as a PR comment.
+7. `.github/workflows/promote-to-prod.yml` merges `staging` into `main` after the production approval gate is satisfied, which then triggers the existing production deploy workflow.
+
+### Branch Conventions
+
+- `main` is production.
+- `staging` is the pre-production branch.
+- Feature branches should merge into `staging` first unless the change is a hotfix.
+- Production promotions should happen from the manual promotion workflow, not by direct commits to `main`.
+
+### CODEOWNERS and Approval
+
+Add reviewer ownership in `.github/CODEOWNERS` and configure the GitHub `production` environment to require approval from that reviewer before `promote-to-prod.yml` can continue.
+
+The repository uses:
+
+```text
+* @TheEyeBeta
+```
+
+The repository includes three workflows:
 
 1. **CI Pipeline** (`.github/workflows/ci.yml`)
    - Runs on every push/PR
@@ -200,6 +229,10 @@ The repository includes two workflows:
    - Builds and pushes Docker images
    - Deploys to Vercel (frontend)
    - Deploys to Railway/Render (backend)
+
+3. **Staging / Promotion Pipelines**
+   - `deploy-staging.yml` deploys Railway staging and runs the E2E suite against staging URLs
+   - `promote-to-prod.yml` merges `staging` into `main` after environment approval
 
 ### Required Secrets
 
@@ -220,7 +253,19 @@ TAVILY_API_KEY
 VERCEL_TOKEN
 RAILWAY_TOKEN (optional)
 RAILWAY_PROJECT_ID (optional)
+RAILWAY_STAGING_SERVICE
+STAGING_FRONTEND_URL
+STAGING_BACKEND_URL
 ```
+
+### Staging Secrets
+
+Use separate values for staging:
+
+- `RAILWAY_STAGING_SERVICE` points to the Railway staging service name or id.
+- `STAGING_FRONTEND_URL` points to the Vercel preview or staging frontend URL used by E2E.
+- `STAGING_BACKEND_URL` points to the Railway staging backend URL used for health checks.
+- Supabase staging credentials should live in the staging project and should not be reused from production.
 
 ## Health Checks
 
@@ -357,6 +402,8 @@ docker-compose up -d
 ## Production Checklist
 
 - [ ] All environment variables configured
+- [ ] `staging` branch exists and is protected
+- [ ] `production` environment requires CODEOWNERS approval
 - [ ] HTTPS enabled for all services
 - [ ] Health checks configured
 - [ ] Monitoring set up

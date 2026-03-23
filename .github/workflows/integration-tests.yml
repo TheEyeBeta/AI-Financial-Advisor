@@ -1,0 +1,48 @@
+name: Backend Integration Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  backend-integration:
+    name: Backend Integration Tests (Supabase)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: backend/websearch_service
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/websearch_service/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write .env.test from secrets
+        run: |
+          cat > .env.test << 'ENVEOF'
+          SUPABASE_URL=${{ secrets.SUPABASE_TEST_URL }}
+          SUPABASE_ANON_KEY=${{ secrets.SUPABASE_TEST_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_TEST_SERVICE_ROLE_KEY }}
+          OPENAI_API_KEY=${{ secrets.TEST_OPENAI_API_KEY }}
+          ENVIRONMENT=test
+          AUTH_REQUIRED=true
+          ENVEOF
+
+      - name: Run integration tests
+        run: pytest tests/integration/ -v --tb=short
+
+      - name: Cleanup .env.test
+        if: always()
+        run: rm -f .env.test

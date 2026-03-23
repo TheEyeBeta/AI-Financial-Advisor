@@ -13,6 +13,7 @@ import {
   Wifi, WifiOff, Loader2, Play, Terminal, ArrowUpRight, Sparkles, ShieldCheck, AlertTriangle
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
+import { getPythonApiUrl } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { useState, useEffect, useCallback } from "react";
 import {
@@ -142,7 +143,7 @@ export default function Admin() {
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
 
-  const BACKEND_URL = import.meta.env.VITE_PYTHON_API_URL || "http://localhost:8000";
+  const BACKEND_URL = getPythonApiUrl();
   /** Get the current Supabase access token for authenticated admin requests. */
   const getAuthHeaders = async (): Promise<HeadersInit> => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -396,7 +397,7 @@ export default function Admin() {
 
   return (
     <AppLayout title="Admin Panel">
-      <div className="space-y-6">
+      <div className="min-w-0 space-y-6">
         <section className="relative overflow-hidden rounded-3xl border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm sm:p-8">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.14),transparent_38%)]" />
           <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
@@ -458,11 +459,11 @@ export default function Admin() {
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 xl:w-[320px] xl:grid-cols-1">
-              <Button onClick={handleRefresh} disabled={refreshing} className="gap-2 rounded-xl px-4 shadow-sm">
+              <Button onClick={handleRefresh} disabled={refreshing} className="w-full gap-2 rounded-xl px-4 shadow-sm sm:w-auto">
                 <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
                 Refresh dashboard
               </Button>
-              <Button onClick={exportUsers} variant="outline" className="gap-2 rounded-xl px-4">
+              <Button onClick={exportUsers} variant="outline" className="w-full gap-2 rounded-xl px-4 sm:w-auto">
                 <Download className="h-4 w-4" />
                 Export users
               </Button>
@@ -527,19 +528,19 @@ export default function Admin() {
 
         <Tabs defaultValue="users" className="space-y-4">
           <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/60 p-1 md:grid-cols-4">
-            <TabsTrigger value="users" className="gap-2 rounded-xl py-2.5">
+            <TabsTrigger value="users" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
               <Users className="h-4 w-4" />
               Users
             </TabsTrigger>
-            <TabsTrigger value="analytics" className="gap-2 rounded-xl py-2.5">
+            <TabsTrigger value="analytics" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
               <BarChart3 className="h-4 w-4" />
               Analytics
             </TabsTrigger>
-            <TabsTrigger value="activity" className="gap-2 rounded-xl py-2.5">
+            <TabsTrigger value="activity" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
               <Activity className="h-4 w-4" />
               Activity
             </TabsTrigger>
-            <TabsTrigger value="system-health" className="gap-2 rounded-xl py-2.5">
+            <TabsTrigger value="system-health" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
               <Heart className="h-4 w-4" />
               System Health
             </TabsTrigger>
@@ -565,7 +566,7 @@ export default function Admin() {
                         className="h-10 rounded-xl border-border/70 bg-background pl-9"
                       />
                     </div>
-                    <Button onClick={exportUsers} variant="outline" className="gap-2 rounded-xl">
+                    <Button onClick={exportUsers} variant="outline" className="w-full gap-2 rounded-xl sm:w-auto">
                       <Download className="h-4 w-4" />
                       Export CSV
                     </Button>
@@ -596,17 +597,17 @@ export default function Admin() {
                 ) : (
                   <>
                     <div className="overflow-hidden rounded-2xl border">
-                      <div className="overflow-x-auto">
-                        <Table>
+                      <div className="max-w-full overflow-x-auto">
+                        <Table className="min-w-[720px] table-fixed md:min-w-[860px] xl:min-w-full">
                           <TableHeader>
                             <TableRow className="bg-muted/30">
-                              <TableHead>User</TableHead>
-                              <TableHead>Email</TableHead>
-                              <TableHead>Experience</TableHead>
-                              <TableHead>Status</TableHead>
-                              <TableHead>Role</TableHead>
-                              <TableHead>Joined</TableHead>
-                              <TableHead className="text-right">Actions</TableHead>
+                              <TableHead className="w-[16rem]">User</TableHead>
+                              <TableHead className="hidden w-[18rem] md:table-cell">Email</TableHead>
+                              <TableHead className="hidden w-[9rem] lg:table-cell">Experience</TableHead>
+                              <TableHead className="w-[8rem]">Status</TableHead>
+                              <TableHead className="w-[7rem]">Role</TableHead>
+                              <TableHead className="hidden w-[8rem] xl:table-cell">Joined</TableHead>
+                              <TableHead className="w-[10rem] text-right">Actions</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
@@ -624,19 +625,24 @@ export default function Admin() {
 
                                 return (
                                   <TableRow key={user.id} className="hover:bg-muted/20">
-                                    <TableCell>
-                                      <div className="space-y-1">
-                                        <div className="font-medium">{fullName}</div>
+                                    <TableCell className="align-top">
+                                      <div className="min-w-0 space-y-1">
+                                        <div className="truncate font-medium">{fullName}</div>
+                                        <div className="truncate text-xs text-muted-foreground md:hidden">
+                                          {user.email || "N/A"}
+                                        </div>
                                         <div className="text-xs text-muted-foreground">ID: {user.id.slice(0, 8)}…</div>
                                       </div>
                                     </TableCell>
-                                    <TableCell className="font-mono text-sm">{user.email || "N/A"}</TableCell>
-                                    <TableCell>
+                                    <TableCell className="hidden align-top md:table-cell">
+                                      <span className="block truncate font-mono text-sm">{user.email || "N/A"}</span>
+                                    </TableCell>
+                                    <TableCell className="hidden align-top lg:table-cell">
                                       <Badge variant="outline" className={`capitalize ${getExperienceStyle(user.experience_level)}`}>
                                         {user.experience_level || "unknown"}
                                       </Badge>
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell className="align-top">
                                       {user.is_verified ? (
                                         <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
                                           <UserCheck className="mr-1 h-3 w-3" />
@@ -649,7 +655,7 @@ export default function Admin() {
                                         </Badge>
                                       )}
                                     </TableCell>
-                                    <TableCell>
+                                    <TableCell className="align-top">
                                       {user.userType === 'Admin' ? (
                                         <Badge className="bg-blue-500/10 text-blue-700 dark:text-blue-300">
                                           <Shield className="mr-1 h-3 w-3" />
@@ -659,11 +665,11 @@ export default function Admin() {
                                         <Badge variant="outline">User</Badge>
                                       )}
                                     </TableCell>
-                                    <TableCell className="text-sm text-muted-foreground">
+                                    <TableCell className="hidden align-top text-sm text-muted-foreground xl:table-cell">
                                       {safeFormatDate(user.created_at, "MMM d, yyyy")}
                                     </TableCell>
-                                    <TableCell className="text-right">
-                                      <div className="flex justify-end gap-2">
+                                    <TableCell className="align-top text-right">
+                                      <div className="flex flex-wrap justify-end gap-2">
                                         {user.id !== userProfile?.id && (
                                           <>
                                             <Button
@@ -776,17 +782,17 @@ export default function Admin() {
                     { icon: TrendingUp, label: "Open positions", subtext: "Active paper trades", value: tradingStats.totalPositions },
                     { icon: Database, label: "Journal entries", subtext: "Trade documentation", value: tradingStats.totalJournalEntries },
                   ].map((item) => (
-                    <div key={item.label} className="flex items-center justify-between rounded-2xl border bg-muted/20 p-4">
-                      <div className="flex items-center gap-3">
+                    <div key={item.label} className="flex flex-col gap-4 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div className="rounded-xl bg-primary/10 p-2 text-primary">
                           <item.icon className="h-5 w-5" />
                         </div>
-                        <div>
+                        <div className="min-w-0">
                           <div className="font-medium">{item.label}</div>
                           <div className="text-xs text-muted-foreground">{item.subtext}</div>
                         </div>
                       </div>
-                      <div className="text-2xl font-semibold">{item.value}</div>
+                      <div className="text-left text-2xl font-semibold sm:text-right">{item.value}</div>
                     </div>
                   ))}
                 </CardContent>
@@ -812,17 +818,17 @@ export default function Admin() {
                         <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                           <MessageSquare className="h-5 w-5" />
                         </div>
-                        <div className="flex-1 space-y-1">
+                        <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="font-medium">{activity.action}</p>
+                            <p className="break-words font-medium">{activity.action}</p>
                             <Badge variant="outline" className="w-fit rounded-full px-2.5 text-[11px]">
                               Event {index + 1}
                             </Badge>
                           </div>
-                          <p className="text-sm text-muted-foreground">{activity.user_email}</p>
+                          <p className="break-all text-sm text-muted-foreground">{activity.user_email}</p>
                           <p className="text-xs text-muted-foreground">{safeFormatDate(activity.timestamp, "MMM d, yyyy 'at' h:mm a")}</p>
                         </div>
-                        <Clock className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                        <Clock className="mt-0.5 h-4 w-4 self-end text-muted-foreground sm:self-auto" />
                       </div>
                     ))}
                   </div>
@@ -837,7 +843,7 @@ export default function Admin() {
                 <h2 className="text-lg font-semibold">System health monitor</h2>
                 <p className="text-sm text-muted-foreground">Live connection status for Supabase, DataAPI, and the backend API.</p>
               </div>
-              <Button onClick={fetchSystemHealth} disabled={healthLoading} variant="outline" size="sm" className="gap-2 rounded-xl">
+              <Button onClick={fetchSystemHealth} disabled={healthLoading} variant="outline" size="sm" className="w-full gap-2 rounded-xl sm:w-auto">
                 <RefreshCw className={`h-4 w-4 ${healthLoading ? "animate-spin" : ""}`} />
                 Check health
               </Button>
@@ -981,38 +987,38 @@ export default function Admin() {
                   <CardContent className="space-y-2 text-sm">
                     {systemHealth.dataapi_dashboard.api && (
                       <>
-                        <div className="flex justify-between">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                           <span className="text-muted-foreground">Name</span>
-                          <span className="font-medium">{systemHealth.dataapi_dashboard.api.name}</span>
+                          <span className="font-medium break-words sm:text-right">{systemHealth.dataapi_dashboard.api.name}</span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                           <span className="text-muted-foreground">Version</span>
-                          <span className="font-medium">{systemHealth.dataapi_dashboard.api.version}</span>
+                          <span className="font-medium break-words sm:text-right">{systemHealth.dataapi_dashboard.api.version}</span>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                           <span className="text-muted-foreground">Environment</span>
-                          <Badge variant="outline">{systemHealth.dataapi_dashboard.api.environment}</Badge>
+                          <Badge variant="outline" className="w-fit">{systemHealth.dataapi_dashboard.api.environment}</Badge>
                         </div>
                       </>
                     )}
                     {systemHealth.dataapi_dashboard.database && (
                       <>
-                        <div className="flex justify-between">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                           <span className="text-muted-foreground">DB Connected</span>
-                          <Badge variant={systemHealth.dataapi_dashboard.database.connected ? "default" : "destructive"}>
+                          <Badge variant={systemHealth.dataapi_dashboard.database.connected ? "default" : "destructive"} className="w-fit">
                             {systemHealth.dataapi_dashboard.database.connected ? "Yes" : "No"}
                           </Badge>
                         </div>
-                        <div className="flex justify-between">
+                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
                           <span className="text-muted-foreground">DB URL</span>
-                          <span className="text-xs font-mono truncate max-w-[200px]">{systemHealth.dataapi_dashboard.database.url_masked}</span>
+                          <span className="max-w-full break-all text-left text-xs font-mono sm:max-w-[200px] sm:text-right">{systemHealth.dataapi_dashboard.database.url_masked}</span>
                         </div>
                       </>
                     )}
                     {systemHealth.dataapi_dashboard.active_tickers !== undefined && (
-                      <div className="flex justify-between">
+                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                         <span className="text-muted-foreground">Active Tickers</span>
-                        <span className="font-medium">{systemHealth.dataapi_dashboard.active_tickers}</span>
+                        <span className="font-medium sm:text-right">{systemHealth.dataapi_dashboard.active_tickers}</span>
                       </div>
                     )}
                   </CardContent>
@@ -1025,7 +1031,8 @@ export default function Admin() {
                   </CardHeader>
                   <CardContent>
                     {systemHealth.dataapi_dashboard.tables?.length > 0 ? (
-                      <Table>
+                      <div className="max-w-full overflow-x-auto">
+                        <Table className="min-w-[320px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead className="text-xs">Table</TableHead>
@@ -1035,7 +1042,7 @@ export default function Admin() {
                         <TableBody>
                           {systemHealth.dataapi_dashboard.tables.map((t: { table: string; row_count: number }) => (
                             <TableRow key={t.table}>
-                              <TableCell className="text-xs font-mono">{t.table}</TableCell>
+                              <TableCell className="max-w-[14rem] truncate text-xs font-mono">{t.table}</TableCell>
                               <TableCell className="text-xs text-right">
                                 {t.row_count >= 0 ? t.row_count.toLocaleString() : (
                                   <span className="text-red-400">N/A</span>
@@ -1044,7 +1051,8 @@ export default function Admin() {
                             </TableRow>
                           ))}
                         </TableBody>
-                      </Table>
+                        </Table>
+                      </div>
                     ) : (
                       <p className="text-sm text-muted-foreground">No table data</p>
                     )}
@@ -1058,7 +1066,8 @@ export default function Admin() {
                       <CardTitle className="text-sm">Engine Worker Heartbeats</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <Table>
+                      <div className="max-w-full overflow-x-auto">
+                        <Table className="min-w-[560px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead className="text-xs">Worker</TableHead>
@@ -1071,7 +1080,7 @@ export default function Admin() {
                           {systemHealth.dataapi_dashboard.engine_workers.map(
                             (w: { worker_name: string; status: string; last_heartbeat: string | null; seconds_ago: number | null }) => (
                             <TableRow key={w.worker_name}>
-                              <TableCell className="text-xs font-mono">{w.worker_name}</TableCell>
+                              <TableCell className="max-w-[14rem] truncate text-xs font-mono">{w.worker_name}</TableCell>
                               <TableCell>
                                 <Badge variant={w.status === "running" ? "default" : "secondary"} className="text-xs">
                                   {w.status}
@@ -1086,7 +1095,8 @@ export default function Admin() {
                             </TableRow>
                           ))}
                         </TableBody>
-                      </Table>
+                        </Table>
+                      </div>
                     </CardContent>
                   </Card>
                 )}
@@ -1098,7 +1108,8 @@ export default function Admin() {
                       <CardTitle className="text-sm">Service Clients (IAM)</CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <Table>
+                      <div className="max-w-full overflow-x-auto">
+                        <Table className="min-w-[560px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead className="text-xs">Client ID</TableHead>
@@ -1111,7 +1122,7 @@ export default function Admin() {
                           {systemHealth.dataapi_dashboard.service_clients.map(
                             (c: { client_id: string; display_name: string | null; is_active: boolean; scope_count: number }) => (
                             <TableRow key={c.client_id}>
-                              <TableCell className="text-xs font-mono">{c.client_id}</TableCell>
+                              <TableCell className="max-w-[14rem] truncate text-xs font-mono">{c.client_id}</TableCell>
                               <TableCell className="text-xs">{c.display_name || "—"}</TableCell>
                               <TableCell>
                                 <Badge variant={c.is_active ? "default" : "destructive"} className="text-xs">
@@ -1122,7 +1133,8 @@ export default function Admin() {
                             </TableRow>
                           ))}
                         </TableBody>
-                      </Table>
+                        </Table>
+                      </div>
                     </CardContent>
                   </Card>
                 )}
@@ -1132,7 +1144,7 @@ export default function Admin() {
             {/* Database Query Console */}
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Terminal className="h-4 w-4" />
@@ -1169,14 +1181,14 @@ export default function Admin() {
 
                 {/* Custom Query Input */}
                 <div className="space-y-2">
-                  <Textarea
-                    placeholder="SELECT * FROM tickers WHERE is_active = true LIMIT 10"
-                    value={queryInput}
-                    onChange={(e) => setQueryInput(e.target.value)}
-                    className="font-mono text-sm min-h-[80px]"
-                  />
-                  <div className="flex items-center gap-3">
-                    <Button onClick={() => runQuery()} disabled={queryLoading || !queryInput.trim()} size="sm" className="gap-2">
+                    <Textarea
+                      placeholder="SELECT * FROM tickers WHERE is_active = true LIMIT 10"
+                      value={queryInput}
+                      onChange={(e) => setQueryInput(e.target.value)}
+                      className="min-h-[80px] font-mono text-xs sm:text-sm"
+                    />
+                  <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
+                    <Button onClick={() => runQuery()} disabled={queryLoading || !queryInput.trim()} size="sm" className="w-full gap-2 sm:w-auto">
                       {queryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                       Execute Query
                     </Button>
@@ -1197,8 +1209,8 @@ export default function Admin() {
 
                 {/* Query Results Table */}
                 {queryResults?.rows?.length > 0 && (
-                  <div className="max-h-[400px] overflow-auto rounded-lg border">
-                    <Table>
+                  <div className="max-h-[400px] max-w-full overflow-auto rounded-lg border">
+                    <Table className="min-w-max">
                       <TableHeader>
                         <TableRow>
                           {Object.keys(queryResults.rows[0]).map((col) => (
@@ -1210,7 +1222,7 @@ export default function Admin() {
                         {queryResults.rows.map((row: Record<string, string | null>, idx: number) => (
                           <TableRow key={idx}>
                             {Object.values(row).map((val, ci) => (
-                              <TableCell key={ci} className="text-xs max-w-[200px] truncate">
+                              <TableCell key={ci} className="max-w-[160px] truncate align-top text-xs sm:max-w-[200px]">
                                 {val !== null ? String(val) : <span className="text-muted-foreground">null</span>}
                               </TableCell>
                             ))}

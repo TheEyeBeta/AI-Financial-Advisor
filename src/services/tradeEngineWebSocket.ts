@@ -3,6 +3,7 @@
  * Provides real-time price updates, trading signals, and engine status
  */
 
+import { getPythonWebSocketUrl } from '@/lib/env';
 import {
   WSConnectedMessage,
   WSMessage,
@@ -41,8 +42,7 @@ class TradeEngineWebSocket {
   private _connectionId: string | null = null;
 
   private get baseUrl(): string {
-    const httpUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-    return httpUrl.replace(/^http/, 'ws');
+    return getPythonWebSocketUrl();
   }
 
   get connectionState(): ConnectionState {

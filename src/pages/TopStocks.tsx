@@ -1,31 +1,34 @@
 import { useState } from "react";
 import {
-  Trophy,
-  RefreshCw,
   AlertTriangle,
   ChevronDown,
   ChevronUp,
-  TrendingUp,
-  TrendingDown,
   Info,
+  Lock,
+  RefreshCw,
   Shield,
   Star,
+  TrendingDown,
+  TrendingUp,
+  Trophy,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useTopStocks } from "@/hooks/use-data";
 import { cn } from "@/lib/utils";
-import type { StockScore, Horizon } from "@/services/api";
+import type { StockScore, Horizon } from "@/services/stock-ranking-api";
+
+const EMPTY_VALUE = "-";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function scoreBadge(score: number) {
-  if (score >= 70) return "bg-profit/10 text-profit border-profit/30";
-  if (score >= 50) return "bg-yellow-500/10 text-yellow-500 border-yellow-500/30";
-  return "bg-destructive/10 text-destructive border-destructive/30";
+  if (score >= 70) return "border-profit/30 bg-profit/10 text-profit";
+  if (score >= 50) return "border-yellow-500/30 bg-yellow-500/10 text-yellow-500";
+  return "border-destructive/30 bg-destructive/10 text-destructive";
 }
 
 function scoreBar(score: number) {
@@ -37,92 +40,169 @@ function scoreBar(score: number) {
 function tierBadge(tier: string) {
   switch (tier) {
     case "Strong Buy":
-      return "bg-profit/15 text-profit border-profit/40";
+      return "border-profit/40 bg-profit/15 text-profit";
     case "Buy":
-      return "bg-profit/10 text-profit border-profit/25";
+      return "border-profit/25 bg-profit/10 text-profit";
     case "Hold":
-      return "bg-yellow-500/10 text-yellow-500 border-yellow-500/30";
+      return "border-yellow-500/30 bg-yellow-500/10 text-yellow-500";
     case "Underperform":
-      return "bg-orange-500/10 text-orange-500 border-orange-500/30";
+      return "border-orange-500/30 bg-orange-500/10 text-orange-500";
     case "Sell":
-      return "bg-destructive/10 text-destructive border-destructive/30";
+      return "border-destructive/30 bg-destructive/10 text-destructive";
     default:
-      return "bg-muted text-muted-foreground border-border";
+      return "border-border bg-muted text-muted-foreground";
   }
 }
 
 function convictionBadge(conviction: string) {
   switch (conviction) {
     case "High":
-      return "bg-profit/10 text-profit border-profit/25";
+      return "border-profit/25 bg-profit/10 text-profit";
     case "Medium":
-      return "bg-yellow-500/10 text-yellow-500 border-yellow-500/25";
+      return "border-yellow-500/25 bg-yellow-500/10 text-yellow-500";
     default:
-      return "bg-muted/50 text-muted-foreground border-border/50";
+      return "border-border/50 bg-muted/50 text-muted-foreground";
   }
 }
 
-function fmtPct(val: number | null, decimals = 1): string {
-  if (val === null) return "—";
-  const sign = val >= 0 ? "+" : "";
-  return `${sign}${val.toFixed(decimals)}%`;
+function stabilityLabel(cycles: number): { text: string; className: string } | null {
+  if (cycles < 3) return null;
+  if (cycles >= 18) {
+    return { text: "Stable 3h+", className: "border-profit/30 bg-profit/10 text-profit" };
+  }
+  if (cycles >= 6) {
+    return {
+      text: `Stable ${Math.round((cycles * 10) / 60)}h+`,
+      className: "border-profit/25 bg-profit/5 text-profit/80",
+    };
+  }
+  return {
+    text: "Holding",
+    className: "border-border/50 bg-muted/30 text-muted-foreground",
+  };
 }
 
-function fmtPrice(val: number | null): string {
-  if (val === null) return "—";
-  return `$${val.toFixed(2)}`;
+function fmtPct(value: number | null, decimals = 1): string {
+  if (value === null) return EMPTY_VALUE;
+  const sign = value >= 0 ? "+" : "";
+  return `${sign}${value.toFixed(decimals)}%`;
 }
 
-function fmtMult(val: number | null, decimals = 2): string {
-  if (val === null) return "—";
-  return val.toFixed(decimals) + "×";
+function fmtPrice(value: number | null): string {
+  if (value === null) return EMPTY_VALUE;
+  return `$${value.toFixed(2)}`;
 }
 
-function fmtNum(val: number | null, decimals = 1): string {
-  if (val === null) return "—";
-  return val.toFixed(decimals);
+function fmtMult(value: number | null, decimals = 2): string {
+  if (value === null) return EMPTY_VALUE;
+  return `${value.toFixed(decimals)}x`;
 }
 
-function fmtCap(val: number | null): string {
-  if (val === null) return "—";
-  if (val >= 1e12) return `$${(val / 1e12).toFixed(1)}T`;
-  if (val >= 1e9) return `$${(val / 1e9).toFixed(1)}B`;
-  if (val >= 1e6) return `$${(val / 1e6).toFixed(0)}M`;
-  return `$${val.toFixed(0)}`;
+function fmtNum(value: number | null, decimals = 1): string {
+  if (value === null) return EMPTY_VALUE;
+  return value.toFixed(decimals);
+}
+
+function fmtCap(value: number | null): string {
+  if (value === null) return EMPTY_VALUE;
+  if (value >= 1e12) return `$${(value / 1e12).toFixed(1)}T`;
+  if (value >= 1e9) return `$${(value / 1e9).toFixed(1)}B`;
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(0)}M`;
+  return `$${value.toFixed(0)}`;
 }
 
 // ── Dimension weights per horizon (must match backend) ────────────────────────
 
-const HORIZON_WEIGHTS: Record<Horizon, { momentum: string; technical: string; fundamental: string; risk: string; quality: string; ml: string }> = {
-  short:    { momentum: "25%", technical: "28%", fundamental: "7%", risk: "10%", quality: "5%", ml: "25%" },
-  long:     { momentum: "7%",  technical: "8%",  fundamental: "35%", risk: "15%", quality: "22%", ml: "13%" },
-  balanced: { momentum: "15%", technical: "20%", fundamental: "25%", risk: "12%", quality: "10%", ml: "18%" },
+const HORIZON_WEIGHTS: Record<
+  Horizon,
+  {
+    momentum: string;
+    technical: string;
+    fundamental: string;
+    risk: string;
+    quality: string;
+    ml: string;
+  }
+> = {
+  short: {
+    momentum: "25%",
+    technical: "28%",
+    fundamental: "7%",
+    risk: "10%",
+    quality: "5%",
+    ml: "25%",
+  },
+  long: {
+    momentum: "7%",
+    technical: "8%",
+    fundamental: "35%",
+    risk: "15%",
+    quality: "22%",
+    ml: "13%",
+  },
+  balanced: {
+    momentum: "15%",
+    technical: "20%",
+    fundamental: "25%",
+    risk: "12%",
+    quality: "10%",
+    ml: "18%",
+  },
 };
 
 const HORIZON_LABELS: Record<Horizon, { label: string; description: string }> = {
-  short:    { label: "Short-term", description: "Swing trading — days to weeks. Emphasises momentum, technicals & ML signals." },
-  long:     { label: "Long-term",  description: "Buy-and-hold — months to years. Emphasises fundamentals, quality & risk." },
-  balanced: { label: "Balanced",   description: "Medium-term position trading. Even blend across all dimensions." },
+  short: {
+    label: "Short-term",
+    description: "Swing trading over days to weeks with more weight on momentum, technicals, and ML signals.",
+  },
+  long: {
+    label: "Long-term",
+    description: "Buy-and-hold ranking for months to years with more weight on fundamentals, quality, and risk.",
+  },
+  balanced: {
+    label: "Balanced",
+    description: "Middle-ground ranking for position trades with a more even blend across all dimensions.",
+  },
 };
+
+function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-[18px] border border-border/60 bg-background/70 p-3">
+      <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+        {label}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">{children}</div>
+    </div>
+  );
+}
 
 // ── Score Bar Component ───────────────────────────────────────────────────────
 
 function ScoreBar({ label, score, weight }: { label: string; score: number; weight: string }) {
   return (
-    <div className="space-y-0.5">
-      <div className="flex items-center justify-between text-[10px]">
-        <span className="text-muted-foreground">{label}</span>
-        <span className={cn("font-medium", score >= 70 ? "text-profit" : score >= 50 ? "text-yellow-500" : "text-destructive")}>
+    <div className="rounded-[16px] border border-border/60 bg-background/70 p-3">
+      <div className="flex items-center justify-between gap-3 text-[11px]">
+        <span className="font-medium text-foreground/80">{label}</span>
+        <span
+          className={cn(
+            "font-semibold tabular-nums",
+            score >= 70
+              ? "text-profit"
+              : score >= 50
+                ? "text-yellow-500"
+                : "text-destructive",
+          )}
+        >
           {score.toFixed(0)}
         </span>
       </div>
-      <div className="relative h-1 rounded-full bg-muted/50">
+      <div className="mt-2 h-1.5 rounded-full bg-muted/60">
         <div
-          className={cn("absolute inset-y-0 left-0 rounded-full transition-all", scoreBar(score))}
+          className={cn("h-full rounded-full transition-all", scoreBar(score))}
           style={{ width: `${Math.min(100, score)}%` }}
         />
       </div>
-      <div className="text-[9px] text-muted-foreground/50">{weight}</div>
+      <p className="mt-1 text-[10px] text-muted-foreground/70">{weight}</p>
     </div>
   );
 }
@@ -284,22 +364,27 @@ function BreakdownRow({ stock }: { stock: StockScore }) {
     title: string,
     items: { label: string; value: string; positive?: boolean }[],
   ) => (
-    <div>
-      <p className="text-[10px] font-semibold text-foreground/70 mb-1.5 uppercase tracking-wider">
+    <div className="space-y-3">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/70">
         {title}
       </p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+      <div className="grid gap-2 sm:grid-cols-2">
         {items.map(({ label, value, positive }) => (
-          <div key={label} className="flex items-center justify-between gap-1">
-            <p className="text-[10px] text-muted-foreground">{label}</p>
+          <div
+            key={label}
+            className="rounded-[14px] border border-border/50 bg-card/60 px-3 py-2"
+          >
+            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+              {label}
+            </p>
             <p
               className={cn(
-                "text-[11px] font-medium tabular-nums",
+                "mt-1 text-sm font-semibold tabular-nums",
                 value === "—"
                   ? "text-muted-foreground/50"
                   : positive
-                  ? "text-profit"
-                  : "text-destructive"
+                    ? "text-profit"
+                    : "text-destructive",
               )}
             >
               {value}
@@ -311,11 +396,14 @@ function BreakdownRow({ stock }: { stock: StockScore }) {
   );
 
   return (
-    <div className="mt-3 pt-3 border-t border-border/50 space-y-3">
-      {renderSection("Technical Indicators", technicalItems)}
-      {renderSection("Momentum", momentumItems)}
-      {renderSection("Fundamentals & Valuation", fundamentalItems)}
-      {signalItems.some(i => i.value !== "—") && renderSection("ML / Signals", signalItems)}
+    <div className="mt-4 rounded-[18px] border border-border/60 bg-background/70 p-4">
+      <div className="space-y-4 border-t border-border/50 pt-4">
+        {renderSection("Technical Indicators", technicalItems)}
+        {renderSection("Momentum", momentumItems)}
+        {renderSection("Fundamentals & Valuation", fundamentalItems)}
+        {signalItems.some((item) => item.value !== "—") &&
+          renderSection("ML / Signals", signalItems)}
+      </div>
     </div>
   );
 }
@@ -336,11 +424,11 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
   return (
     <Card
       className={cn(
-        "border-border/50 bg-card/50 backdrop-blur-sm transition-all animate-in fade-in duration-300",
-        !stock.data_fresh && "opacity-70"
+        "group overflow-hidden rounded-[22px] border border-border/60 bg-card/90 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.55)] transition-all duration-200 hover:border-primary/25 hover:bg-card animate-in fade-in duration-300",
+        !stock.data_fresh && "opacity-80"
       )}
     >
-      <CardContent className="pt-4 pb-3 px-4">
+      <CardContent className="p-5">
         {/* Top row: rank + ticker + composite */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
@@ -364,12 +452,12 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
             </div>
           </div>
 
-          {/* Composite score badge */}
+          {/* Smoothed composite score badge */}
           <Badge
             variant="outline"
-            className={cn("text-sm font-bold px-2.5 py-1 h-auto shrink-0", scoreBadge(stock.composite_score))}
+            className={cn("text-sm font-bold px-2.5 py-1 h-auto shrink-0", scoreBadge(stock.smoothed_score))}
           >
-            {stock.composite_score.toFixed(0)}
+            {stock.smoothed_score.toFixed(0)}
           </Badge>
         </div>
 
@@ -389,6 +477,16 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
             {stock.conviction === "Medium" && <Shield className="h-2.5 w-2.5" />}
             {stock.conviction} conviction
           </Badge>
+          {(() => {
+            const stability = stabilityLabel(stock.tier_held_cycles);
+            if (!stability) return null;
+            return (
+              <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0 h-4 gap-0.5", stability.className)}>
+                <Lock className="h-2 w-2" />
+                {stability.text}
+              </Badge>
+            );
+          })()}
           <span className="text-[9px] text-muted-foreground/50">
             {stock.dimensions_bullish}/{stock.has_ml_data ? 6 : 5} bullish
           </span>
@@ -405,24 +503,24 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
           </div>
         </div>
 
-        {/* Composite score bar */}
+        {/* Smoothed composite score bar */}
         <div className="mt-3 space-y-0.5">
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-muted-foreground font-medium">Composite</span>
-            <span className={cn("font-semibold", stock.composite_score >= 70 ? "text-profit" : stock.composite_score >= 50 ? "text-yellow-500" : "text-destructive")}>
-              {stock.composite_score.toFixed(1)} / 100
+            <span className={cn("font-semibold", stock.smoothed_score >= 70 ? "text-profit" : stock.smoothed_score >= 50 ? "text-yellow-500" : "text-destructive")}>
+              {stock.smoothed_score.toFixed(1)} / 100
             </span>
           </div>
           <div className="h-1.5 rounded-full bg-muted/50">
             <div
-              className={cn("h-full rounded-full transition-all", scoreBar(stock.composite_score))}
-              style={{ width: `${Math.min(100, stock.composite_score)}%` }}
+              className={cn("h-full rounded-full transition-all", scoreBar(stock.smoothed_score))}
+              style={{ width: `${Math.min(100, stock.smoothed_score)}%` }}
             />
           </div>
         </div>
 
         {/* Dimension scores — 6 dimensions in 3×2 grid with horizon-aware weights */}
-        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {(() => { const hw = HORIZON_WEIGHTS[horizon]; return (<>
             <ScoreBar label="Momentum" score={stock.momentum_score} weight={hw.momentum} />
             <ScoreBar label="Technical" score={stock.technical_score} weight={hw.technical} />
@@ -430,7 +528,7 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
             <ScoreBar label="Risk-Adj." score={stock.risk_score} weight={hw.risk} />
             <ScoreBar label="Quality" score={stock.quality_score} weight={hw.quality} />
             <ScoreBar
-              label={stock.has_ml_data ? "ML Signal" : "ML Signal (—)"}
+              label={stock.has_ml_data ? "ML Signal" : "ML Signal (-)"}
               score={stock.ml_score ?? 50}
               weight={stock.has_ml_data ? hw.ml : "redistributed"}
             />
@@ -441,10 +539,10 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
         <Button
           variant="ghost"
           size="sm"
-          className="w-full mt-2 h-6 text-[11px] text-muted-foreground gap-1 hover:text-foreground"
-          onClick={() => setExpanded(e => !e)}
+          className="mt-4 h-10 rounded-full border border-border/70 bg-background/70 px-4 text-xs font-medium text-muted-foreground gap-1 hover:bg-background hover:text-foreground"
+          onClick={() => setExpanded((e) => !e)}
         >
-          {expanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+          {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           {expanded ? "Hide details" : "Show details"}
         </Button>
 
@@ -474,106 +572,119 @@ const TopStocks = () => {
 
   return (
     <AppLayout title="Top Stocks">
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in duration-300">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-lg bg-primary/10">
-              <Trophy className="h-5 w-5 text-primary" />
+      <div className="mx-auto max-w-5xl space-y-6">
+        <section className="rounded-[24px] border border-border/60 bg-card/95 p-6 shadow-[0_20px_60px_-48px_rgba(15,23,42,0.28)] animate-in fade-in duration-300">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-3">
+            <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/50 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
+              <Trophy className="h-3.5 w-3.5" />
+              Top Stocks
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-foreground">Top Stocks</h1>
-              <p className="text-sm text-muted-foreground">
-                Professional multi-dimensional ranking across momentum, technical, fundamental, risk, quality &amp; ML signals
+              <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+                Scan the market leaders faster.
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
+                Review ranked names, tighten the score filter, and shift time horizon from one clean surface.
               </p>
             </div>
           </div>
 
-          {/* Controls */}
-          <div className="flex items-center gap-2 flex-wrap justify-end">
-            {/* Limit toggle */}
-            <div className="flex rounded-lg border border-border/50 p-1 bg-muted/30">
-              {LIMIT_OPTIONS.map(n => (
-                <Button
-                  key={n}
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 px-3 text-xs rounded-md transition-all",
-                    limit === n && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
-                  )}
-                  onClick={() => setLimit(n)}
-                >
-                  Top {n}
-                </Button>
-              ))}
-            </div>
-
-            {/* Min score toggle */}
-            <div className="flex rounded-lg border border-border/50 p-1 bg-muted/30">
-              {MIN_SCORE_OPTIONS.map(s => (
-                <Button
-                  key={s}
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 px-3 text-xs rounded-md transition-all",
-                    minScore === s && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
-                  )}
-                  onClick={() => setMinScore(s)}
-                >
-                  {s === 0 ? "All" : `≥${s}`}
-                </Button>
-              ))}
-            </div>
-
-            {/* Horizon toggle */}
-            <div className="flex rounded-lg border border-border/50 p-1 bg-muted/30">
-              {HORIZON_OPTIONS.map(h => (
-                <Button
-                  key={h}
-                  variant="ghost"
-                  size="sm"
-                  className={cn(
-                    "h-7 px-3 text-xs rounded-md transition-all",
-                    horizon === h && "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
-                  )}
-                  onClick={() => setHorizon(h)}
-                  title={HORIZON_LABELS[h].description}
-                >
-                  {HORIZON_LABELS[h].label}
-                </Button>
-              ))}
-            </div>
-
-            {/* Refresh */}
+          <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              size="sm"
-              className="h-7 px-2"
               onClick={() => refetch()}
               disabled={isLoading || isRefetching}
+              className="h-10 rounded-full px-4"
             >
-              <RefreshCw className={cn("h-3 w-3", (isLoading || isRefetching) && "animate-spin")} />
+              <RefreshCw className={cn("h-4 w-4", (isLoading || isRefetching) && "animate-spin")} />
+              Refresh rankings
             </Button>
           </div>
         </div>
 
-        {/* Info bar */}
-        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground animate-in fade-in duration-300">
-          {!isLoading && totalScored > 0 && (
-            <span>
-              Showing <span className="text-foreground font-medium">{stocks.length}</span> of{" "}
-              <span className="text-foreground font-medium">{totalScored}</span> ranked stocks
+        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+          <FilterGroup label="Show ranked set">
+            {LIMIT_OPTIONS.map((n) => (
+              <Button
+                key={n}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 rounded-full px-4 text-xs font-medium transition-all",
+                  limit === n
+                    ? "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                    : "border border-border/60 bg-card/70 text-muted-foreground hover:bg-background hover:text-foreground",
+                )}
+                onClick={() => setLimit(n)}
+              >
+                Top {n}
+              </Button>
+            ))}
+          </FilterGroup>
+
+          <FilterGroup label="Minimum score">
+            {MIN_SCORE_OPTIONS.map((s) => (
+              <Button
+                key={s}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 rounded-full px-4 text-xs font-medium transition-all",
+                  minScore === s
+                    ? "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                    : "border border-border/60 bg-card/70 text-muted-foreground hover:bg-background hover:text-foreground",
+                )}
+                onClick={() => setMinScore(s)}
+              >
+                {s === 0 ? "All" : `>= ${s}`}
+              </Button>
+            ))}
+          </FilterGroup>
+
+          <FilterGroup label="Time horizon">
+            {HORIZON_OPTIONS.map((h) => (
+              <Button
+                key={h}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "h-9 rounded-full px-4 text-xs font-medium transition-all",
+                  horizon === h
+                    ? "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
+                    : "border border-border/60 bg-card/70 text-muted-foreground hover:bg-background hover:text-foreground",
+                )}
+                onClick={() => setHorizon(h)}
+                title={HORIZON_LABELS[h].description}
+              >
+                {HORIZON_LABELS[h].label}
+              </Button>
+            ))}
+          </FilterGroup>
+        </div>
+
+        <div className="mt-5 flex flex-wrap gap-2 text-sm">
+          <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
+            <span className="font-semibold text-foreground">{stocks.length}</span> shown
+          </div>
+          <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
+            <span className="font-semibold text-foreground">{totalScored}</span> ranked universe
+          </div>
+          <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
+            <span className="font-semibold text-foreground">
+              {minScore === 0 ? "All scores" : `Score >= ${minScore}`}
             </span>
-          )}
+          </div>
+          <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
+            <span className="font-semibold text-foreground">{HORIZON_LABELS[horizon].label}</span>
+          </div>
 
           {hasStaleData && (
             <Badge
               variant="outline"
-              className="gap-1 text-[10px] border-yellow-500/40 text-yellow-500"
+              className="h-auto rounded-full border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-500"
             >
-              <AlertTriangle className="h-3 w-3" />
+              <AlertTriangle className="mr-1 h-3.5 w-3.5" />
               Some data may be stale (&gt;24h)
             </Badge>
           )}
@@ -581,38 +692,40 @@ const TopStocks = () => {
           {!isLoading && !hasMlData && stocks.length > 0 && (
             <Badge
               variant="outline"
-              className="gap-1 text-[10px] border-muted-foreground/30 text-muted-foreground"
+              className="h-auto rounded-full border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground"
             >
-              <Info className="h-3 w-3" />
-              ML signals unavailable — weight redistributed
+              <Info className="mr-1 h-3.5 w-3.5" />
+              ML signals unavailable - weight redistributed
             </Badge>
           )}
         </div>
 
-        {/* Horizon description + methodology note */}
-        <div className="text-[11px] text-muted-foreground/60 space-y-1 animate-in fade-in duration-300">
-          <p className="text-muted-foreground/80">
-            <span className="font-medium text-foreground/70">{HORIZON_LABELS[horizon].label}:</span>{" "}
+        <div className="mt-4 rounded-[20px] border border-border/60 bg-background/70 p-4">
+          <p className="text-sm leading-6 text-muted-foreground">
+            <span className="font-medium text-foreground/80">{HORIZON_LABELS[horizon].label}:</span>{" "}
             {HORIZON_LABELS[horizon].description}
           </p>
-          <p>6-dimension scoring (30+ metrics) normalized 0–100 across universe. Not financial advice.</p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground/80">
+            6-dimension scoring across 30+ metrics with EMA smoothing and tier hysteresis for more stable rankings. Not financial advice.
+          </p>
         </div>
+        </section>
 
         {/* Content */}
         {error ? (
-          <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in duration-300">
-            <CardContent className="py-12 text-center">
-              <div className="p-3 rounded-full bg-destructive/10 mx-auto mb-4 w-fit">
+          <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/95 shadow-[0_24px_60px_-48px_rgba(15,23,42,0.7)] animate-in fade-in duration-300">
+            <CardContent className="py-16 text-center">
+              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[20px] bg-destructive/10">
                 <Trophy className="h-8 w-8 text-destructive" />
               </div>
-              <p className="text-destructive font-medium">Error loading stock rankings</p>
-              <p className="text-xs text-muted-foreground mt-2 max-w-sm mx-auto">
+              <h2 className="text-xl font-semibold text-foreground">Error loading stock rankings</h2>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
                 {error instanceof Error ? error.message : "Failed to fetch stock data."}
               </p>
             </CardContent>
           </Card>
         ) : isLoading ? (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-4 lg:grid-cols-2">
             {[...Array(8)].map((_, i) => (
               <Card key={i} className="border-border/50 bg-card/50">
                 <CardContent className="pt-4 pb-3 px-4 space-y-3">
@@ -632,21 +745,21 @@ const TopStocks = () => {
             ))}
           </div>
         ) : stocks.length === 0 ? (
-          <Card className="border-border/50 bg-card/50 backdrop-blur-sm animate-in fade-in duration-300">
-            <CardContent className="py-12 text-center">
-              <div className="p-3 rounded-full bg-muted mx-auto mb-4 w-fit">
-                <Trophy className="h-8 w-8 text-muted-foreground" />
+          <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/95 shadow-[0_24px_60px_-48px_rgba(15,23,42,0.7)] animate-in fade-in duration-300">
+            <CardContent className="py-16 text-center">
+              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[20px] bg-primary/10">
+                <Trophy className="h-8 w-8 text-primary" />
               </div>
-              <p className="text-muted-foreground font-medium">No stocks match the current filters</p>
-              <p className="text-xs text-muted-foreground mt-2">
+              <h2 className="text-xl font-semibold text-foreground">No stocks match the current filters</h2>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
                 {minScore > 0
-                  ? `Try lowering the minimum score threshold (currently ≥${minScore}).`
+                  ? `Try lowering the minimum score threshold. It is currently set to >= ${minScore}.`
                   : "No stock data is available. Make sure the Trade Engine is running."}
               </p>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-4 lg:grid-cols-2">
             {stocks.map((stock, index) => (
               <StockCard key={stock.ticker} stock={stock} rank={index + 1} horizon={horizon} />
             ))}

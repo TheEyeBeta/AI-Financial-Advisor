@@ -66,7 +66,7 @@ export function SupabaseConnectionTest() {
           setConnectionStatus({
             status: 'tables-missing',
             message: 'Connected to Supabase, but tables not found',
-            details: 'Run supabase-schema.sql in Supabase SQL Editor to create tables'
+            details: 'Run sql/schema.sql, then sql/fix_rls_policies_schema.sql and sql/verify_runtime_schema_readiness.sql in the Supabase SQL Editor.'
           });
         } else if (error.code === 'PGRST301' || error.message.includes('permission') || error.message.includes('RLS')) {
           setConnectionStatus({

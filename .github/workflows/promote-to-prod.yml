@@ -1,0 +1,54 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  promote:
+    name: Merge staging to main
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge staging into main
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            try {
+              const response = await github.rest.repos.merge({
+                owner,
+                repo,
+                base: 'main',
+                head: 'staging',
+                commit_message: 'Promote staging to main',
+              });
+
+              core.info(`Merged staging into main: ${response.data.sha}`);
+            } catch (error) {
+              if (error.status === 409) {
+                core.setFailed('Promotion failed because staging cannot be merged cleanly into main.');
+                return;
+              }
+
+              if (error.status === 422) {
+                core.setFailed('Promotion failed because staging is already merged or the refs are invalid.');
+                return;
+              }
+
+              throw error;
+            }
+
+      - name: Confirm production deploy will trigger
+        run: |
+          echo "Merge into main completed."
+          echo "The existing production deploy workflow is triggered by pushes to main."

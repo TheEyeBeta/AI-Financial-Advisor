@@ -1,15 +1,16 @@
 -- =============================================================================
 -- Fix RLS Policies for multi-schema architecture
 -- =============================================================================
--- PROBLEM: RLS policies were created on public.* tables, but tables now live
+-- PROBLEM: RLS policies were created against the deprecated public schema,
+-- but runtime tables now live
 -- in ai.*, core.*, trading.*, academy.* schemas.
 -- The policies need to exist on the actual schema-qualified tables.
 -- =============================================================================
 
 -- ─── Helper function (if not already in the correct schema) ──────────────────
 
--- Ensure is_current_user_admin works across schemas
-CREATE OR REPLACE FUNCTION public.is_current_user_admin()
+-- Ensure is_current_user_admin lives in the runtime core schema.
+CREATE OR REPLACE FUNCTION core.is_current_user_admin()
 RETURNS boolean AS $$
   SELECT EXISTS (
     SELECT 1 FROM core.users
@@ -28,7 +29,7 @@ CREATE POLICY "Users can view profiles"
 ON core.users FOR SELECT
 USING (
   auth_id = auth.uid()
-  OR public.is_current_user_admin()
+  OR core.is_current_user_admin()
 );
 
 DROP POLICY IF EXISTS "Users can update profiles" ON core.users;
@@ -37,26 +38,26 @@ ON core.users FOR UPDATE
 USING (
   -- Who can target a row for update:
   auth_id = auth.uid()              -- own row
-  OR public.is_current_user_admin() -- or admin targets any row
+  OR core.is_current_user_admin() -- or admin targets any row
 )
 WITH CHECK (
   -- What values are allowed to be written:
   (
     -- Regular users updating their own row: userType must remain unchanged.
     auth_id = auth.uid()
-    AND NOT public.is_current_user_admin()
+    AND NOT core.is_current_user_admin()
     AND "userType" = (SELECT "userType" FROM core.users WHERE auth_id = auth.uid())
   )
   OR
   -- Admins may change any column on any row.
-  public.is_current_user_admin()
+  core.is_current_user_admin()
 );
 
 DROP POLICY IF EXISTS "Admins can delete users" ON core.users;
 CREATE POLICY "Admins can delete users"
 ON core.users FOR DELETE
 USING (
-  public.is_current_user_admin()
+  core.is_current_user_admin()
   AND auth_id != auth.uid()
 );
 

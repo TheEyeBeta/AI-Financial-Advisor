@@ -5,11 +5,25 @@ import { useOpenPositions, usePortfolioHistory } from "@/hooks/use-data";
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import type { OpenPosition, PortfolioHistory } from "@/types/database";
 
-export function PortfolioPerformance() {
-  const { data: portfolioHistory = [], isLoading } = usePortfolioHistory();
-  const { data: openPositions = [] } = useOpenPositions();
+interface PortfolioPerformanceProps {
+  portfolioHistory?: PortfolioHistory[];
+  openPositions?: OpenPosition[];
+  isLoading?: boolean;
+}
+
+export function PortfolioPerformance({
+  portfolioHistory: portfolioHistoryProp,
+  openPositions: openPositionsProp,
+  isLoading: isLoadingProp,
+}: PortfolioPerformanceProps = {}) {
+  const { data: fallbackPortfolioHistory = [], isLoading: isPortfolioHistoryLoading } = usePortfolioHistory();
+  const { data: fallbackOpenPositions = [], isLoading: isOpenPositionsLoading } = useOpenPositions();
   const navigate = useNavigate();
+  const portfolioHistory = portfolioHistoryProp ?? fallbackPortfolioHistory;
+  const openPositions = openPositionsProp ?? fallbackOpenPositions;
+  const isLoading = isLoadingProp ?? (isPortfolioHistoryLoading || isOpenPositionsLoading);
 
   // Transform data for chart (group by month and format)
   const portfolioData = portfolioHistory.map((entry) => ({

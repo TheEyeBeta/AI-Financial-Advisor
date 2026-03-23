@@ -43,6 +43,226 @@ _cache: dict[str, dict[str, Any]] = {}
 # Raw snapshots cache keyed by source (shared across horizons for same source)
 _snapshots_cache: dict[str, dict[str, Any]] = {}
 
+# ── EMA Smoothing ────────────────────────────────────────────────────────────
+# α = 0.3 means 70% weight on previous score, 30% on new raw score.
+# This dampens refresh-to-refresh noise over ~3-4 cycles.
+EMA_ALPHA = 0.3
+
+# Previous smoothed scores per horizon: { "balanced": { "AAPL": { "score": 72.3, "tier": "Buy", "cycles": 5 } } }
+_prev_scores: dict[str, dict[str, dict[str, Any]]] = {}
+
+# ── Tier Hysteresis (dead-zone) ──────────────────────────────────────────────
+# To prevent flip-flopping at tier boundaries, a stock must cross a buffer
+# zone to change tiers.  Thresholds: (upgrade_at, downgrade_at)
+#   Strong Buy: >=80 normally → need >=83 to upgrade, <=77 to downgrade
+#   Buy:        >=65 normally → need >=68 to upgrade, <=62 to downgrade
+#   Hold:       >=45 normally → need >=48 to upgrade, <=42 to downgrade
+#   Underperf:  >=30 normally → need >=33 to upgrade, <=27 to downgrade
+#   Sell:       <30  normally → below 27 to confirm
+
+TIER_THRESHOLDS_UP = {
+    "Strong Buy": 83.0,
+    "Buy": 68.0,
+    "Hold": 48.0,
+    "Underperform": 33.0,
+}
+
+TIER_THRESHOLDS_DOWN = {
+    "Strong Buy": 77.0,
+    "Buy": 62.0,
+    "Hold": 42.0,
+    "Underperform": 27.0,
+}
+
+TIER_ORDER = ["Sell", "Underperform", "Hold", "Buy", "Strong Buy"]
+
+
+def _tier_index(tier: str) -> int:
+    try:
+        return TIER_ORDER.index(tier)
+    except ValueError:
+        return 2  # default to Hold
+
+
+def _seed_prev_scores_from_history(horizon: str) -> None:
+    """On cold start, seed _prev_scores from the ranking history table.
+
+    Reads the single most recent row per ticker for the given horizon,
+    so the EMA and hysteresis pick up where they left off after a restart.
+    """
+    if horizon in _prev_scores:
+        return  # already seeded (or populated by a prior cycle)
+
+    try:
+        url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+        key = (
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
+        )
+        if not url or not key:
+            return
+
+        from supabase import create_client
+        client = create_client(url, key)
+
+        # Fetch the latest scoring cycle's rows for this horizon.
+        # We grab the most recent scored_at, then all rows with that timestamp.
+        result = (
+            client.schema("market")
+            .from_("stock_ranking_history")
+            .select("ticker, smoothed_score, rank_tier, scored_at")
+            .eq("horizon", horizon)
+            .order("scored_at", desc=True)
+            .limit(500)
+            .execute()
+        )
+        rows = result.data or []
+
+        if not rows:
+            _prev_scores[horizon] = {}
+            return
+
+        # All rows from the latest scored_at timestamp
+        latest_ts = rows[0].get("scored_at")
+        prev: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            if r.get("scored_at") != latest_ts:
+                break  # only take the latest cycle
+            prev[r["ticker"]] = {
+                "score": float(r["smoothed_score"]),
+                "tier": r["rank_tier"],
+                "cycles": 1,  # conservative — we don't persist exact cycle count
+            }
+
+        _prev_scores[horizon] = prev
+        logger.info("Seeded %d prev scores from ranking history for horizon=%s", len(prev), horizon)
+    except Exception as exc:
+        logger.warning("Failed to seed prev scores from history (non-fatal): %s", exc)
+        _prev_scores[horizon] = {}
+
+
+def _rank_tier_with_hysteresis(score: float, prev_tier: str | None) -> str:
+    """Determine rank tier using hysteresis to prevent boundary oscillation."""
+    raw_tier = _rank_tier(score)
+
+    if prev_tier is None:
+        return raw_tier
+
+    raw_idx = _tier_index(raw_tier)
+    prev_idx = _tier_index(prev_tier)
+
+    if raw_idx == prev_idx:
+        return prev_tier
+
+    # Attempting to upgrade
+    if raw_idx > prev_idx:
+        up_threshold = TIER_THRESHOLDS_UP.get(raw_tier)
+        if up_threshold is not None and score < up_threshold:
+            return prev_tier  # not enough to break through — stay
+        return raw_tier
+
+    # Attempting to downgrade
+    if raw_idx < prev_idx:
+        down_threshold = TIER_THRESHOLDS_DOWN.get(prev_tier)
+        if down_threshold is not None and score > down_threshold:
+            return prev_tier  # not low enough to drop — stay
+        return raw_tier
+
+    return raw_tier
+
+
+def _stabilize_scores(
+    raw_scores: list[StockScore], horizon: str
+) -> list[StockScore]:
+    """Apply EMA smoothing and tier hysteresis to raw scores."""
+    # On cold start, seed from ranking history so we don't lose smoothing across restarts
+    _seed_prev_scores_from_history(horizon)
+    prev = _prev_scores.get(horizon, {})
+    stabilized: list[StockScore] = []
+
+    for s in raw_scores:
+        prev_data = prev.get(s.ticker)
+        prev_smoothed = prev_data["score"] if prev_data else None
+        prev_tier = prev_data["tier"] if prev_data else None
+        prev_cycles = prev_data.get("cycles", 0) if prev_data else 0
+
+        # Layer 1: EMA smoothing
+        if prev_smoothed is not None:
+            smoothed = round(EMA_ALPHA * s.composite_score + (1 - EMA_ALPHA) * prev_smoothed, 1)
+        else:
+            smoothed = s.composite_score
+
+        # Layer 3: Tier hysteresis (uses smoothed score)
+        tier = _rank_tier_with_hysteresis(smoothed, prev_tier)
+
+        # Track how many cycles this tier has been held
+        if tier == prev_tier:
+            cycles = prev_cycles + 1
+        else:
+            cycles = 1
+
+        # Conviction uses smoothed score
+        conviction = _conviction(s.dimensions_bullish, smoothed)
+
+        stabilized.append(s.model_copy(update={
+            "smoothed_score": smoothed,
+            "rank_tier": tier,
+            "conviction": conviction,
+            "tier_held_cycles": cycles,
+        }))
+
+    # Update previous scores for next cycle
+    new_prev: dict[str, dict[str, Any]] = {}
+    for s in stabilized:
+        new_prev[s.ticker] = {
+            "score": s.smoothed_score,
+            "tier": s.rank_tier,
+            "cycles": s.tier_held_cycles,
+        }
+    _prev_scores[horizon] = new_prev
+
+    return stabilized
+
+
+def _persist_ranking_history(scores: list[StockScore], horizon: str) -> None:
+    """Persist ranking snapshot to market.stock_ranking_history (best-effort, non-blocking)."""
+    try:
+        url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
+        key = (
+            os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
+        )
+        if not url or not key:
+            return
+
+        from supabase import create_client
+        client = create_client(url, key)
+
+        rows = []
+        for s in scores:
+            rows.append({
+                "ticker": s.ticker,
+                "horizon": horizon,
+                "composite_score": s.composite_score,
+                "smoothed_score": s.smoothed_score,
+                "rank_tier": s.rank_tier,
+                "conviction": s.conviction,
+                "dimension_scores": {
+                    "momentum": s.momentum_score,
+                    "technical": s.technical_score,
+                    "fundamental": s.fundamental_score,
+                    "risk": s.risk_score,
+                    "quality": s.quality_score,
+                    "ml": s.ml_score,
+                },
+            })
+
+        if rows:
+            client.schema("market").from_("stock_ranking_history").insert(rows).execute()
+            logger.info("Persisted %d ranking history rows for horizon=%s", len(rows), horizon)
+    except Exception as exc:
+        logger.warning("Failed to persist ranking history (non-fatal): %s", exc)
+
 
 def _query_stock_snapshots(client, limit: int = 500):
     """Query stock snapshots from the market schema."""
@@ -125,6 +345,7 @@ class StockScore(BaseModel):
     updated_at: Optional[str] = None
     # Composite
     composite_score: float
+    smoothed_score: float  # EMA-smoothed composite score (displayed to users)
     rank_tier: str  # "Strong Buy" / "Buy" / "Hold" / "Underperform" / "Sell"
     conviction: str  # "High" / "Medium" / "Low"
     # Dimension scores (all 0-100)
@@ -140,6 +361,8 @@ class StockScore(BaseModel):
     data_fresh: bool
     # Dimension agreement count (how many dimensions score above 60)
     dimensions_bullish: int
+    # Stability: how many consecutive scoring cycles the stock has held its current tier
+    tier_held_cycles: int = 0
 
 
 class RankingResponse(BaseModel):
@@ -854,6 +1077,7 @@ def _compute_scores(snapshots: list[dict], horizon: str = "balanced") -> list[St
             price_change_pct=_f(s.get("price_change_pct")),
             updated_at=updated_str,
             composite_score=round(composite, 1),
+            smoothed_score=round(composite, 1),  # will be overwritten by _stabilize_scores
             rank_tier=_rank_tier(composite),
             conviction=_conviction(dims_bullish, composite),
             momentum_score=round(momentum, 1),
@@ -1057,8 +1281,8 @@ async def get_stock_ranking(
     if hcache["data"] is not None and cache_age < CACHE_TTL_SECONDS:
         all_scores: list[StockScore] = hcache["data"]
         filtered = sorted(
-            [s for s in all_scores if s.composite_score >= min_score],
-            key=lambda s: s.composite_score,
+            [s for s in all_scores if s.smoothed_score >= min_score],
+            key=lambda s: s.smoothed_score,
             reverse=True,
         )
         return RankingResponse(
@@ -1109,12 +1333,19 @@ async def get_stock_ranking(
             cache_age_seconds=0.0,
         )
 
-    all_scores = _compute_scores(snapshots, horizon=horizon)
+    raw_scores = _compute_scores(snapshots, horizon=horizon)
+
+    # Layer 1+3: Apply EMA smoothing and tier hysteresis
+    all_scores = _stabilize_scores(raw_scores, horizon=horizon)
+
     _cache[cache_key] = {"data": all_scores, "ts": time.time()}
 
+    # Layer 2: Persist ranking snapshot to history table (best-effort)
+    _persist_ranking_history(all_scores, horizon=horizon)
+
     filtered = sorted(
-        [s for s in all_scores if s.composite_score >= min_score],
-        key=lambda s: s.composite_score,
+        [s for s in all_scores if s.smoothed_score >= min_score],
+        key=lambda s: s.smoothed_score,
         reverse=True,
     )
     return RankingResponse(

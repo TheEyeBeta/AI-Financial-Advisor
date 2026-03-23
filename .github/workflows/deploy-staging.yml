@@ -1,0 +1,165 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [staging]
+  pull_request:
+    branches: [staging]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.12'
+  STAGING_FRONTEND_URL: ${{ secrets.STAGING_FRONTEND_URL }}
+  STAGING_BACKEND_URL: ${{ secrets.STAGING_BACKEND_URL }}
+
+jobs:
+  deploy-backend:
+    name: Deploy Backend to Railway Staging
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    outputs:
+      backend_url: ${{ steps.endpoints.outputs.backend_url }}
+      frontend_url: ${{ steps.endpoints.outputs.frontend_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        if: github.event_name != 'pull_request'
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway staging
+        if: github.event_name != 'pull_request'
+        working-directory: ./backend/websearch_service
+        run: railway up --service "${{ secrets.RAILWAY_STAGING_SERVICE }}" --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Resolve staging endpoints
+        id: endpoints
+        run: |
+          if [ -z "${STAGING_FRONTEND_URL}" ] || [ -z "${STAGING_BACKEND_URL}" ]; then
+            echo "Missing staging URLs. Set STAGING_FRONTEND_URL and STAGING_BACKEND_URL." >&2
+            exit 1
+          fi
+
+          echo "frontend_url=${STAGING_FRONTEND_URL}" >> "$GITHUB_OUTPUT"
+          echo "backend_url=${STAGING_BACKEND_URL}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for backend health
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "${STAGING_BACKEND_URL}/health/live" >/dev/null; then
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo "Backend staging health check failed for ${STAGING_BACKEND_URL}" >&2
+          exit 1
+
+  e2e:
+    name: Run Full E2E Suite
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: deploy-backend
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E suite against staging
+        id: e2e
+        continue-on-error: true
+        env:
+          PLAYWRIGHT_BASE_URL: ${{ env.STAGING_FRONTEND_URL }}
+        run: |
+          npx playwright test --reporter=json > "$RUNNER_TEMP/playwright-staging-results.json"
+
+      - name: Summarize results
+        id: summary
+        if: always()
+        run: |
+          SUMMARY_JSON=$(node -e "const fs=require('fs'); const path=process.argv[1]; let stats={expected:0,unexpected:0,skipped:0,flaky:0,duration:0}; if (fs.existsSync(path)) { try { const data=JSON.parse(fs.readFileSync(path,'utf8')); stats=data.stats || stats; } catch (error) { stats.error=String(error.message || error); } } else { stats.error='Playwright JSON report was not generated.'; } process.stdout.write(JSON.stringify(stats));" "$RUNNER_TEMP/playwright-staging-results.json")
+          echo "summary=$SUMMARY_JSON" >> "$GITHUB_OUTPUT"
+
+      - name: Upload E2E report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-playwright-report
+          path: ${{ runner.temp }}/playwright-staging-results.json
+          retention-days: 7
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        env:
+          STAGING_FRONTEND_URL: ${{ env.STAGING_FRONTEND_URL }}
+          STAGING_BACKEND_URL: ${{ env.STAGING_BACKEND_URL }}
+          E2E_SUMMARY: ${{ steps.summary.outputs.summary }}
+          E2E_CONCLUSION: ${{ steps.e2e.outcome }}
+        with:
+          script: |
+            const marker = '<!-- staging-e2e -->';
+            const summary = JSON.parse(process.env.E2E_SUMMARY || '{}');
+            const conclusion = process.env.E2E_CONCLUSION || 'unknown';
+            const body = [
+              marker,
+              `Staging E2E result: **${conclusion.toUpperCase()}**`,
+              '',
+              `Frontend: ${process.env.STAGING_FRONTEND_URL}`,
+              `Backend: ${process.env.STAGING_BACKEND_URL}`,
+              '',
+              `Expected: ${summary.expected ?? 0}`,
+              `Unexpected: ${summary.unexpected ?? 0}`,
+              `Skipped: ${summary.skipped ?? 0}`,
+              `Flaky: ${summary.flaky ?? 0}`,
+              `Duration(ms): ${summary.duration ?? 0}`,
+              summary.error ? `Error: ${summary.error}` : null,
+            ].filter(Boolean).join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }

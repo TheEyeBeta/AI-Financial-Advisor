@@ -1,3 +1,4 @@
+import { getPythonApiUrl, getWebSearchApiUrl, shouldMonitorBackendHealth } from '@/lib/env';
 import { resilientFetch } from '@/utils/resilientFetch';
 
 export interface ServiceHealth {
@@ -15,30 +16,12 @@ export interface HealthStatus {
 class HealthCheckService {
   private readonly checkIntervalMs = 30000;
 
-  private readonly endpoints = {
-    // Websearch and AI backend are the same service, use same URL
-    // Force port 8000 if env var points to 8001 (common misconfiguration)
-    websearch: (() => {
-      const websearchUrl = import.meta.env.VITE_WEBSEARCH_API_URL;
-      const pythonUrl = import.meta.env.VITE_PYTHON_API_URL;
-      
-      // If websearch URL points to 8001, ignore it and use python URL or default
-      if (websearchUrl && websearchUrl.includes(':8001')) {
-        return pythonUrl 
-          ? `${pythonUrl}/health/live`
-          : 'http://localhost:8000/health/live';
-      }
-      
-      return websearchUrl
-        ? `${websearchUrl}/health/live`
-        : pythonUrl
-        ? `${pythonUrl}/health/live`
-        : 'http://localhost:8000/health/live';
-    })(),
-    ai_backend: import.meta.env.VITE_PYTHON_API_URL
-      ? `${import.meta.env.VITE_PYTHON_API_URL}/health`
-      : 'http://localhost:8000/health',
-  };
+  private get endpoints() {
+    return {
+      websearch: `${getWebSearchApiUrl()}/health/live`,
+      ai_backend: `${getPythonApiUrl()}/health`,
+    };
+  }
 
   private status: HealthStatus = {
     status: 'healthy',
@@ -47,6 +30,17 @@ class HealthCheckService {
   };
 
   private intervalId?: ReturnType<typeof window.setInterval>;
+
+  private createMonitoringDisabledStatus(): HealthStatus {
+    return {
+      status: 'healthy',
+      services: {
+        websearch: { available: true },
+        ai_backend: { available: true },
+      },
+      lastCheck: Date.now(),
+    };
+  }
 
   async checkService(name: string, url: string, timeout = 5000): Promise<ServiceHealth> {
     const startedAt = Date.now();
@@ -89,6 +83,11 @@ class HealthCheckService {
   }
 
   async checkAllServices(): Promise<HealthStatus> {
+    if (!shouldMonitorBackendHealth()) {
+      this.status = this.createMonitoringDisabledStatus();
+      return this.status;
+    }
+
     const services = {
       websearch: await this.checkService('websearch', this.endpoints.websearch),
       ai_backend: await this.checkService('ai_backend', this.endpoints.ai_backend),
@@ -107,6 +106,13 @@ class HealthCheckService {
   }
 
   startMonitoring() {
+    this.stopMonitoring();
+
+    if (!shouldMonitorBackendHealth()) {
+      this.status = this.createMonitoringDisabledStatus();
+      return;
+    }
+
     void this.checkAllServices();
     this.intervalId = window.setInterval(() => {
       void this.checkAllServices();

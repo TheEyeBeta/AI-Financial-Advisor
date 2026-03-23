@@ -12,16 +12,33 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { usePortfolioHistory, useClosedTrades, useOpenPositions } from "@/hooks/use-data";
-import { format, parseISO, startOfWeek } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { useMemo } from "react";
 import { TrendingUp, TrendingDown, Activity, PieChart as PieChartIcon, BarChart3 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { OpenPosition, PortfolioHistory, Trade } from "@/types/database";
 
-export function PerformanceCharts() {
-  const { data: portfolioHistory = [], isLoading: portfolioLoading } = usePortfolioHistory();
-  const { data: trades = [], isLoading: tradesLoading } = useClosedTrades();
-  const { data: positions = [], isLoading: positionsLoading } = useOpenPositions();
+interface PerformanceChartsProps {
+  portfolioHistory: PortfolioHistory[];
+  trades: Trade[];
+  positions: OpenPosition[];
+  isLoading?: boolean;
+}
+
+function formatAxisCurrency(value: number) {
+  if (Math.abs(value) >= 1000) {
+    return `$${(value / 1000).toFixed(0)}k`;
+  }
+
+  return `$${Math.round(value)}`;
+}
+
+export function PerformanceCharts({
+  portfolioHistory,
+  trades,
+  positions,
+  isLoading = false,
+}: PerformanceChartsProps) {
 
   const currentPortfolioValue = useMemo(
     () => positions.reduce((sum, pos) => sum + ((pos.current_price ?? pos.entry_price) * pos.quantity), 0),
@@ -32,30 +49,28 @@ export function PerformanceCharts() {
 
   // Calculate equity curve
   const equityData = useMemo(() => {
-    const data: Array<{ date: string; value: number; fullDate: string; isLatest?: boolean }> = [];
-    
     if (portfolioHistory.length > 0) {
-      const sorted = [...portfolioHistory].sort((a, b) => 
-        new Date(a.date).getTime() - new Date(b.date).getTime()
-      );
-      
-      const weeklyData: Record<string, number> = {};
-      sorted.forEach(entry => {
-        const date = parseISO(entry.date);
-        const weekStart = format(startOfWeek(date), 'MMM d');
-        weeklyData[weekStart] = entry.value;
-      });
-      
-      Object.entries(weeklyData).forEach(([date, value], index) => {
-        data.push({ date: `W${index + 1}`, value, fullDate: date });
-      });
+      return [...portfolioHistory]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map((entry) => ({
+          date: entry.date,
+          value: entry.value,
+          fullDate: format(parseISO(entry.date), "MMM d, yyyy"),
+        }));
     }
-    
+
     if (hasOpenPositions) {
-      data.push({ date: 'Now', value: currentPortfolioValue, fullDate: format(new Date(), 'MMM d'), isLive: true });
+      const today = format(new Date(), "yyyy-MM-dd");
+      return [
+        {
+          date: today,
+          value: currentPortfolioValue,
+          fullDate: format(parseISO(today), "MMM d, yyyy"),
+        },
+      ];
     }
-    
-    return data;
+
+    return [];
   }, [hasOpenPositions, portfolioHistory, currentPortfolioValue]);
 
   // Calculate win/loss distribution
@@ -89,7 +104,7 @@ export function PerformanceCharts() {
 
   // Calculate portfolio stats
   const portfolioStats = useMemo(() => {
-    const currentValue = currentPortfolioValue;
+    const currentValue = portfolioHistory[portfolioHistory.length - 1]?.value ?? currentPortfolioValue;
     const totalCostBasis = positions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
     const unrealizedPnL = positions.reduce((sum, pos) => {
       const currentPrice = pos.current_price ?? pos.entry_price;
@@ -97,13 +112,13 @@ export function PerformanceCharts() {
     }, 0);
     const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
     const baseValue = portfolioHistory.length > 0 ? portfolioHistory[0].value : totalCostBasis;
-    const totalReturn = currentValue - baseValue;
+    const totalReturn = realizedPnL + unrealizedPnL;
     const percentReturn = baseValue > 0 ? ((totalReturn / baseValue) * 100) : 0;
     
     return { currentValue, totalReturn, percentReturn, unrealizedPnL, realizedPnL, totalPnL: unrealizedPnL + realizedPnL };
   }, [portfolioHistory, currentPortfolioValue, positions, trades]);
 
-  if (portfolioLoading || tradesLoading || positionsLoading) {
+  if (isLoading) {
     return (
       <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
         {[1, 2, 3, 4].map((i) => (
@@ -130,7 +145,7 @@ export function PerformanceCharts() {
               {portfolioStats.totalReturn >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
               <span>{portfolioStats.totalReturn >= 0 ? '+' : ''}${portfolioStats.totalReturn.toFixed(2)} ({portfolioStats.percentReturn.toFixed(2)}%)</span>
             </div>
-            <div className="text-[10px] text-muted-foreground/50 mt-1">Snapshot-backed pricing</div>
+            <div className="text-[10px] text-muted-foreground/50 mt-1">Chronological journal replay with live marks</div>
           </CardContent>
         </Card>
 
@@ -169,7 +184,7 @@ export function PerformanceCharts() {
         <CardContent className="pt-4 pb-3">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Equity Curve</span>
-            <span className="text-[10px] text-muted-foreground/50">(Snapshot)</span>
+            <span className="text-[10px] text-muted-foreground/50">(Journal replay)</span>
           </div>
           <div className="h-[180px]">
             {equityData.length === 0 ? (
@@ -185,11 +200,27 @@ export function PerformanceCharts() {
                       <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <XAxis dataKey="date" stroke="hsl(var(--muted-foreground) / 0.3)" fontSize={10} tickLine={false} axisLine={false} />
-                  <YAxis stroke="hsl(var(--muted-foreground) / 0.3)" fontSize={10} tickLine={false} axisLine={false} tickFormatter={(v) => `$${(v / 1000).toFixed(0)}k`} width={40} />
+                  <XAxis
+                    dataKey="date"
+                    stroke="hsl(var(--muted-foreground) / 0.3)"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    minTickGap={24}
+                    tickFormatter={(value: string) => format(parseISO(value), "MMM yyyy")}
+                  />
+                  <YAxis
+                    stroke="hsl(var(--muted-foreground) / 0.3)"
+                    fontSize={10}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={formatAxisCurrency}
+                    width={48}
+                  />
                   <Tooltip
                     contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border) / 0.5)", borderRadius: "8px", fontSize: "11px" }}
                     formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
+                    labelFormatter={(label: string) => format(parseISO(label), "MMM yyyy")}
                   />
                   <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#colorEquity)" />
                 </AreaChart>

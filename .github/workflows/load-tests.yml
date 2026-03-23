@@ -1,0 +1,96 @@
+name: Load Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: Backend base URL for `/api/chat` and `/api/search`
+        required: false
+        type: string
+      supabase_url:
+        description: Supabase project URL for direct paper-trading writes
+        required: false
+        type: string
+      duration:
+        description: Scenario duration
+        required: false
+        default: 30s
+        type: string
+
+jobs:
+  load-tests:
+    name: k6 load tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      BACKEND_URL: ${{ inputs.backend_url || secrets.STAGING_BACKEND_URL }}
+      SUPABASE_URL: ${{ inputs.supabase_url || secrets.STAGING_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+      SUPABASE_TEST_JWT: ${{ secrets.STAGING_SUPABASE_TEST_JWT }}
+      PAPER_TRADING_USER_ID: ${{ secrets.STAGING_PAPER_TRADING_USER_ID }}
+      K6_DURATION: ${{ inputs.duration }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run chat load test
+        run: >
+          docker run --rm
+          -v "${{ github.workspace }}:/src"
+          -w /src
+          -e BACKEND_URL
+          -e SUPABASE_TEST_JWT
+          -e K6_DURATION
+          -e K6_CHAT_MESSAGE
+          grafana/k6:0.50.0
+          run --summary-export "load-results-chat.json" tests/load/chat-load.js
+        env:
+          K6_CHAT_MESSAGE: What is the difference between diversification and concentration risk?
+
+      - name: Run search load test
+        run: >
+          docker run --rm
+          -v "${{ github.workspace }}:/src"
+          -w /src
+          -e BACKEND_URL
+          -e SUPABASE_TEST_JWT
+          -e K6_DURATION
+          -e K6_SEARCH_QUERY
+          -e K6_SEARCH_RESULTS
+          grafana/k6:0.50.0
+          run --summary-export "load-results-search.json" tests/load/search-load.js
+        env:
+          K6_SEARCH_QUERY: What is a healthy gross margin for a software company?
+          K6_SEARCH_RESULTS: "5"
+
+      - name: Run paper trading load test
+        run: >
+          docker run --rm
+          -v "${{ github.workspace }}:/src"
+          -w /src
+          -e SUPABASE_URL
+          -e SUPABASE_SERVICE_ROLE_KEY
+          -e PAPER_TRADING_USER_ID
+          -e K6_DURATION
+          -e K6_TRADE_QUANTITY
+          -e K6_ENTRY_PRICE
+          -e K6_EXIT_PRICE
+          grafana/k6:0.50.0
+          run --summary-export "load-results-paper-trading.json" tests/load/paper-trading-load.js
+        env:
+          K6_TRADE_QUANTITY: "10"
+          K6_ENTRY_PRICE: "100"
+          K6_EXIT_PRICE: "101"
+
+      - name: Upload raw k6 summaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-load-results
+          path: |
+            load-results-chat.json
+            load-results-search.json
+            load-results-paper-trading.json
+          retention-days: 14

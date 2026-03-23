@@ -30,19 +30,19 @@ ON core.users FOR UPDATE
 USING (
   -- Who can target a row for update:
   auth_id = auth.uid()             -- own row
-  OR public.is_current_user_admin() -- or admin targets any row
+  OR core.is_current_user_admin() -- or admin targets any row
 )
 WITH CHECK (
   -- What values are allowed to be written:
   (
     -- Regular users updating their own row: userType must remain unchanged.
     auth_id = auth.uid()
-    AND NOT public.is_current_user_admin()
+    AND NOT core.is_current_user_admin()
     AND "userType" = (SELECT "userType" FROM core.users WHERE auth_id = auth.uid())
   )
   OR
   -- Admins may change any column on any row.
-  public.is_current_user_admin()
+  core.is_current_user_admin()
 );
 
 -- ============================================================
@@ -71,11 +71,11 @@ DROP POLICY IF EXISTS "Service role can insert user profiles" ON core.users;
 -- that allows FOR ALL (SELECT + INSERT + UPDATE + DELETE) to anon and
 -- authenticated users. Any user could inject malicious news articles.
 
-DROP POLICY IF EXISTS "Open access to news" ON public.news;
-DROP POLICY IF EXISTS "Anyone can view news" ON public.news;
+DROP POLICY IF EXISTS "Open access to news" ON market.news;
+DROP POLICY IF EXISTS "Anyone can view news" ON market.news;
 
 CREATE POLICY "Anyone can read news"
-ON public.news FOR SELECT
+ON market.news FOR SELECT
 TO authenticated, anon
 USING (true);
 
@@ -86,10 +86,10 @@ USING (true);
 -- ============================================================
 -- FIX 4: news_articles table — Restrict writes similarly
 -- ============================================================
-DROP POLICY IF EXISTS "Anyone can view news articles" ON public.news_articles;
+DROP POLICY IF EXISTS "Anyone can view news articles" ON market.news_articles;
 
 CREATE POLICY "Anyone can read news articles"
-ON public.news_articles FOR SELECT
+ON market.news_articles FOR SELECT
 TO authenticated, anon
 USING (true);
 
@@ -110,9 +110,9 @@ USING (true);
 -- FIX 7: stock_snapshots — Ensure no write policy for authenticated
 -- ============================================================
 -- Currently only SELECT is granted to authenticated. Verify no write exists.
-DROP POLICY IF EXISTS "Authenticated users can insert stock snapshots" ON public.stock_snapshots;
-DROP POLICY IF EXISTS "Authenticated users can update stock snapshots" ON public.stock_snapshots;
-DROP POLICY IF EXISTS "Authenticated users can delete stock snapshots" ON public.stock_snapshots;
+DROP POLICY IF EXISTS "Authenticated users can insert stock snapshots" ON market.stock_snapshots;
+DROP POLICY IF EXISTS "Authenticated users can update stock snapshots" ON market.stock_snapshots;
+DROP POLICY IF EXISTS "Authenticated users can delete stock snapshots" ON market.stock_snapshots;
 
 -- ============================================================
 -- FIX 8: Achievements — Prevent users from self-awarding achievements
@@ -133,6 +133,6 @@ DROP POLICY IF EXISTS "Authenticated users can delete stock snapshots" ON public
 -- This prevents function inlining that could break RLS.
 -- Already defined correctly in schema.sql but ensure it is set:
 
-ALTER FUNCTION public.is_current_user_admin() SECURITY DEFINER;
+ALTER FUNCTION core.is_current_user_admin() SECURITY DEFINER;
 
 SELECT '✅ RLS policies hardened — privilege escalation vectors closed.' AS status;

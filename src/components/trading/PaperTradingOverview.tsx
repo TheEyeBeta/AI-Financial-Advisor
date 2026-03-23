@@ -1,9 +1,16 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { useMemo } from "react";
 import { Activity, DollarSign, LineChart, Trophy, Wallet } from "lucide-react";
-import { usePortfolioHistory, useClosedTrades, useOpenPositions } from "@/hooks/use-data";
 import { useTradeEngineConnection } from "@/hooks/use-trade-engine";
 import { cn } from "@/lib/utils";
+import type { OpenPosition, PortfolioHistory, Trade } from "@/types/database";
+
+interface PaperTradingOverviewProps {
+  positions: OpenPosition[];
+  trades: Trade[];
+  portfolioHistory: PortfolioHistory[];
+  isLoading?: boolean;
+}
 
 function formatCurrency(value: number) {
   const absoluteValue = Math.abs(value).toLocaleString(undefined, {
@@ -14,10 +21,12 @@ function formatCurrency(value: number) {
   return `${value < 0 ? '-' : ''}$${absoluteValue}`;
 }
 
-export function PaperTradingOverview() {
-  const { data: positions = [] } = useOpenPositions();
-  const { data: trades = [] } = useClosedTrades();
-  const { data: portfolioHistory = [] } = usePortfolioHistory();
+export function PaperTradingOverview({
+  positions,
+  trades,
+  portfolioHistory,
+  isLoading = false,
+}: PaperTradingOverviewProps) {
   const { isConnected } = useTradeEngineConnection();
 
   const summary = useMemo(() => {
@@ -35,6 +44,7 @@ export function PaperTradingOverview() {
     const unrealizedPnL = markedPositions.reduce((sum, position) => sum + position.unrealizedPnL, 0);
     const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
     const totalReturn = unrealizedPnL + realizedPnL;
+    const accountValue = portfolioHistory[portfolioHistory.length - 1]?.value ?? marketValue;
     const openCostBasis = positions.reduce((sum, position) => sum + position.entry_price * position.quantity, 0);
     const closedTradeCostBasis = trades.reduce((sum, trade) => sum + trade.entry_price * trade.quantity, 0);
     const fallbackBaseValue = openCostBasis + closedTradeCostBasis;
@@ -45,6 +55,7 @@ export function PaperTradingOverview() {
 
     return {
       marketValue,
+      accountValue,
       unrealizedPnL,
       realizedPnL,
       totalReturn,
@@ -59,14 +70,14 @@ export function PaperTradingOverview() {
   const cards = [
     {
       label: 'Portfolio Value',
-      value: formatCurrency(summary.marketValue),
-      helper: summary.hasSnapshotPrices ? 'Marked prices (snapshot)' : 'Using entry prices where needed',
+      value: formatCurrency(summary.accountValue),
+      helper: summary.hasSnapshotPrices ? 'Account value with live marks' : 'Account value using journal prices',
       icon: Wallet,
     },
     {
       label: 'Total Return',
       value: formatCurrency(summary.totalReturn),
-      helper: `${summary.totalReturnPct >= 0 ? '+' : ''}${summary.totalReturnPct.toFixed(2)}% vs starting basis`,
+      helper: `${summary.totalReturnPct >= 0 ? '+' : ''}${summary.totalReturnPct.toFixed(2)}% vs funded capital`,
       icon: LineChart,
       accent: summary.totalReturn >= 0 ? 'text-profit' : 'text-loss',
     },
@@ -83,6 +94,18 @@ export function PaperTradingOverview() {
       icon: Trophy,
     },
   ];
+
+  if (isLoading) {
+    return (
+      <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+        {[1, 2, 3, 4].map((index) => (
+          <Card key={index} className="border-border/50 bg-card/60 backdrop-blur-sm">
+            <CardContent className="h-28 animate-pulse" />
+          </Card>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">

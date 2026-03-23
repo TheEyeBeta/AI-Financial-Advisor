@@ -6,16 +6,23 @@ import { AcademyProgress } from "@/components/dashboard/AcademyProgress";
 import { OpenPositions } from "@/components/trading/OpenPositions";
 import { TradeHistory } from "@/components/trading/TradeHistory";
 import { useAuth } from "@/hooks/use-auth";
-import { useOpenPositions, useClosedTrades, usePortfolioHistory } from "@/hooks/use-data";
+import { useMemo } from "react";
+import { usePaperTradingLedger } from "@/hooks/use-paper-trading-ledger";
 import { DollarSign, TrendingUp, BarChart2, Briefcase } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import type { TradeStatisticsSummary } from "@/components/dashboard/TradeStatistics";
 
 const Dashboard = () => {
   const { userProfile } = useAuth();
-  const { data: positions = [] } = useOpenPositions();
-  const { data: closedTrades = [] } = useClosedTrades();
-  const { data: portfolioHistory = [] } = usePortfolioHistory();
+  const {
+    openPositions,
+    closedTrades,
+    portfolioHistory,
+    accountValue,
+    realizedPnl,
+    isLoading,
+  } = usePaperTradingLedger();
 
   const greeting = userProfile?.first_name
     ? `Welcome back, ${userProfile.first_name}`
@@ -26,16 +33,37 @@ const Dashboard = () => {
   const sectionAnimation = "animate-in fade-in slide-in-from-bottom-2 duration-300";
 
   // Calculate quick summary stats
-  const totalPositions = positions.length;
+  const totalPositions = openPositions.length;
   const totalTrades = closedTrades.length;
-  const totalPnL = closedTrades.reduce((sum, t) => sum + (t.pnl || 0), 0);
-  const openPositionsValue = positions.reduce(
+  const totalPnL = realizedPnl;
+  const openPositionsValue = openPositions.reduce(
     (sum, pos) => sum + ((pos.current_price || pos.entry_price) * pos.quantity),
     0
   );
   const latestValue = portfolioHistory.length > 0
-    ? portfolioHistory[portfolioHistory.length - 1]?.value || 0
-    : openPositionsValue;
+    ? portfolioHistory[portfolioHistory.length - 1]?.value || accountValue
+    : accountValue || openPositionsValue;
+
+  const tradeStatistics = useMemo<TradeStatisticsSummary>(() => {
+    const winningTrades = closedTrades.filter((trade) => (trade.pnl || 0) > 0);
+    const losingTrades = closedTrades.filter((trade) => (trade.pnl || 0) <= 0);
+    const avgProfit = winningTrades.length > 0
+      ? winningTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0) / winningTrades.length
+      : 0;
+    const avgLoss = losingTrades.length > 0
+      ? losingTrades.reduce((sum, trade) => sum + Math.abs(trade.pnl || 0), 0) / losingTrades.length
+      : 0;
+
+    return {
+      winRate: totalTrades > 0 ? (winningTrades.length / totalTrades) * 100 : 0,
+      avgProfit,
+      avgLoss,
+      profitFactor: avgLoss > 0 ? Math.abs(avgProfit) / avgLoss : 0,
+      totalTrades,
+      winningTrades: winningTrades.length,
+      losingTrades: losingTrades.length,
+    };
+  }, [closedTrades, totalTrades]);
 
   const quickStats = [
     {
@@ -99,10 +127,14 @@ const Dashboard = () => {
         {/* Main Content Grid */}
         <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
           <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '100ms' }}>
-            <PortfolioPerformance />
+            <PortfolioPerformance
+              portfolioHistory={portfolioHistory}
+              openPositions={openPositions}
+              isLoading={isLoading}
+            />
           </div>
           <div className={sectionAnimation} style={{ animationDelay: '150ms' }}>
-            <TradeStatistics />
+            <TradeStatistics stats={tradeStatistics} isLoading={isLoading} />
           </div>
           <div className={sectionAnimation} style={{ animationDelay: '200ms' }}>
             <MarketOverview />
@@ -111,10 +143,10 @@ const Dashboard = () => {
             <AcademyProgress />
           </div>
           <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '300ms' }}>
-            <OpenPositions />
+            <OpenPositions positions={openPositions} isLoading={isLoading} allowClose={false} />
           </div>
           <div className={`lg:col-span-2 ${sectionAnimation}`} style={{ animationDelay: '350ms' }}>
-            <TradeHistory />
+            <TradeHistory trades={closedTrades} isLoading={isLoading} />
           </div>
         </div>
       </div>

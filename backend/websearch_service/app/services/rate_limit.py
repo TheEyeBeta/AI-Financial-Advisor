@@ -254,7 +254,7 @@ class RateLimitService:
 
         try:
             now = time.time()
-            resp = client.table("rate_limit_state").select("*").execute()
+            resp = client.schema("core").table("rate_limit_state").select("*").execute()
             rows = resp.data or []
             loaded = 0
             for row in rows:
@@ -346,7 +346,7 @@ class RateLimitService:
                             else None
                         ),
                     }
-                    client.table("rate_limit_state").upsert(
+                    client.schema("core").table("rate_limit_state").upsert(
                         row,
                         on_conflict="identifier,endpoint,window_type",
                     ).execute()

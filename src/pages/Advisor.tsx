@@ -1,86 +1,102 @@
-import { useEffect, useState, useRef } from "react";
-import { useSearchParams, useLocation } from "react-router-dom";
-import { AppLayout } from "@/components/layout/AppLayout";
+import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
+import { formatDistanceToNow, isToday, isYesterday, parseISO } from "date-fns";
+import { Clock3, History, Plus } from "lucide-react";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
+
 import { ChatInterface } from "@/components/advisor/ChatInterface";
 import { SuggestedTopics } from "@/components/advisor/SuggestedTopics";
-import { useChats, useChat, useCreateChat, useSendChatMessage } from "@/hooks/use-data";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
+import { useChat, useChats, useCreateChat, useSendChatMessage } from "@/hooks/use-data";
+import { AppLayout } from "@/components/layout/AppLayout";
+
+const QUICK_PROMPTS = {
+  beginner: [
+    "Build me a simple starter portfolio.",
+    "Explain the market in plain English.",
+    "Show me how to start investing safely.",
+  ],
+  intermediate: [
+    "Review my portfolio risk.",
+    "Summarize what matters in the market right now.",
+    "Help me think through rebalancing.",
+  ],
+  advanced: [
+    "Pressure-test my thesis on a position.",
+    "Walk through current market regime signals.",
+    "Stress-test my portfolio under a macro shock.",
+  ],
+  default: [
+    "Summarize the market setup.",
+    "Help me think through a decision.",
+    "Explain a finance topic clearly.",
+  ],
+} as const;
+
+type ExperienceLevel = "beginner" | "intermediate" | "advanced" | null | undefined;
 
 const Advisor = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const chatFromUrl = searchParams.get('chat');
-  const isExplicitNewChat = searchParams.get('new') === '1';
-  
+  const navigate = useNavigate();
+  const chatFromUrl = searchParams.get("chat");
+  const isExplicitNewChat = searchParams.get("new") === "1";
+
   const { userId, isAuthenticated, userProfile } = useAuth();
   const { data: chats = [], isLoading: chatsLoading } = useChats();
   const createChatMutation = useCreateChat();
   const sendMessageMutation = useSendChatMessage();
-  
-  // Track the current active chat
+
   const [currentChatId, setCurrentChatId] = useState<string | null>(chatFromUrl);
   const { data: currentChat, isLoading: chatLoading } = useChat(currentChatId);
-  
+
   const [showTopics, setShowTopics] = useState(true);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
-  // Track the message count before sending to identify the new AI response for streaming
-  const prevMessageCountRef = useRef<number>(0);
   const [streamingResponseContent, setStreamingResponseContent] = useState<string | null>(null);
-  // Track when user explicitly wants a new chat (prevents auto-loading most recent chat)
-  const isNewChatRef = useRef<boolean>(false);
-  
-  // Handle initial message from navigation state (e.g., from learning topics)
+  const [composerValue, setComposerValue] = useState("");
+  const isNewChatRef = useRef(false);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+
+    textarea.style.height = "0px";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+  }, [composerValue]);
+
   useEffect(() => {
     const handleInitialMessage = async () => {
-      // Check if there's an initial message in location state
       const state = location.state as { initialMessage?: string } | null;
       if (state?.initialMessage && isAuthenticated && userId) {
-        const message = state.initialMessage;
-        // Send the message
-        await handleSendMessage(message);
-        // Clear the state to avoid re-triggering on re-render
-        window.history.replaceState({ ...window.history.state, state: null }, '');
+        await handleSendMessage(state.initialMessage);
+        window.history.replaceState({ ...window.history.state, state: null }, "");
       }
     };
-    
+
     if (isAuthenticated && userId) {
       handleInitialMessage();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state, isAuthenticated, userId]);
 
-  // Handle chat/new intent from URL params
   useEffect(() => {
     if (chatFromUrl && chatFromUrl !== currentChatId) {
       isNewChatRef.current = false;
       setCurrentChatId(chatFromUrl);
       setShowTopics(false);
-      // Clear the URL params after using them
       setSearchParams({});
       return;
     }
 
     if (isExplicitNewChat) {
-      isNewChatRef.current = true;
-      setCurrentChatId(null);
-      setShowTopics(true);
-      setPendingMessage(null);
-      setStreamingResponseContent(null);
-      // Clear the URL params after using them
+      resetWorkspace(true);
       setSearchParams({});
     }
   }, [chatFromUrl, currentChatId, isExplicitNewChat, setSearchParams]);
 
-  // On load, set the most recent chat as current (or null for new chat)
-  useEffect(() => {
-    if (!chatsLoading && chats.length > 0 && !currentChatId && !chatFromUrl && !isExplicitNewChat && !isNewChatRef.current) {
-      // Use the most recent chat
-      setCurrentChatId(chats[0].id);
-      setShowTopics(false);
-    }
-  }, [chats, chatsLoading, currentChatId, chatFromUrl, isExplicitNewChat]);
-
-  // Show topics when starting fresh
   useEffect(() => {
     if (currentChat && currentChat.messageCount === 0) {
       setShowTopics(true);
@@ -89,25 +105,24 @@ const Advisor = () => {
     }
   }, [currentChat]);
 
-  const handleSendMessage = async (content: string) => {
+  const handleSendMessage = async (content: string): Promise<boolean> => {
+    const trimmedContent = content.trim();
+
+    if (!trimmedContent) return false;
     if (!isAuthenticated || !userId) {
-      console.error('User not authenticated');
-      return;
+      console.error("User not authenticated");
+      return false;
     }
 
-    // Show user message immediately (optimistic update)
-    setPendingMessage(content);
+    setPendingMessage(trimmedContent);
     setShowTopics(false);
-    // Remember current count so we can identify the new AI response
-    prevMessageCountRef.current = (currentChat?.messages?.length ?? 0);
 
     try {
       let chatId = currentChatId;
       let isFirstMessage = false;
 
-      // Create a new chat if we don't have one
       if (!chatId) {
-        const newChat = await createChatMutation.mutateAsync('New Chat');
+        const newChat = await createChatMutation.mutateAsync("New Chat");
         chatId = newChat.id;
         isNewChatRef.current = false;
         setCurrentChatId(chatId);
@@ -118,41 +133,61 @@ const Advisor = () => {
 
       const result = await sendMessageMutation.mutateAsync({
         chatId,
-        message: content,
+        message: trimmedContent,
         isFirstMessage,
       });
 
-      // Flag the AI response for streaming typewriter effect
       if (result?.response) {
         setStreamingResponseContent(result.response);
       }
 
-      // Clear pending message after mutation completes
       setPendingMessage(null);
+      return true;
     } catch (error) {
-      console.error('Error sending message:', error);
-      // Clear pending message on error so user can retry
+      console.error("Error sending message:", error);
       setPendingMessage(null);
+      return false;
     }
   };
 
-  const handleTopicSelect = (topic: string) => {
-    handleSendMessage(topic);
+  const handleComposerSubmit = async () => {
+    const didSend = await handleSendMessage(composerValue);
+    if (didSend) {
+      setComposerValue("");
+    }
   };
 
-  const handleNewChat = () => {
-    isNewChatRef.current = true;
+  const handleTopicSelect = async (topic: string) => {
+    setComposerValue(topic);
+    await handleSendMessage(topic);
+    setComposerValue("");
+  };
+
+  const resetWorkspace = (explicitNewChat = false) => {
+    isNewChatRef.current = explicitNewChat;
     setCurrentChatId(null);
     setShowTopics(true);
     setPendingMessage(null);
     setStreamingResponseContent(null);
+    setComposerValue("");
   };
 
-  // Convert database messages to component format
+  const handleNewChat = () => {
+    resetWorkspace(true);
+  };
+
+  const handleOpenLatest = () => {
+    if (!chats[0]) return;
+    isNewChatRef.current = false;
+    setCurrentChatId(chats[0].id);
+    setShowTopics(false);
+    setPendingMessage(null);
+    setStreamingResponseContent(null);
+  };
+
   const messages = currentChat?.messages || [];
   const chatMessages = messages.map((msg, index) => {
-    // Flag the last assistant message as streaming if it matches the streaming content
-    const isLastAssistant = msg.role === 'assistant' && index === messages.length - 1;
+    const isLastAssistant = msg.role === "assistant" && index === messages.length - 1;
     const shouldStream = isLastAssistant && streamingResponseContent !== null && msg.content === streamingResponseContent;
 
     return {
@@ -162,171 +197,274 @@ const Advisor = () => {
     };
   });
 
-  // Add pending message if it exists and hasn't been saved yet
   let displayMessages = chatMessages;
   if (pendingMessage) {
-    // Check if the pending message is already in the chat (meaning it was saved)
-    const isMessageSaved = chatMessages.some(
-      msg => msg.role === 'user' && msg.content === pendingMessage
-    );
-    
+    const isMessageSaved = chatMessages.some((msg) => msg.role === "user" && msg.content === pendingMessage);
+
     if (!isMessageSaved) {
-      // Add pending message optimistically
       displayMessages = [
         ...chatMessages,
         {
           role: "user" as const,
           content: pendingMessage,
-        }
+        },
       ];
     }
   }
-  
-  // Clear pending message when it appears in the chat (useEffect to avoid stale closure)
+
   useEffect(() => {
-    if (pendingMessage && chatMessages.some(
-      msg => msg.role === 'user' && msg.content === pendingMessage
-    )) {
+    if (pendingMessage && chatMessages.some((msg) => msg.role === "user" && msg.content === pendingMessage)) {
       setPendingMessage(null);
     }
   }, [pendingMessage, chatMessages]);
 
-  // If no messages yet, show welcome message in UI
   if (displayMessages.length === 0) {
-    displayMessages = [{
-      role: "assistant" as const,
-      content: getWelcomeMessage(userProfile?.first_name, userProfile?.experience_level),
-    }];
+    displayMessages = [
+      {
+        role: "assistant" as const,
+        content: getWelcomeMessage(userProfile?.first_name, userProfile?.experience_level),
+      },
+    ];
   }
 
   const isLoading = chatsLoading || chatLoading || sendMessageMutation.isPending || createChatMutation.isPending;
-  // Only show "Thinking..." when waiting for an AI response, not during initial loads
   const isThinking = sendMessageMutation.isPending;
+  const isStarterState = showTopics && displayMessages.length <= 1;
+  const experienceLevel = userProfile?.experience_level as ExperienceLevel;
+  const quickPrompts = getQuickPrompts(experienceLevel);
+  const experienceLevelLabel = getExperienceLevelLabel(experienceLevel);
+  const latestChat = chats[0];
+  const chatHeaderTitle = currentChat?.title || "Conversation";
+  const chatHeaderDescription = currentChat?.updated_at
+    ? `Updated ${formatActivityTime(currentChat.updated_at)}`
+    : "Ask follow-ups and keep the thread going.";
 
   return (
-    <AppLayout title="AI Financial Advisor">
-      <div className="mx-auto flex h-[calc(100dvh-4rem)] max-w-4xl w-full flex-col">
-        {/* Scrollable content area */}
-        <div className="flex-1 overflow-y-auto px-4 pb-4 scrollbar-subtle">
-          {/* Suggested Topics */}
-          {showTopics && displayMessages.length <= 1 && (
-            <SuggestedTopics 
-              onSelectTopic={handleTopicSelect} 
-              experienceLevel={userProfile?.experience_level}
-            />
-          )}
-          
-          {/* Chat Messages */}
-          <ChatInterface
-            messages={displayMessages}
-            onNewChat={handleNewChat}
-            isLoading={isLoading}
-            isThinking={isThinking}
-            chatTitle={currentChat?.title}
-            onStreamingComplete={() => setStreamingResponseContent(null)}
-          />
-        </div>
-        
-        {/* Input pinned to bottom */}
-        <div className="px-4 pb-1 pt-0.5">
-          <div className="max-w-3xl mx-auto relative">
-            <input
-              type="text"
-              placeholder={userProfile?.first_name ? `Message...` : "Ask anything..."}
-              className="w-full h-11 pl-3 pr-12 rounded-lg border border-border/50 bg-muted/20 text-sm placeholder:text-muted-foreground/40 focus:bg-background focus:border-primary/40 focus:outline-none transition-all duration-200 disabled:opacity-50"
-              disabled={isLoading}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  const input = e.currentTarget;
-                  if (input.value.trim()) {
-                    handleSendMessage(input.value.trim());
-                    input.value = '';
-                  }
-                }
-              }}
-              id="chat-input"
-            />
-            <button 
-              type="button"
-              disabled={isLoading}
-              onClick={() => {
-                const input = document.getElementById('chat-input') as HTMLInputElement;
-                if (input?.value.trim()) {
-                  handleSendMessage(input.value.trim());
-                  input.value = '';
-                }
-              }}
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-9 w-9 rounded-md bg-primary/80 hover:bg-primary disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center justify-center text-primary-foreground"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
-            </button>
+    <AppLayout title="Advisor">
+      <div className="mx-auto flex h-full min-h-0 w-full max-w-5xl flex-col overflow-hidden">
+        {isStarterState ? (
+          <div className="flex flex-1 items-center overflow-y-auto px-4 py-8 sm:px-6">
+            <div className="mx-auto w-full max-w-3xl">
+              <div className="text-center">
+                <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
+                  {getStarterHeading(userProfile?.first_name)}
+                </h1>
+                <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
+                  Ask about markets, portfolio decisions, or financial planning. IRIS uses your profile and The Eye context when it is available.
+                </p>
+                <div className="mt-4 flex justify-center">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-1.5 text-xs text-muted-foreground">
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
+                    <span>Personalized for</span>
+                    <span className="font-medium text-foreground">{experienceLevelLabel}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8">
+                <AdvisorComposer
+                  textareaRef={composerRef}
+                  value={composerValue}
+                  onChange={setComposerValue}
+                  onSubmit={() => void handleComposerSubmit()}
+                  disabled={isLoading}
+                  placeholder="Ask anything..."
+                  helperText="Enter to send. Shift+Enter for a new line."
+                />
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                {latestChat && (
+                  <Button
+                    variant="ghost"
+                    onClick={handleOpenLatest}
+                    className="rounded-full px-4 text-muted-foreground"
+                  >
+                    <Clock3 className="h-4 w-4" />
+                    Continue latest
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate("/chat-history")}
+                  className="rounded-full px-4 text-muted-foreground"
+                >
+                  <History className="h-4 w-4" />
+                  History
+                </Button>
+              </div>
+
+              <div className="mt-8 flex flex-wrap justify-center gap-2">
+                {quickPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => setComposerValue(prompt)}
+                    className="rounded-full border border-border/60 bg-card px-3 py-2 text-sm text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-8">
+                <SuggestedTopics
+                  onSelectTopic={handleTopicSelect}
+                  experienceLevel={userProfile?.experience_level}
+                />
+              </div>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground/50 text-center mt-1">
-            Test mode only · AI responses can include financial suggestions and are not professional financial advice
-          </p>
-        </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between gap-4 px-4 pb-4 pt-4 sm:px-6">
+              <div className="min-w-0">
+                <h1 className="truncate text-lg font-medium text-foreground">
+                  {chatHeaderTitle}
+                </h1>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {chatHeaderDescription}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate("/chat-history")}
+                  className="rounded-full px-3 text-muted-foreground"
+                >
+                  <History className="h-4 w-4" />
+                  History
+                </Button>
+                <Button onClick={handleNewChat} className="rounded-full px-4">
+                  <Plus className="h-4 w-4" />
+                  New
+                </Button>
+              </div>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6">
+              <ChatInterface
+                messages={displayMessages}
+                isThinking={isThinking}
+                onStreamingComplete={() => setStreamingResponseContent(null)}
+              />
+            </div>
+
+              <div className="border-t border-border/60 px-4 py-4 sm:px-6">
+                <div className="mx-auto max-w-3xl">
+                  <AdvisorComposer
+                    textareaRef={composerRef}
+                    value={composerValue}
+                    onChange={setComposerValue}
+                    onSubmit={() => void handleComposerSubmit()}
+                  disabled={isLoading}
+                  placeholder="Ask a follow-up..."
+                  helperText="Enter to send. Shift+Enter for a new line."
+                />
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </AppLayout>
   );
 };
 
+interface AdvisorComposerProps {
+  textareaRef: RefObject<HTMLTextAreaElement>;
+  value: string;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  disabled: boolean;
+  placeholder: string;
+  helperText: string;
+}
+
+const AdvisorComposer = ({
+  textareaRef,
+  value,
+  onChange,
+  onSubmit,
+  disabled,
+  placeholder,
+  helperText,
+}: AdvisorComposerProps) => {
+  return (
+    <div className="rounded-[30px] border border-border/60 bg-card/95 px-5 py-4 shadow-[0_20px_50px_-44px_rgba(15,23,42,0.5)]">
+      <Textarea
+        ref={textareaRef}
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            onSubmit();
+          }
+        }}
+        placeholder={placeholder}
+        className="min-h-[80px] max-h-[200px] resize-none border-0 bg-transparent px-0 py-0 text-base leading-7 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+      />
+
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/50 pt-3">
+        <span className="text-xs text-muted-foreground">
+          {helperText}
+        </span>
+        <Button
+          onClick={onSubmit}
+          disabled={disabled || value.trim().length === 0}
+          className="rounded-full px-5"
+        >
+          Send
+        </Button>
+      </div>
+    </div>
+  );
+};
+
+function getQuickPrompts(experienceLevel: ExperienceLevel) {
+  if (experienceLevel === "beginner") return QUICK_PROMPTS.beginner;
+  if (experienceLevel === "intermediate") return QUICK_PROMPTS.intermediate;
+  if (experienceLevel === "advanced") return QUICK_PROMPTS.advanced;
+  return QUICK_PROMPTS.default;
+}
+
+function getExperienceLevelLabel(experienceLevel: ExperienceLevel) {
+  if (experienceLevel === "beginner") return "Beginner";
+  if (experienceLevel === "intermediate") return "Intermediate";
+  if (experienceLevel === "advanced") return "Advanced";
+  return "General";
+}
+
+function getStarterHeading(firstName?: string | null) {
+  const hour = new Date().getHours();
+  const period = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
+  return firstName ? `Good ${period}, ${firstName}` : "What do you want to figure out?";
+}
+
+function formatActivityTime(dateStr: string) {
+  const date = parseISO(dateStr);
+  if (isToday(date)) return "today";
+  if (isYesterday(date)) return "yesterday";
+  return formatDistanceToNow(date, { addSuffix: true });
+}
+
 function getWelcomeMessage(
   firstName?: string | null,
-  experienceLevel?: 'beginner' | 'intermediate' | 'advanced' | null
+  experienceLevel?: "beginner" | "intermediate" | "advanced" | null,
 ): string {
-  const greeting = firstName ? `Hello ${firstName}!` : "Hello!";
-  
+  const greeting = firstName ? `Hello ${firstName}.` : "Hello.";
+
   switch (experienceLevel) {
-    case 'beginner':
-      return `${greeting} I'm your AI Financial Teacher, and I'm here to help you start your financial journey! 🎓
-
-I'll explain everything in simple terms and make sure you understand each concept before moving forward. Here's what I can help you with:
-
-• **Getting Started** - What is investing? How does the stock market work?
-• **Basic Concepts** - Stocks, bonds, ETFs, and how they differ
-• **Building Your First Portfolio** - Simple strategies to get started
-• **Saving for the Future** - Retirement accounts, compound interest basics
-• **Understanding Risk** - How to protect your money while growing it
-
-Don't worry if something seems confusing - just ask me to explain it differently! What would you like to learn about first?`;
-
-    case 'intermediate':
-      return `${greeting} I'm your AI Financial Advisor, ready to help you take your investing knowledge to the next level! 📈
-
-I'll assume you know the basics and dive into more nuanced strategies and concepts. Here's how I can help:
-
-• **Advanced Portfolio Strategies** - Sector analysis, rebalancing, tax optimization
-• **Options & Derivatives** - Understanding options basics and when to use them
-• **Market Dynamics** - Technical analysis, market cycles, economic indicators
-• **Risk Management** - Hedging strategies, position sizing, stop losses
-• **Performance Analysis** - Evaluating your trades and improving your strategy
-
-What area would you like to explore or improve?`;
-
-    case 'advanced':
-      return `${greeting} I'm your AI Financial Advisor, here to engage in sophisticated financial discussions! 💼
-
-I'll discuss complex strategies and advanced concepts with you. Here's what we can dive into:
-
-• **Advanced Strategies** - Derivatives, arbitrage, quantitative analysis, algorithmic trading
-• **Market Microstructure** - Order flow, liquidity, execution strategies
-• **Portfolio Optimization** - Modern portfolio theory, factor investing, risk parity
-• **Macro Analysis** - Economic indicators, central bank policy, global markets
-• **Performance Metrics** - Sharpe ratio, Sortino ratio, alpha generation, risk-adjusted returns
-
-What complex topic or strategy would you like to analyze?`;
-
+    case "beginner":
+      return `${greeting} I can help you understand investing basics, build a first portfolio, and make market news easier to follow.`;
+    case "intermediate":
+      return `${greeting} I can help you think through allocation, risk, rebalancing, and what matters most in the current market.`;
+    case "advanced":
+      return `${greeting} I can help with higher-signal market analysis, thesis checks, and portfolio stress-testing.`;
     default:
-      return `${greeting} I'm your AI Financial Advisor. I can help you learn about:
-
-• **Investing basics** - stocks, bonds, ETFs, mutual funds
-• **Portfolio building** - diversification and asset allocation
-• **Retirement planning** - 401(k), IRA, compound interest
-• **Risk management** - protecting your investments
-• **Market analysis** - understanding trends and indicators
-
-What would you like to explore today?`;
+      return `${greeting} Ask about markets, portfolio decisions, long-term planning, or finance concepts.`;
   }
 }
 

@@ -1,4 +1,5 @@
 {
+  "// security-note": "vercel undici vulns tracked — awaiting upstream patch from Vercel",
   "name": "ai-financial-advisor",
   "private": true,
   "version": "0.1.0",
@@ -26,10 +27,18 @@
     "test:watch": "vitest",
     "type-check": "tsc --noEmit",
     "validate": "npm run lint:ci && npm run type-check && npm run test",
+    "generate:api-types": "openapi-typescript docs/openapi.json -o src/lib/generated/api-types.ts",
     "validate:services": "node --experimental-strip-types scripts/validate-services.ts",
-    "start:backend": "bash scripts/start-backend.sh",
-    "start:frontend": "bash scripts/start-frontend.sh",
+    "start:backend": "node scripts/start-backend.mjs",
+    "start:backend:railway": "node scripts/start-backend-railway.mjs",
+    "start:backend:bash": "bash scripts/start-backend.sh",
+    "start:backend:win": "powershell -ExecutionPolicy Bypass -File scripts/start-backend.ps1",
+    "start:frontend": "vite",
     "deploy:railway": "cd backend/websearch_service && railway up",
+    "railway:backend:link-project": "cd backend/websearch_service && railway link",
+    "railway:backend:link-service": "cd backend/websearch_service && railway service link",
+    "railway:backend:shell": "cd backend/websearch_service && railway shell",
+    "railway:backend:status": "cd backend/websearch_service && railway status",
     "deploy:vercel": "vercel --prod",
     "railway": "railway",
     "vercel": "vercel"
@@ -63,6 +72,7 @@
     "@radix-ui/react-toggle": "^1.1.9",
     "@radix-ui/react-toggle-group": "^1.1.10",
     "@radix-ui/react-tooltip": "^1.2.7",
+    "@sentry/react": "^10.44.0",
     "@supabase/supabase-js": "^2.49.2",
     "@tanstack/react-query": "^5.83.0",
     "class-variance-authority": "^0.7.1",
@@ -108,15 +118,16 @@
     "globals": "^15.15.0",
     "happy-dom": "^20.6.1",
     "jsdom": "^28.0.0",
+    "openapi-typescript": "^7.13.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
+    "vercel": "^50.35.0",
     "vite": "^5.4.19",
     "vitest": "^4.0.18"
   },
   "optionalDependencies": {
-    "@railway/cli": "^4.30.1",
-    "vercel": "^50.17.1"
+    "@railway/cli": "^4.30.1"
   }
 }

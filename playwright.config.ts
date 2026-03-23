@@ -6,7 +6,10 @@ import { defineConfig, devices } from '@playwright/test';
  * needed.  The Python backend requires a local venv + API keys that are not
  * available in CI, so we skip it there.
  */
-const backendServer = process.env.CI
+const externalBaseUrl = process.env.PLAYWRIGHT_BASE_URL?.trim();
+const useExternalBaseUrl = Boolean(externalBaseUrl);
+
+const backendServer = process.env.CI || useExternalBaseUrl
   ? []
   : [
       {
@@ -24,12 +27,17 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  workers: 1,
+  reporter: [['html', { open: 'never' }], ['list']],
   use: {
-    baseURL: 'http://127.0.0.1:4173',
-    trace: 'on-first-retry',
+    baseURL: externalBaseUrl ?? (process.env.CI ? 'http://127.0.0.1:4173' : 'http://127.0.0.1:8080'),
+    // Always capture traces for local debugging of schema/data failures
+    trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+    // Reasonable timeouts for local dev
+    actionTimeout: 10_000,
+    navigationTimeout: 15_000,
   },
   projects: [
     {
@@ -39,11 +47,24 @@ export default defineConfig({
   ],
   webServer: [
     ...backendServer,
-    {
-      command:
-        'VITE_SUPABASE_URL=http://127.0.0.1:54321 VITE_SUPABASE_ANON_KEY=e2e-test-key npm run dev -- --host 0.0.0.0 --port 4173',
-      url: 'http://127.0.0.1:4173',
-      reuseExistingServer: !process.env.CI,
-    },
+    ...(useExternalBaseUrl
+      ? []
+      : [
+          {
+            command: process.env.CI
+              ? 'npm run dev -- --host 0.0.0.0 --port 4173'
+              : 'npm run dev -- --host 0.0.0.0 --port 8080',
+            url: process.env.CI ? 'http://127.0.0.1:4173' : 'http://127.0.0.1:8080',
+            reuseExistingServer: !process.env.CI,
+            env: {
+              ...process.env,
+              ...(process.env.CI
+                ? { VITE_SUPABASE_URL: 'http://127.0.0.1:54321', VITE_SUPABASE_ANON_KEY: 'e2e-test-key' }
+                : {}),
+            },
+          },
+        ]),
   ],
+  // Store all test artifacts (traces, screenshots, videos) in one place
+  outputDir: './test-results',
 });

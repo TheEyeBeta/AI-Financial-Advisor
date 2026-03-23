@@ -1,0 +1,1227 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "AI Financial Advisor - Web Search Service",
+    "description": "A small FastAPI microservice that provides a unified web search API for the AI Financial Advisor agent. This service should be used for general information lookup that is *not* strictly tied to the Trade Engine's quantitative market data.",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Root",
+        "operationId": "root__get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": { "type": "string" },
+                  "type": "object",
+                  "title": "Response Root  Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "anyOf": [
+                      { "type": "string" },
+                      { "type": "number" }
+                    ]
+                  },
+                  "type": "object",
+                  "title": "Response Health Check Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "summary": "Liveness Check",
+        "operationId": "liveness_check_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": { "type": "string" },
+                  "type": "object",
+                  "title": "Response Liveness Check Health Live Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "summary": "Readiness Check",
+        "operationId": "readiness_check_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response Readiness Check Health Ready Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search": {
+      "get": {
+        "tags": ["search"],
+        "summary": "Search Web",
+        "description": "Perform a general web search via an external provider and return\na compact, LLM-friendly JSON structure.\n\nRequires: authenticated Supabase JWT in the Authorization header.\nRate-limited per authenticated user.",
+        "operationId": "search_web_api_search_get",
+        "parameters": [
+          {
+            "name": "query",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "maxLength": 500,
+              "description": "Natural language search query.",
+              "title": "Query"
+            },
+            "description": "Natural language search query."
+          },
+          {
+            "name": "max_results",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10,
+              "default": 5,
+              "description": "Maximum number of search results to return (1-10).",
+              "title": "Max Results"
+            },
+            "description": "Maximum number of search results to return (1-10)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response Search Web Api Search Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meridian/onboard": {
+      "post": {
+        "tags": ["ai-proxy"],
+        "summary": "Meridian Onboard",
+        "description": "Create or update Meridian profile and first goal; refresh IRIS context cache.",
+        "operationId": "meridian_onboard_api_meridian_onboard_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MeridianOnboardRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": { "type": "string" },
+                  "type": "object",
+                  "title": "Response Meridian Onboard Api Meridian Onboard Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": ["ai-proxy"],
+        "summary": "Chat Completion",
+        "operationId": "chat_completion_api_chat_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChatRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": { "type": "string" },
+                  "type": "object",
+                  "title": "Response Chat Completion Api Chat Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat/title": {
+      "post": {
+        "tags": ["ai-proxy"],
+        "summary": "Chat Title",
+        "operationId": "chat_title_api_chat_title_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChatTitleRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": { "type": "string" },
+                  "type": "object",
+                  "title": "Response Chat Title Api Chat Title Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ai/analyze-quantitative": {
+      "post": {
+        "tags": ["ai-proxy"],
+        "summary": "Analyze Quantitative Data",
+        "operationId": "analyze_quantitative_data_api_ai_analyze_quantitative_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/QuantitativeAnalysisRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": { "type": "string" },
+                  "type": "object",
+                  "title": "Response Analyze Quantitative Data Api Ai Analyze Quantitative Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/news": {
+      "get": {
+        "tags": ["news"],
+        "summary": "Get News",
+        "description": "Stub endpoint for news.\n\nNote: News articles are stored in Supabase (news_articles table).\nThis endpoint returns empty results to prevent 404 errors.\nThe frontend should use Supabase directly for news.",
+        "operationId": "get_news_api_news_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 30,
+              "description": "Maximum number of news items to return",
+              "title": "Limit"
+            },
+            "description": "Maximum number of news items to return"
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string" },
+                { "type": "null" }
+              ],
+              "description": "Pagination cursor",
+              "title": "Cursor"
+            },
+            "description": "Pagination cursor"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response Get News Api News Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/context": {
+      "get": {
+        "tags": ["trade-engine"],
+        "summary": "Get Ai Context",
+        "description": "Get comprehensive AI context for the chatbot.\n\nUse `source=dataapi` to fetch from TheEyeBetaDataAPI (live engine data),\n`source=auto` to try DataAPI first with stub fallback, or `source=supabase`\n(default) for the original stub behavior.",
+        "operationId": "get_ai_context_api_v1_ai_context_get",
+        "parameters": [
+          {
+            "name": "include_news",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "description": "Include recent news articles",
+              "title": "Include News"
+            },
+            "description": "Include recent news articles"
+          },
+          {
+            "name": "news_limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 15,
+              "description": "Maximum news articles to return",
+              "title": "News Limit"
+            },
+            "description": "Maximum news articles to return"
+          },
+          {
+            "name": "signals_hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 48,
+              "description": "Hours of signal history to include",
+              "title": "Signals Hours"
+            },
+            "description": "Hours of signal history to include"
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "supabase",
+              "description": "Data source: supabase, dataapi, or auto",
+              "title": "Source"
+            },
+            "description": "Data source: supabase, dataapi, or auto"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AIContextResponse" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/signals": {
+      "get": {
+        "tags": ["trade-engine"],
+        "summary": "Get Signals",
+        "description": "Get recent trading signals.\n\nUse `source=dataapi` or `source=auto` to fetch from TheEyeBetaDataAPI.\nDefault (supabase) returns empty list (Trade Engine not deployed).",
+        "operationId": "get_signals_api_v1_ai_signals_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string" },
+                { "type": "null" }
+              ],
+              "description": "Filter by ticker symbol",
+              "title": "Ticker"
+            },
+            "description": "Filter by ticker symbol"
+          },
+          {
+            "name": "signal_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                { "type": "string" },
+                { "type": "null" }
+              ],
+              "description": "Filter by signal type (BUY, SELL, HOLD)",
+              "title": "Signal Type"
+            },
+            "description": "Filter by signal type (BUY, SELL, HOLD)"
+          },
+          {
+            "name": "hours",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 168,
+              "default": 24,
+              "description": "Hours of history to include",
+              "title": "Hours"
+            },
+            "description": "Hours of history to include"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500,
+              "default": 50,
+              "description": "Maximum signals to return",
+              "title": "Limit"
+            },
+            "description": "Maximum signals to return"
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "supabase",
+              "description": "Data source: supabase, dataapi, or auto",
+              "title": "Source"
+            },
+            "description": "Data source: supabase, dataapi, or auto"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": { "$ref": "#/components/schemas/TradingSignal" },
+                  "type": "array",
+                  "title": "Response Get Signals Api V1 Ai Signals Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/engine/status": {
+      "get": {
+        "tags": ["trade-engine"],
+        "summary": "Get Engine Status",
+        "description": "Get Trade Engine / DataAPI connection status.",
+        "operationId": "get_engine_status_api_v1_engine_status_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "supabase",
+              "description": "Data source: supabase, dataapi, or auto",
+              "title": "Source"
+            },
+            "description": "Data source: supabase, dataapi, or auto"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response Get Engine Status Api V1 Engine Status Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stock-price/{ticker}": {
+      "get": {
+        "tags": ["trade-engine"],
+        "summary": "Get Stock Price",
+        "description": "Return the last known price for a ticker.\n\nUses Supabase by default. Set `source=dataapi` or `source=auto` to\nfetch from TheEyeBetaDataAPI.",
+        "operationId": "get_stock_price_api_stock_price__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "supabase",
+              "description": "Data source: supabase, dataapi, or auto",
+              "title": "Source"
+            },
+            "description": "Data source: supabase, dataapi, or auto"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response Get Stock Price Api Stock Price  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/ranking": {
+      "get": {
+        "tags": ["stock-ranking"],
+        "summary": "Get Stock Ranking",
+        "description": "Return stocks ranked by composite score (0-100).",
+        "operationId": "get_stock_ranking_api_stocks_ranking_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20,
+              "description": "Top N stocks to return",
+              "title": "Limit"
+            },
+            "description": "Top N stocks to return"
+          },
+          {
+            "name": "min_score",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "default": 0.0,
+              "description": "Minimum composite score filter",
+              "title": "Min Score"
+            },
+            "description": "Minimum composite score filter"
+          },
+          {
+            "name": "horizon",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "balanced",
+              "description": "Investment horizon: 'short' (swing/days-weeks), 'long' (buy-and-hold/months-years), 'balanced' (default)",
+              "title": "Horizon"
+            },
+            "description": "Investment horizon: 'short' (swing/days-weeks), 'long' (buy-and-hold/months-years), 'balanced' (default)"
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "supabase",
+              "description": "Data source: supabase (default), dataapi, or auto",
+              "title": "Source"
+            },
+            "description": "Data source: supabase (default), dataapi, or auto"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RankingResponse" }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/system-health": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "System Health",
+        "description": "Return comprehensive system health across all services.",
+        "operationId": "system_health_api_admin_system_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response System Health Api Admin System Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/dataapi-query": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "Dataapi Query",
+        "description": "Proxy a read-only SQL query to the DataAPI admin endpoint.",
+        "operationId": "dataapi_query_api_admin_dataapi_query_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response Dataapi Query Api Admin Dataapi Query Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/chat-dashboard": {
+      "get": {
+        "tags": ["admin"],
+        "summary": "Chat Dashboard",
+        "operationId": "chat_dashboard_api_admin_chat_dashboard_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {},
+                  "type": "object",
+                  "title": "Response Chat Dashboard Api Admin Chat Dashboard Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AIContextResponse": {
+        "properties": {
+          "generated_at": { "type": "string", "title": "Generated At" },
+          "engine_status": { "$ref": "#/components/schemas/EngineStatus" },
+          "tracked_tickers": {
+            "items": { "type": "string" },
+            "type": "array",
+            "title": "Tracked Tickers",
+            "default": []
+          },
+          "ticker_snapshots": {
+            "items": { "$ref": "#/components/schemas/TickerSnapshot" },
+            "type": "array",
+            "title": "Ticker Snapshots",
+            "default": []
+          },
+          "recent_signals": {
+            "items": { "$ref": "#/components/schemas/TradingSignal" },
+            "type": "array",
+            "title": "Recent Signals",
+            "default": []
+          },
+          "recent_news": {
+            "items": { "$ref": "#/components/schemas/NewsItemFull" },
+            "type": "array",
+            "title": "Recent News",
+            "default": []
+          },
+          "summary": { "$ref": "#/components/schemas/EngineSummaryFull" }
+        },
+        "type": "object",
+        "required": ["generated_at", "engine_status", "summary"],
+        "title": "AIContextResponse",
+        "description": "Full AI context response matching frontend TradeEngineAIContext interface."
+      },
+      "ChatRequest": {
+        "properties": {
+          "messages": {
+            "anyOf": [
+              {
+                "items": { "$ref": "#/components/schemas/Message" },
+                "type": "array"
+              },
+              { "type": "null" }
+            ],
+            "title": "Messages"
+          },
+          "message": {
+            "anyOf": [
+              { "type": "string", "maxLength": 10000, "minLength": 1 },
+              { "type": "null" }
+            ],
+            "title": "Message"
+          },
+          "user_id": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "User Id"
+          },
+          "temperature": {
+            "type": "number",
+            "maximum": 2,
+            "minimum": 0,
+            "title": "Temperature",
+            "default": 0.7
+          },
+          "max_tokens": {
+            "type": "integer",
+            "maximum": 16000,
+            "minimum": 1,
+            "title": "Max Tokens",
+            "default": 2000
+          },
+          "experience_level": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Experience Level"
+          }
+        },
+        "type": "object",
+        "title": "ChatRequest"
+      },
+      "ChatTitleRequest": {
+        "properties": {
+          "first_message": {
+            "type": "string",
+            "maxLength": 10000,
+            "minLength": 1,
+            "title": "First Message"
+          }
+        },
+        "type": "object",
+        "required": ["first_message"],
+        "title": "ChatTitleRequest"
+      },
+      "EngineStatus": {
+        "properties": {
+          "is_running": { "type": "boolean", "title": "Is Running", "default": false },
+          "engine_started_at": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Engine Started At"
+          },
+          "last_price_tick": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Last Price Tick"
+          },
+          "last_news_poll": {
+            "anyOf": [
+              { "type": "string" },
+              { "type": "null" }
+            ],
+            "title": "Last News Poll"
+          },
+          "total_ticks_processed": {
+            "type": "integer",
+            "title": "Total Ticks Processed",
+            "default": 0
+          },
+          "total_news_fetched": {
+            "type": "integer",
+            "title": "Total News Fetched",
+            "default": 0
+          },
+          "active_workers": {
+            "additionalProperties": { "type": "boolean" },
+            "type": "object",
+            "title": "Active Workers",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "title": "EngineStatus",
+        "description": "Status of the Trade Engine - matches TradeEngineEngineStatus interface."
+      },
+      "EngineSummaryFull": {
+        "properties": {
+          "total_tracked_tickers": { "type": "integer", "title": "Total Tracked Tickers", "default": 0 },
+          "tickers_with_data": { "type": "integer", "title": "Tickers With Data", "default": 0 },
+          "tickers_with_indicators": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Tickers With Indicators"
+          },
+          "tickers_with_fundamentals": {
+            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "title": "Tickers With Fundamentals"
+          },
+          "buy_signals_count": { "type": "integer", "title": "Buy Signals Count", "default": 0 },
+          "sell_signals_count": { "type": "integer", "title": "Sell Signals Count", "default": 0 },
+          "hold_signals_count": { "type": "integer", "title": "Hold Signals Count", "default": 0 },
+          "tickers_with_buy": {
+            "items": { "type": "string" },
+            "type": "array",
+            "title": "Tickers With Buy",
+            "default": []
+          },
+          "tickers_with_sell": {
+            "items": { "type": "string" },
+            "type": "array",
+            "title": "Tickers With Sell",
+            "default": []
+          },
+          "average_rsi": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Average Rsi" },
+          "average_pe_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Average Pe Ratio" },
+          "bullish_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Bullish Tickers" },
+          "bearish_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Bearish Tickers" },
+          "oversold_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Oversold Tickers" },
+          "overbought_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Overbought Tickers" },
+          "high_volume_tickers": {
+            "anyOf": [
+              { "items": { "type": "string" }, "type": "array" },
+              { "type": "null" }
+            ],
+            "title": "High Volume Tickers"
+          },
+          "signals_last_24h": { "type": "integer", "title": "Signals Last 24H", "default": 0 },
+          "news_count": { "type": "integer", "title": "News Count", "default": 0 }
+        },
+        "type": "object",
+        "title": "EngineSummaryFull",
+        "description": "Full summary matching frontend TradeEngineAIContext.summary interface."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": { "$ref": "#/components/schemas/ValidationError" },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "MeridianOnboardRequest": {
+        "properties": {
+          "knowledge_tier": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Knowledge Tier" },
+          "risk_profile": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Risk Profile" },
+          "investment_horizon": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Investment Horizon" },
+          "monthly_investable": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Monthly Investable" },
+          "emergency_fund_months": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Emergency Fund Months" },
+          "goal_name": { "type": "string", "minLength": 1, "title": "Goal Name" },
+          "target_amount": { "type": "number", "exclusiveMinimum": 0, "title": "Target Amount" },
+          "target_date": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Target Date" }
+        },
+        "type": "object",
+        "required": ["goal_name", "target_amount"],
+        "title": "MeridianOnboardRequest",
+        "description": "POST /api/meridian/onboard -- all optional except goal_name and target_amount."
+      },
+      "Message": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": ["system", "user", "assistant"],
+            "title": "Role"
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 50000,
+            "minLength": 1,
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": ["role", "content"],
+        "title": "Message"
+      },
+      "NewsItemFull": {
+        "properties": {
+          "headline": { "type": "string", "title": "Headline" },
+          "source": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Source" },
+          "category": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Category" },
+          "published_at": { "type": "string", "title": "Published At" },
+          "related_tickers": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Related Tickers" }
+        },
+        "type": "object",
+        "required": ["headline", "published_at"],
+        "title": "NewsItemFull",
+        "description": "News item matching frontend interface."
+      },
+      "QuantitativeAnalysisRequest": {
+        "properties": {
+          "quantitative_data": {
+            "additionalProperties": { "type": "number" },
+            "type": "object",
+            "title": "Quantitative Data"
+          }
+        },
+        "type": "object",
+        "required": ["quantitative_data"],
+        "title": "QuantitativeAnalysisRequest"
+      },
+      "RankingResponse": {
+        "properties": {
+          "stocks": {
+            "items": { "$ref": "#/components/schemas/StockScore" },
+            "type": "array",
+            "title": "Stocks"
+          },
+          "has_stale_data": { "type": "boolean", "title": "Has Stale Data" },
+          "has_ml_data": { "type": "boolean", "title": "Has Ml Data" },
+          "total_scored": { "type": "integer", "title": "Total Scored" },
+          "horizon": { "type": "string", "title": "Horizon" },
+          "cached": { "type": "boolean", "title": "Cached" },
+          "cache_age_seconds": { "type": "number", "title": "Cache Age Seconds" }
+        },
+        "type": "object",
+        "required": ["stocks", "has_stale_data", "has_ml_data", "total_scored", "horizon", "cached", "cache_age_seconds"],
+        "title": "RankingResponse"
+      },
+      "ScoreBreakdown": {
+        "properties": {
+          "rsi_14": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rsi 14" },
+          "rsi_9": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rsi 9" },
+          "macd_above_signal": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Macd Above Signal" },
+          "macd_histogram": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd Histogram" },
+          "golden_cross": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Golden Cross" },
+          "adx": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Adx" },
+          "stochastic_k": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Stochastic K" },
+          "stochastic_d": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Stochastic D" },
+          "williams_r": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Williams R" },
+          "cci": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Cci" },
+          "bollinger_position": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Bollinger Position" },
+          "volume_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Volume Ratio" },
+          "price_vs_sma_50": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Vs Sma 50" },
+          "price_vs_sma_200": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Vs Sma 200" },
+          "price_vs_ema_50": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Vs Ema 50" },
+          "fifty_two_week_position": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Fifty Two Week Position" },
+          "pe_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Pe Ratio" },
+          "forward_pe": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Forward Pe" },
+          "peg_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Peg Ratio" },
+          "price_to_book": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price To Book" },
+          "price_to_sales": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price To Sales" },
+          "eps": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Eps" },
+          "eps_growth": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Eps Growth" },
+          "revenue_growth": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Revenue Growth" },
+          "dividend_yield": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Dividend Yield" },
+          "market_cap": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Market Cap" },
+          "signal_confidence": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Signal Confidence" },
+          "is_bullish": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Is Bullish" },
+          "signal_strategy": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Signal Strategy" }
+        },
+        "type": "object",
+        "title": "ScoreBreakdown",
+        "description": "Detailed metric-level breakdown surfaced in the UI."
+      },
+      "StockScore": {
+        "properties": {
+          "ticker": { "type": "string", "title": "Ticker" },
+          "company_name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Company Name" },
+          "last_price": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Last Price" },
+          "price_change_pct": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Change Pct" },
+          "updated_at": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Updated At" },
+          "composite_score": { "type": "number", "title": "Composite Score" },
+          "rank_tier": { "type": "string", "title": "Rank Tier" },
+          "conviction": { "type": "string", "title": "Conviction" },
+          "momentum_score": { "type": "number", "title": "Momentum Score" },
+          "technical_score": { "type": "number", "title": "Technical Score" },
+          "fundamental_score": { "type": "number", "title": "Fundamental Score" },
+          "risk_score": { "type": "number", "title": "Risk Score" },
+          "quality_score": { "type": "number", "title": "Quality Score" },
+          "ml_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Ml Score" },
+          "has_ml_data": { "type": "boolean", "title": "Has Ml Data" },
+          "breakdown": { "$ref": "#/components/schemas/ScoreBreakdown" },
+          "data_fresh": { "type": "boolean", "title": "Data Fresh" },
+          "dimensions_bullish": { "type": "integer", "title": "Dimensions Bullish" }
+        },
+        "type": "object",
+        "required": [
+          "ticker", "composite_score", "rank_tier", "conviction",
+          "momentum_score", "technical_score", "fundamental_score",
+          "risk_score", "quality_score", "has_ml_data", "breakdown",
+          "data_fresh", "dimensions_bullish"
+        ],
+        "title": "StockScore"
+      },
+      "TickerSnapshot": {
+        "properties": {
+          "ticker": { "type": "string", "title": "Ticker" },
+          "company_name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Company Name" },
+          "last_price": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Last Price" },
+          "price_change_pct": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Change Pct" },
+          "volume": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Volume" },
+          "volume_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Volume Ratio" },
+          "rsi_14": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rsi 14" },
+          "sma_50": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Sma 50" },
+          "sma_200": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Sma 200" },
+          "macd": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd" },
+          "macd_signal": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd Signal" },
+          "macd_histogram": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd Histogram" },
+          "pe_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Pe Ratio" },
+          "market_cap": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Market Cap" },
+          "latest_signal": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Latest Signal" },
+          "signal_confidence": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Signal Confidence" },
+          "signal_timestamp": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Signal Timestamp" },
+          "signal_strategy": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Signal Strategy" },
+          "is_bullish": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Is Bullish" }
+        },
+        "type": "object",
+        "required": ["ticker"],
+        "title": "TickerSnapshot",
+        "description": "Snapshot of a single ticker's data."
+      },
+      "TradingSignal": {
+        "properties": {
+          "ticker": { "type": "string", "title": "Ticker" },
+          "signal": { "type": "string", "title": "Signal" },
+          "strategy": { "type": "string", "title": "Strategy" },
+          "confidence": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Confidence" },
+          "timestamp": { "type": "string", "title": "Timestamp" },
+          "price_at_signal": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price At Signal" }
+        },
+        "type": "object",
+        "required": ["ticker", "signal", "strategy", "timestamp"],
+        "title": "TradingSignal",
+        "description": "A trading signal from the engine."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                { "type": "string" },
+                { "type": "integer" }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": { "type": "string", "title": "Message" },
+          "type": { "type": "string", "title": "Error Type" }
+        },
+        "type": "object",
+        "required": ["loc", "msg", "type"],
+        "title": "ValidationError"
+      }
+    }
+  }
+}

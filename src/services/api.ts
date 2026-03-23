@@ -1,24 +1,17 @@
-import { aiDb, supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
+import { getPythonApiUrl } from '@/lib/env';
+import { apiClient } from '@/lib/api-client';
 import type { PostgrestFilterBuilder } from '@supabase/postgrest-js';
 import type {
-  PortfolioHistory,
-  OpenPosition,
-  Trade,
-  TradeJournalEntry,
-  Chat,
-  ChatMessage,
-  ChatWithMessages,
-  LearningTopic,
-  Achievement,
-  MarketIndex,
-  TrendingStock,
   NewsArticle,
   StockSnapshot,
 } from '@/types/database';
 
+// Legacy compatibility module.
+// New code should import focused modules from src/services/*-api.ts instead.
+
 // Constants for input validation and API configuration
 const MAX_MESSAGE_LENGTH = 10000;
-const MAX_TITLE_LENGTH = 200;
 const MAX_CHAT_HISTORY_MESSAGES = 30;
 const OPENAI_MAX_TOKENS = 2000;
 const OPENAI_CHAT_TEMPERATURE = 0.7;
@@ -174,32 +167,13 @@ function detectSearchIntent(message: string): SearchIntent {
  * Returns search results or null if search fails.
  */
 async function performWebSearch(query: string, maxResults: number = 5): Promise<WebSearchResponse | null> {
-  const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
-
-  if (!pythonBackendUrl) {
-    console.log('[WebSearch] Backend URL not configured');
-    return null;
-  }
-
   try {
     const params = new URLSearchParams({
       query,
       max_results: maxResults.toString(),
     });
 
-    const response = await fetch(`${pythonBackendUrl}/api/search?${params}`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      console.log('[WebSearch] Search endpoint returned error:', response.status);
-      return null;
-    }
-
-    const data: WebSearchResponse = await response.json();
+    const data = await apiClient.get<WebSearchResponse>(`/api/search?${params}`, { skipRetry: true });
     console.log('[WebSearch] Found', data.results?.length || 0, 'results for:', query);
     return data;
   } catch (error) {
@@ -238,681 +212,11 @@ function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType:
   return context;
 }
 
-// Portfolio API
-export const portfolioApi = {
-  async getHistory(userId: string): Promise<PortfolioHistory[]> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('portfolio_history')
-      .select('*')
-      .eq('user_id', userId)
-      .order('date', { ascending: true });
+export { portfolioApi, positionsApi, tradesApi, journalApi } from '@/services/trading-api';
 
-    if (error) throw error;
-    return data || [];
-  },
+export { chatApi, chatsApi } from '@/services/chat-api';
 
-  async addHistoryEntry(userId: string, date: string, value: number): Promise<PortfolioHistory> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('portfolio_history')
-      .insert({ user_id: userId, date, value })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-};
-
-// Open Positions API
-export const positionsApi = {
-  async getAll(userId: string): Promise<OpenPosition[]> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('open_positions')
-      .select('*')
-      .eq('user_id', userId)
-      .order('entry_date', { ascending: false });
-
-    if (error) throw error;
-
-    const positions = data || [];
-    if (positions.length === 0) {
-      return positions;
-    }
-
-    const uniqueSymbols = Array.from(
-      new Set(
-        positions
-          .map((position) => position.symbol?.trim().toUpperCase())
-          .filter((symbol): symbol is string => Boolean(symbol))
-      )
-    );
-
-    if (uniqueSymbols.length === 0) {
-      return positions;
-    }
-
-    try {
-      const snapshots = await stockSnapshotsApi.getByTickers(uniqueSymbols);
-      const snapshotPriceByTicker = new Map(
-        snapshots
-          .filter((snapshot) => typeof snapshot.last_price === 'number')
-          .map((snapshot) => [snapshot.ticker.toUpperCase(), snapshot.last_price as number])
-      );
-
-      return positions.map((position) => {
-        const normalizedSymbol = position.symbol.trim().toUpperCase();
-        const snapshotPrice = snapshotPriceByTicker.get(normalizedSymbol);
-
-        return snapshotPrice !== undefined
-          ? { ...position, symbol: normalizedSymbol, current_price: snapshotPrice }
-          : { ...position, symbol: normalizedSymbol, current_price: null };
-      });
-    } catch (snapshotError) {
-      console.warn('[positionsApi.getAll] Failed to hydrate position prices from stock snapshots:', snapshotError);
-      return positions;
-    }
-  },
-
-  async create(userId: string, position: Omit<OpenPosition, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<OpenPosition> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('open_positions')
-      .insert({ ...position, user_id: userId })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-
-  async update(id: string, userId: string, updates: Partial<OpenPosition>): Promise<OpenPosition> {
-    // First verify ownership
-    const { data: position, error: fetchError } = await supabase
-      .schema('trading')
-      .from('open_positions')
-      .select('user_id')
-      .eq('id', id)
-      .eq('user_id', userId)
-      .single();
-
-    if (fetchError || !position) {
-      throw new Error('Position not found or access denied');
-    }
-
-    // Update with user_id check for defense-in-depth
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('open_positions')
-      .update(updates)
-      .eq('id', id)
-      .eq('user_id', userId)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-
-  async delete(id: string, userId: string): Promise<void> {
-    // First verify ownership
-    const { data: position, error: fetchError } = await supabase
-      .schema('trading')
-      .from('open_positions')
-      .select('user_id')
-      .eq('id', id)
-      .eq('user_id', userId)
-      .single();
-
-    if (fetchError || !position) {
-      throw new Error('Position not found or access denied');
-    }
-
-    // Delete with user_id check for defense-in-depth
-    const { error } = await supabase
-      .schema('trading')
-      .from('open_positions')
-      .delete()
-      .eq('id', id)
-      .eq('user_id', userId);
-
-    if (error) throw error;
-  },
-};
-
-// Trades API
-export const tradesApi = {
-  async getAll(userId: string): Promise<Trade[]> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('trades')
-      .select('*')
-      .eq('user_id', userId)
-      .order('exit_date', { ascending: false, nullsFirst: false });
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async getClosed(userId: string): Promise<Trade[]> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('trades')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('action', 'CLOSED')
-      .order('exit_date', { ascending: false });
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async create(userId: string, trade: Omit<Trade, 'id' | 'user_id' | 'created_at' | 'updated_at'>): Promise<Trade> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('trades')
-      .insert({ ...trade, user_id: userId })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-
-  async getStatistics(userId: string) {
-    const trades = await this.getClosed(userId);
-    const winningTrades = trades.filter(t => (t.pnl || 0) > 0);
-    const losingTrades = trades.filter(t => (t.pnl || 0) <= 0);
-
-    const avgProfit = winningTrades.length > 0
-      ? winningTrades.reduce((sum, t) => sum + (t.pnl || 0), 0) / winningTrades.length
-      : 0;
-
-    const avgLoss = losingTrades.length > 0
-      ? losingTrades.reduce((sum, t) => sum + Math.abs(t.pnl || 0), 0) / losingTrades.length
-      : 0;
-
-    // Calculate profit factor: ratio of average profit to average loss
-    // Edge case: If all trades are winners (avgLoss = 0), profit factor is undefined
-    // In this case, we return 0 to indicate we can't calculate a meaningful ratio
-    // This represents a perfect trading record with no losses
-    const profitFactor = avgLoss > 0 ? Math.abs(avgProfit) / avgLoss : 0;
-
-    return {
-      winRate: trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0,
-      avgProfit,
-      avgLoss,
-      profitFactor,
-      totalTrades: trades.length,
-      winningTrades: winningTrades.length,
-      losingTrades: losingTrades.length,
-    };
-  },
-};
-
-// Trade Journal API
-export const journalApi = {
-  async getAll(userId: string): Promise<TradeJournalEntry[]> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('trade_journal')
-      .select('*')
-      .eq('user_id', userId)
-      .order('date', { ascending: false });
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async create(userId: string, entry: Omit<TradeJournalEntry, 'id' | 'user_id' | 'created_at' | 'updated_at' | 'trade_id'> & { trade_id?: string | null }): Promise<TradeJournalEntry> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('trade_journal')
-      .insert({ ...entry, user_id: userId })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-
-  async update(id: string, updates: Partial<TradeJournalEntry>): Promise<TradeJournalEntry> {
-    const { data, error } = await supabase
-      .schema('trading')
-      .from('trade_journal')
-      .update(updates)
-      .eq('id', id)
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-
-  async delete(id: string): Promise<void> {
-    const { error } = await supabase
-      .schema('trading')
-      .from('trade_journal')
-      .delete()
-      .eq('id', id);
-
-    if (error) throw error;
-  },
-};
-
-function normalizeChatTitle(title?: string): string {
-  const trimmedTitle = title?.trim();
-
-  if (trimmedTitle == null) {
-    return 'New Chat';
-  }
-
-  if (trimmedTitle.length === 0) {
-    throw new Error('Title cannot be empty');
-  }
-
-  if (trimmedTitle.length > MAX_TITLE_LENGTH) {
-    throw new Error(`Title too long. Maximum length is ${MAX_TITLE_LENGTH} characters.`);
-  }
-
-  return trimmedTitle;
-}
-
-function fromAiChats() {
-  return aiDb.from('chats');
-}
-
-function fromAiChatMessages() {
-  return aiDb.from('chat_messages');
-}
-
-/**
- * Returns true when a Supabase/PostgREST error indicates that the table or
- * schema is not accessible.  This covers:
- *   - 404: table/schema not found OR role missing GRANT USAGE/SELECT on schema
- *   - 400 with "schema" in message: schema not in PostgREST search path
- *   - PostgreSQL 42P01: undefined_table
- *   - PostgreSQL 42501: insufficient_privilege (missing GRANT on table/schema)
- *
- * In all these cases callers should treat the result as empty or throw a
- * user-friendly error rather than propagating the raw Supabase error.
- */
-function isSchemaOrTableNotFound(error: unknown): boolean {
-  if (!error || typeof error !== 'object') return false;
-  const e = error as { status?: number; code?: string; message?: string };
-  if (e.status === 404) return true;
-  if (e.status === 400 && e.message?.includes('schema')) return true;
-  if (e.code === '42P01') return true; // PostgreSQL: undefined_table
-  if (e.code === '42501') return true; // PostgreSQL: insufficient_privilege (missing GRANT)
-  return false;
-}
-
-const CHAT_SETUP_ERROR =
-  'Chat is unavailable: the ai schema is missing required GRANT permissions. ' +
-  'Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor to fix this.';
-
-async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
-  const { data: chats, error: chatsError } = await fromAiChats()
-    .select('*')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
-
-  if (chatsError) {
-    if (isSchemaOrTableNotFound(chatsError)) {
-      console.warn('ai.chats returned 404. The table exists and the schema is exposed, so the likely cause is missing GRANT permissions — run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning empty chat list.');
-      return [];
-    }
-    throw chatsError;
-  }
-  if (!Array.isArray(chats) || chats.length === 0) return [];
-
-  const chatIds = chats.map(c => c.id);
-  const { data: messages, error: messagesError } = await fromAiChatMessages()
-    .select('*')
-    .in('chat_id', chatIds)
-    .order('created_at', { ascending: false });
-
-  if (messagesError) {
-    if (isSchemaOrTableNotFound(messagesError)) {
-      console.warn('ai.chat_messages returned 404 — missing GRANT permissions. Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning chats without messages.');
-      return chats.map(chat => ({ ...chat, messages: [], messageCount: 0, lastMessage: undefined }));
-    }
-    throw messagesError;
-  }
-
-  const messagesByChat = (messages || []).reduce((acc, msg) => {
-    if (!acc[msg.chat_id!]) acc[msg.chat_id!] = [];
-    acc[msg.chat_id!].push(msg);
-    return acc;
-  }, {} as Record<string, ChatMessage[]>);
-
-  return chats.map(chat => ({
-    ...chat,
-    messages: [...(messagesByChat[chat.id] || [])].reverse(),
-    messageCount: (messagesByChat[chat.id] || []).length,
-    lastMessage: (messagesByChat[chat.id] || [])[0],
-  }));
-}
-
-async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
-  const { data, error } = await fromAiChatMessages()
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: true });
-
-  if (error) {
-    if (isSchemaOrTableNotFound(error)) {
-      console.warn('ai.chat_messages returned 404 — missing GRANT permissions. Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning empty message list.');
-      return [];
-    }
-    throw error;
-  }
-  return data || [];
-}
-
-// Chat API
-// Chats API - for managing chat sessions
-export const chatsApi = {
-  // Get all chats for a user with message counts
-  async getAll(userId: string): Promise<ChatWithMessages[]> {
-    return fetchChatsForUser(userId);
-  },
-
-  // Create a new chat
-  async create(userId: string, title?: string): Promise<Chat> {
-    const normalizedTitle = normalizeChatTitle(title);
-
-    const { data, error } = await fromAiChats()
-      .insert({ user_id: userId, title: normalizedTitle })
-      .select()
-      .single();
-
-    if (error) {
-      if (isSchemaOrTableNotFound(error)) throw new Error(CHAT_SETUP_ERROR);
-      throw error;
-    }
-    return data;
-  },
-
-  // Update chat title
-  async updateTitle(chatId: string, title: string): Promise<Chat> {
-    const normalizedTitle = normalizeChatTitle(title);
-
-    const { data, error } = await fromAiChats()
-      .update({ title: normalizedTitle, updated_at: new Date().toISOString() })
-      .eq('id', chatId)
-      .select()
-      .single();
-
-    if (error) {
-      if (isSchemaOrTableNotFound(error)) throw new Error(CHAT_SETUP_ERROR);
-      throw error;
-    }
-    return data;
-  },
-
-  // Delete a chat (cascade deletes messages)
-  async delete(chatId: string): Promise<void> {
-    const { error } = await fromAiChats()
-      .delete()
-      .eq('id', chatId);
-
-    if (error) throw error;
-  },
-
-  // Get single chat with messages
-  async getWithMessages(chatId: string): Promise<ChatWithMessages | null> {
-    const { data: chat, error: chatError } = await fromAiChats()
-      .select('*')
-      .eq('id', chatId)
-      .maybeSingle();
-
-    if (chatError) {
-      if (isSchemaOrTableNotFound(chatError)) return null;
-      throw chatError;
-    }
-    if (!chat) return null;
-
-    const { data: messages, error: messagesError } = await fromAiChatMessages()
-      .select('*')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
-
-    if (messagesError) {
-      if (isSchemaOrTableNotFound(messagesError)) {
-        return { ...chat, messages: [], messageCount: 0, lastMessage: undefined };
-      }
-      throw messagesError;
-    }
-
-    return {
-      ...chat,
-      messages: messages || [],
-      messageCount: (messages || []).length,
-      lastMessage: messages?.[messages.length - 1],
-    };
-  },
-};
-
-export const chatApi = {
-  // Get messages for a specific chat
-  async getMessages(chatId: string): Promise<ChatMessage[]> {
-    const { data, error } = await fromAiChatMessages()
-      .select('*')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      if (isSchemaOrTableNotFound(error)) return [];
-      throw error;
-    }
-    return data || [];
-  },
-
-  // Legacy: Get all messages for a user (for backward compatibility)
-  async getAllUserMessages(userId: string): Promise<ChatMessage[]> {
-    return fetchMessagesForUser(userId);
-  },
-
-  async addMessage(userId: string, chatId: string, role: 'user' | 'assistant', content: string): Promise<ChatMessage> {
-    // Input validation
-    if (!content || content.trim().length === 0) {
-      throw new Error('Message content cannot be empty');
-    }
-    if (content.length > MAX_MESSAGE_LENGTH) {
-      throw new Error(`Message too long. Maximum length is ${MAX_MESSAGE_LENGTH} characters.`);
-    }
-
-    const { data, error } = await fromAiChatMessages()
-      .insert({ user_id: userId, chat_id: chatId, role, content })
-      .select()
-      .single();
-
-    if (error) {
-      if (isSchemaOrTableNotFound(error)) throw new Error(CHAT_SETUP_ERROR);
-      throw error;
-    }
-
-    // Update chat's updated_at timestamp
-    const { error: updateChatError } = await fromAiChats()
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', chatId);
-
-    if (updateChatError) {
-      // Log error but don't fail the message creation
-      console.error('Failed to update chat timestamp', { chatId, error: updateChatError });
-    }
-
-    return data;
-  },
-
-  async clearMessages(chatId: string): Promise<void> {
-    const { error } = await fromAiChatMessages()
-      .delete()
-      .eq('chat_id', chatId);
-
-    if (error) throw error;
-  },
-};
-
-// Learning API
-export const learningApi = {
-  async getTopics(userId: string): Promise<LearningTopic[]> {
-    const [{ data: lessons, error: lessonsError }, { data: progressRows, error: progressError }] = await Promise.all([
-      supabase
-        .schema('academy')
-        .from('lessons')
-        .select('id, tier_id, title, order_index, created_at, updated_at')
-        .eq('is_published', true)
-        .order('order_index', { ascending: true }),
-      supabase
-        .schema('academy')
-        .from('user_lesson_progress')
-        .select('lesson_id, status, best_quiz_score, last_opened_at, completed_at')
-        .eq('user_id', userId),
-    ]);
-
-    if (lessonsError) throw lessonsError;
-    if (progressError) throw progressError;
-
-    const progressByLesson = new Map((progressRows || []).map((row) => [row.lesson_id, row]));
-
-    return (lessons || []).map((lesson) => {
-      const progress = progressByLesson.get(lesson.id);
-      const completed = progress?.status === 'completed';
-      const derivedProgress = completed
-        ? 100
-        : progress?.status === 'in_progress'
-          ? Math.max(5, Math.min(95, Math.round(Number(progress?.best_quiz_score ?? 0))))
-          : 0;
-
-      return {
-        id: lesson.id,
-        user_id: userId,
-        topic_name: lesson.title,
-        progress: derivedProgress,
-        completed,
-        created_at: lesson.created_at ?? null,
-        updated_at: lesson.updated_at ?? progress?.last_opened_at ?? progress?.completed_at ?? null,
-        lesson_id: lesson.id,
-        tier_id: lesson.tier_id ?? null,
-      };
-    });
-  },
-
-  async updateProgress(userId: string, topicName: string, progress: number, completed?: boolean): Promise<LearningTopic> {
-    const { data: lesson, error: lessonError } = await supabase
-      .schema('academy')
-      .from('lessons')
-      .select('id, tier_id, title, created_at, updated_at')
-      .eq('title', topicName)
-      .maybeSingle();
-
-    if (lessonError) throw lessonError;
-    if (!lesson) throw new Error(`No academy lesson found for topic "${topicName}".`);
-
-    const { data: existingProgress, error: existingProgressError } = await supabase
-      .schema('academy')
-      .from('user_lesson_progress')
-      .select('id, best_quiz_score, completed_at')
-      .eq('user_id', userId)
-      .eq('lesson_id', lesson.id)
-      .maybeSingle();
-
-    if (existingProgressError) throw existingProgressError;
-
-    const normalizedProgress = Math.max(0, Math.min(100, progress));
-    const status = completed ?? normalizedProgress >= 100 ? 'completed' : normalizedProgress > 0 ? 'in_progress' : 'not_started';
-    const timestamp = new Date().toISOString();
-
-    const { error: upsertError } = await supabase
-      .schema('academy')
-      .from('user_lesson_progress')
-      .upsert({
-        user_id: userId,
-        lesson_id: lesson.id,
-        status,
-        best_quiz_score: existingProgress?.best_quiz_score ?? null,
-        last_opened_at: timestamp,
-        completed_at: status === 'completed'
-          ? existingProgress?.completed_at ?? timestamp
-          : null,
-      }, { onConflict: 'user_id,lesson_id' });
-
-    if (upsertError) throw upsertError;
-
-    return {
-      id: lesson.id,
-      user_id: userId,
-      topic_name: lesson.title,
-      progress: status === 'completed' ? 100 : normalizedProgress,
-      completed: status === 'completed',
-      created_at: lesson.created_at ?? null,
-      updated_at: timestamp,
-      lesson_id: lesson.id,
-      tier_id: lesson.tier_id ?? null,
-    };
-  },
-
-  async initializeTopics(userId: string): Promise<LearningTopic[]> {
-    return this.getTopics(userId);
-  },
-};
-
-// Achievements API
-export const achievementsApi = {
-  async getAll(userId: string): Promise<Achievement[]> {
-    const { data, error } = await supabase
-      .schema('core')
-      .from('achievements')
-      .select('*')
-      .eq('user_id', userId)
-      .order('unlocked_at', { ascending: false });
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async unlock(userId: string, name: string, icon?: string): Promise<Achievement> {
-    const { data, error } = await supabase
-      .schema('core')
-      .from('achievements')
-      .insert({ user_id: userId, name, icon })
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
-  },
-};
-
-// Market Data API (can be updated by Python backend)
-export const marketApi = {
-  async getIndices(): Promise<MarketIndex[]> {
-    const { data, error } = await supabase
-      .schema('market')
-      .from('market_indices')
-      .select('*')
-      .order('symbol', { ascending: true });
-
-    if (error) throw error;
-    return data || [];
-  },
-
-  async getTrendingStocks(): Promise<TrendingStock[]> {
-    const { data, error } = await supabase
-      .schema('market')
-      .from('trending_stocks')
-      .select('*')
-      .order('updated_at', { ascending: false })
-      .limit(10);
-
-    if (error) throw error;
-    return data || [];
-  },
-};
+export { achievementsApi, learningApi, marketApi } from '@/services/user-data-api';
 
 // News API - for financial news articles
 /**
@@ -1428,10 +732,7 @@ export interface TopStocksResult {
 export const stockRankingApi = {
   async getRanking(options: TopStocksOptions = {}, source?: string): Promise<TopStocksResult> {
     const { limit = 20, minScore = 0, horizon = 'balanced' } = options;
-    const backendUrl = import.meta.env.VITE_PYTHON_API_URL;
-    if (!backendUrl) {
-      throw new Error('VITE_PYTHON_API_URL is not configured');
-    }
+    const backendUrl = getPythonApiUrl();
 
     const params = new URLSearchParams({
       limit: String(limit),
@@ -1441,14 +742,14 @@ export const stockRankingApi = {
     if (source) params.append('source', source);
 
     try {
-      const res = await fetch(`${backendUrl}/api/stocks/ranking?${params}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || `Stock ranking API error: ${res.statusText}`);
-      }
+      const data = await apiClient.get<{
+        stocks: StockScore[];
+        has_stale_data: boolean;
+        has_ml_data: boolean;
+        total_scored: number;
+        horizon: Horizon;
+      }>(`/api/stocks/ranking?${params}`);
 
-      // Backend returns snake_case; map to camelCase for the frontend
-      const data = await res.json();
       return {
         stocks: data.stocks,
         hasStaleData: data.has_stale_data,
@@ -1554,12 +855,6 @@ ${allRules}`;
 export const pythonApi = {
   // Analyze quantitative data using Deepseek (compliance-safe: only sends numerical data, no PII)
   async analyzeQuantitativeData(quantitativeData: Record<string, number | undefined>): Promise<string> {
-    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
-
-    if (!pythonBackendUrl) {
-      throw new Error('AI backend URL not configured');
-    }
-
     // Filter out undefined values
     const sanitizedData = Object.fromEntries(
       Object.entries(quantitativeData).filter(([_, value]) => value !== undefined)
@@ -1571,22 +866,10 @@ export const pythonApi = {
     }
 
     try {
-      const response = await fetch(`${pythonBackendUrl}/api/ai/analyze-quantitative`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          quantitative_data: sanitizedData,
-        }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `AI backend error: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await apiClient.post<{ response?: string }>(
+        '/api/ai/analyze-quantitative',
+        { quantitative_data: sanitizedData },
+      );
       return data.response || 'Unable to analyze data.';
     } catch (error) {
       console.error('Error calling AI analysis backend:', error);
@@ -1613,7 +896,7 @@ export const pythonApi = {
       throw new Error(`Chat history too long. Maximum ${100} messages allowed.`);
     }
 
-    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
+    const pythonBackendUrl = getPythonApiUrl();
 
     const hasTradeEngineData = !!tradeEngineContext;
 
@@ -2332,32 +1615,22 @@ export const pythonApi = {
     if (pythonBackendUrl) {
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        const accessToken = session?.access_token;
-        if (!accessToken) {
+        if (!session?.access_token) {
           throw new Error('Not authenticated. Please sign in to use the AI assistant.');
         }
 
-        const response = await fetch(`${pythonBackendUrl}/api/chat`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({
+        const data = await apiClient.post<{ response?: string }>(
+          '/api/chat',
+          {
             messages,
             user_id: userId,
             temperature: OPENAI_CHAT_TEMPERATURE,
             max_tokens: OPENAI_MAX_TOKENS,
             experience_level: experienceLevel ?? null,
-          }),
-        });
+          },
+          { skipRetry: true },
+        );
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.detail || `AI backend error: ${response.statusText}`);
-        }
-
-        const data = await response.json();
         const content = data.response;
         if (!content || typeof content !== 'string') {
           return 'I apologize, but I encountered an error processing your request.';
@@ -2384,34 +1657,12 @@ export const pythonApi = {
       return (lastSpace > 15 ? truncated.substring(0, lastSpace) : truncated) + '...';
     };
 
-    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
-    if (!pythonBackendUrl) {
-      return fallbackTitle(firstMessage);
-    }
-
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const accessToken = session?.access_token;
-      if (!accessToken) {
-        return fallbackTitle(firstMessage);
-      }
-
-      const response = await fetch(`${pythonBackendUrl}/api/chat/title`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-        },
-        body: JSON.stringify({ first_message: firstMessage }),
-      });
-
-      if (!response.ok) {
-        // Don't throw - just use fallback title silently
-        console.warn('Chat title API returned', response.status, '- using fallback');
-        return fallbackTitle(firstMessage);
-      }
-
-      const data = await response.json();
+      const data = await apiClient.post<{ title?: string }>(
+        '/api/chat/title',
+        { first_message: firstMessage },
+        { skipRetry: true },
+      );
       const title = data.title?.trim();
       if (!title || typeof title !== 'string') {
         return fallbackTitle(firstMessage);
@@ -2425,25 +1676,12 @@ export const pythonApi = {
 
   // Helper method for Python backend (if using that instead)
   async getChatResponseFromPython(message: string, userId: string): Promise<string> {
-    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-
     try {
-      const response = await fetch(`${pythonBackendUrl}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message,
-          user_id: userId,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Python API error: ${response.statusText}`);
-      }
-
-      const data = await response.json();
+      const data = await apiClient.post<{ response?: string }>(
+        '/api/chat',
+        { message, user_id: userId },
+        { skipRetry: true },
+      );
       return data.response || 'I apologize, but I encountered an error processing your request.';
     } catch (error) {
       console.error('Error calling Python API:', error);
@@ -2453,17 +1691,9 @@ export const pythonApi = {
 
   // Example: Get live stock prices from Python backend
   async getStockPrice(symbol: string, source?: string): Promise<number> {
-    const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000';
-
     try {
       const params = source ? `?source=${source}` : '';
-      const response = await fetch(`${pythonBackendUrl}/api/stock-price/${symbol}${params}`);
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch price for ${symbol}`);
-      }
-
-      const data = await response.json();
+      const data = await apiClient.get<{ price: number }>(`/api/stock-price/${symbol}${params}`);
       return data.price;
     } catch (error) {
       console.error(`Error fetching price for ${symbol}:`, error);
@@ -2504,7 +1734,9 @@ export interface TradeEnginePriceData {
 }
 
 export const tradeEngineApi = {
-  baseUrl: import.meta.env.VITE_PYTHON_API_URL || 'http://localhost:8000',
+  get baseUrl() {
+    return getPythonApiUrl();
+  },
 
   // Fetch news from Trade Engine (or stub endpoint)
   async getNews(limit: number = 15, cursor?: string): Promise<{ items: TradeEngineNewsItem[]; next_cursor: string | null }> {

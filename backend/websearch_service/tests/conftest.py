@@ -1,12 +1,35 @@
 """Pytest configuration and fixtures."""
 import os
+import time
 from typing import AsyncGenerator
 
+import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
 from app.main import create_app
+
+# Shared test JWT secret — also set in mock_env_vars so auth.py picks it up.
+TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests"
+
+
+def _make_jwt(role: str = "service_role", sub: str = "test-service", **extra) -> str:
+    """Create a signed HS256 JWT for testing."""
+    payload = {"role": role, "sub": sub, "iat": int(time.time()), **extra}
+    return pyjwt.encode(payload, TEST_JWT_SECRET, algorithm="HS256")
+
+
+@pytest.fixture
+def service_role_jwt() -> str:
+    """A valid service-role JWT for admin endpoint tests."""
+    return _make_jwt(role="service_role")
+
+
+@pytest.fixture
+def anon_role_jwt() -> str:
+    """A JWT with role=anon (should be rejected by service-role endpoints)."""
+    return _make_jwt(role="anon")
 
 
 @pytest.fixture
@@ -32,6 +55,7 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("APP_VERSION", "test-version")
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("AUTH_REQUIRED", "false")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
 
 
 @pytest.fixture

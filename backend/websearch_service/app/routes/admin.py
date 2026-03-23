@@ -7,8 +7,8 @@ heartbeats, and run read-only queries against the engine database.
 **Authentication**: Every route in this module requires either:
   1. A valid Supabase JWT (Authorization: Bearer <token>) from a user
      whose ``userType`` is ``'Admin'`` in the ``core.users`` table, OR
-  2. A static API key (X-Admin-Key header) matching the ``ADMIN_API_KEY``
-     environment variable (for direct/automated access).
+  2. A Supabase **service-role JWT** (Authorization: Bearer <token>)
+     whose ``role`` claim is ``service_role`` (for automated/CI access).
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from ..services.auth import verify_service_role
 from ..services.dataapi_client import get_dataapi_client
 
 logger = logging.getLogger(__name__)
@@ -38,29 +39,38 @@ async def _require_admin(request: Request) -> str:
     """Validate that the caller is an authenticated admin.
 
     Supports two mechanisms (checked in order):
-      1. ``X-Admin-Key`` header matching ``ADMIN_API_KEY`` env var.
-      2. ``Authorization: Bearer <supabase-jwt>`` — the JWT is verified
+      1. ``Authorization: Bearer <service-role-jwt>`` — a Supabase
+         service-role JWT verified locally via ``SUPABASE_JWT_SECRET``.
+         Grants immediate access when the ``role`` claim is ``service_role``.
+      2. ``Authorization: Bearer <user-jwt>`` — the JWT is verified
          against Supabase, and the corresponding user must have
          ``userType = 'Admin'`` in ``core.users``.
 
-    Returns the authenticated principal identifier (email or "api-key").
+    Returns the authenticated principal identifier (email or "service-role").
     Raises ``HTTPException(401/403)`` on failure.
     """
-    # --- Option 1: Static API key ---
-    admin_api_key = os.getenv("ADMIN_API_KEY", "").strip()
-    incoming_key = (request.headers.get("X-Admin-Key") or "").strip()
-    if admin_api_key and incoming_key:
-        if incoming_key == admin_api_key:
-            return "api-key"
-        raise HTTPException(status_code=401, detail="Invalid admin API key")
+    # --- Try service-role JWT first (fast, local verification) ---
+    try:
+        payload = await verify_service_role(request)
+        logger.info("Admin access granted via service-role JWT")
+        return "service-role"
+    except HTTPException as exc:
+        # If the token was present but invalid, re-raise immediately
+        auth_header = (request.headers.get("Authorization") or "").strip()
+        if not auth_header.lower().startswith("bearer "):
+            raise HTTPException(
+                status_code=401,
+                detail="Missing authentication. Provide Authorization: Bearer <token> header.",
+            )
+        # Token present but role != service_role — fall through to user-JWT path
+        if exc.status_code == 403:
+            pass  # not a service-role token; try user JWT path below
+        elif exc.status_code == 401:
+            pass  # could be a user JWT; try the Supabase path
+        else:
+            raise  # 500-level errors should propagate
 
-    # --- Option 2: Supabase JWT ---
-    auth_header = (request.headers.get("Authorization") or "").strip()
-    if not auth_header.lower().startswith("bearer "):
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authentication. Provide Authorization: Bearer <token> or X-Admin-Key header.",
-        )
+    # --- Fallback: Supabase user JWT with admin check ---
     token = auth_header[7:].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Empty bearer token")
