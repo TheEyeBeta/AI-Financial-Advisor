@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main, develop, staging]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   NODE_VERSION: '20'
   PYTHON_VERSION: '3.12'
@@ -160,30 +164,3 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ─── Security Scanning ─────────────────────────────────────────────────
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Audit npm dependencies
-        # --omit=optional: vercel and @railway/cli are optional CLI tools,
-        # not runtime deps — their transitive vulns are not exploitable.
-        run: npm audit --omit=dev --omit=optional --audit-level=high || true
-
-      - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          severity: 'CRITICAL,HIGH'

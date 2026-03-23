@@ -1,5 +1,9 @@
 name: Docker Build and Test
 
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   pull_request:
     paths:

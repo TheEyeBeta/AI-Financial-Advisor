@@ -6,6 +6,10 @@ on:
     tags:
       - 'v*'
 
+concurrency:
+  group: deploy-production-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   REGISTRY: ghcr.io
   BACKEND_IMAGE: ${{ github.repository }}/backend

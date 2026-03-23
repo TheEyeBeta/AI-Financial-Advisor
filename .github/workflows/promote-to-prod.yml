@@ -3,13 +3,17 @@ name: Promote to Production
 on:
   workflow_dispatch:
 
+concurrency:
+  group: promote-to-prod
+  cancel-in-progress: false
+
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
   promote:
-    name: Merge staging to main
+    name: Open promotion PR staging → main
     runs-on: ubuntu-latest
     environment:
       name: production
@@ -19,36 +23,66 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Merge staging into main
+      - name: Create or update promotion PR
         uses: actions/github-script@v7
         with:
           script: |
             const { owner, repo } = context.repo;
-            try {
-              const response = await github.rest.repos.merge({
-                owner,
-                repo,
-                base: 'main',
-                head: 'staging',
-                commit_message: 'Promote staging to main',
-              });
 
-              core.info(`Merged staging into main: ${response.data.sha}`);
-            } catch (error) {
-              if (error.status === 409) {
-                core.setFailed('Promotion failed because staging cannot be merged cleanly into main.');
-                return;
-              }
+            // Check if a promotion PR already exists
+            const { data: pulls } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: 'open',
+              head: `${owner}:staging`,
+              base: 'main',
+            });
 
-              if (error.status === 422) {
-                core.setFailed('Promotion failed because staging is already merged or the refs are invalid.');
-                return;
-              }
-
-              throw error;
+            if (pulls.length > 0) {
+              const pr = pulls[0];
+              core.info(`Promotion PR already open: #${pr.number} — ${pr.html_url}`);
+              core.setOutput('pr_url', pr.html_url);
+              return;
             }
 
-      - name: Confirm production deploy will trigger
-        run: |
-          echo "Merge into main completed."
-          echo "The existing production deploy workflow is triggered by pushes to main."
+            // Verify staging is ahead of main (fast-fail before opening a PR)
+            try {
+              const { data: compare } = await github.rest.repos.compareCommitsWithBasehead({
+                owner,
+                repo,
+                basehead: 'main...staging',
+              });
+
+              if (compare.ahead_by === 0) {
+                core.setFailed('staging has no new commits ahead of main — nothing to promote.');
+                return;
+              }
+            } catch (error) {
+              core.setFailed(`Could not compare branches: ${error.message}`);
+              return;
+            }
+
+            const { data: pr } = await github.rest.pulls.create({
+              owner,
+              repo,
+              title: 'chore: promote staging to production',
+              head: 'staging',
+              base: 'main',
+              body: [
+                '## Production promotion',
+                '',
+                'This PR was created automatically by the **Promote to Production** workflow.',
+                '',
+                'Merge this PR only after:',
+                '- [ ] All required status checks pass',
+                '- [ ] At least one reviewer has approved',
+                '',
+                '> Merging will trigger the production deploy workflow.',
+              ].join('\n'),
+            });
+
+            core.info(`Promotion PR created: #${pr.number} — ${pr.html_url}`);
+            core.setOutput('pr_url', pr.html_url);
+
+      - name: Print PR URL
+        run: echo "Promotion PR → ${{ steps.*.outputs.pr_url || 'see job log above' }}"
