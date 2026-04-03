@@ -3,7 +3,8 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { Suspense, lazy, useEffect } from "react";
+import { Suspense, lazy, useEffect, Component } from "react";
+import type { ErrorInfo, ReactNode } from "react";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import { AuthProvider } from "@/context/AuthContext";
@@ -41,6 +42,44 @@ const queryClient = new QueryClient({
   },
 });
 
+class ErrorBoundary extends Component<
+  { children: ReactNode },
+  { error: Error | null }
+> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("App render error:", error, info.componentStack);
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex min-h-screen flex-col items-center justify-center bg-background p-6 text-center">
+          <h1 className="mb-2 text-2xl font-bold text-foreground">Something went wrong</h1>
+          <p className="mb-4 text-sm text-muted-foreground">
+            The application encountered an unexpected error.
+          </p>
+          <pre className="mb-6 max-w-xl overflow-auto rounded bg-muted p-4 text-left text-xs text-foreground">
+            {this.state.error.message}
+          </pre>
+          <a href="/" className="text-sm text-primary underline hover:text-primary/80">
+            Reload app
+          </a>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function RouteFallback() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4 text-sm text-muted-foreground">
@@ -60,6 +99,7 @@ const App = () => {
   }, []);
 
   return (
+  <ErrorBoundary>
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
@@ -197,6 +237,7 @@ const App = () => {
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
+  </ErrorBoundary>
   );
 };
 
