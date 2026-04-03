@@ -25,7 +25,18 @@ export default defineConfig(({ mode: _mode }) => ({
             return "supabase-vendor";
           }
 
-          if (id.includes("recharts")) {
+          // React must be in a single shared chunk to avoid duplicate instances.
+          // recharts accesses React internals (__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED)
+          // via react-dom; splitting React across chunks causes a TypeError at runtime.
+          if (
+            id.includes("/node_modules/react/") ||
+            id.includes("/node_modules/react-dom/") ||
+            id.includes("/node_modules/scheduler/")
+          ) {
+            return "react-vendor";
+          }
+
+          if (id.includes("recharts") || id.includes("react-smooth")) {
             return "recharts-vendor";
           }
 
