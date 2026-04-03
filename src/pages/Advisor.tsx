@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { useChat, useChats, useCreateChat, useSendChatMessage, useIntelligenceDigests } from "@/hooks/use-data";
+import { stockSnapshotsApi } from "@/services/stock-snapshots-api";
 import type { IntelligenceDigest } from "@/types/database";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -111,6 +112,14 @@ const Advisor = () => {
       setShowTopics(false);
     }
   }, [currentChat]);
+
+  // Pre-warm the stock cache on page load so the first chat response is faster
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    stockSnapshotsApi.initializeCache().catch(() => {
+      // Cache warm-up is best-effort; errors are non-fatal
+    });
+  }, [isAuthenticated]);
 
   const handleSendMessage = async (content: string): Promise<boolean> => {
     const trimmedContent = content.trim();
