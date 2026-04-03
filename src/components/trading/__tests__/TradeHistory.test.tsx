@@ -78,7 +78,7 @@ describe('TradeHistory', () => {
 
     expect(screen.getByText(/3 closed trades/)).toBeInTheDocument();
     expect(screen.getByText(/2 wins/)).toBeInTheDocument();
-    expect(screen.getByText(/1 losses/)).toBeInTheDocument();
+    expect(screen.getByText(/1 loss/)).toBeInTheDocument();
   });
 
   it('shows total realized P&L', () => {

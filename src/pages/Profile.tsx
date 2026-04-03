@@ -62,12 +62,24 @@ const formatRiskLevel = (riskLevel: string | null | undefined): string => {
   return riskLevel.charAt(0).toUpperCase() + riskLevel.slice(1);
 };
 
+const validateAge = (value: string): string | null => {
+  if (!value.trim()) return null;
+
+  const parsedAge = Number(value);
+  if (!Number.isInteger(parsedAge) || parsedAge < 18 || parsedAge > 150) {
+    return "Age must be between 18 and 150.";
+  }
+
+  return null;
+};
+
 const Profile = () => {
   const { user, userProfile, profileLoading, refreshProfile } = useAuth();
   const [isSaving, setIsSaving] = useState(false);
   const [firstName, setFirstName] = useState(userProfile?.first_name || "");
   const [lastName, setLastName] = useState(userProfile?.last_name || "");
   const [age, setAge] = useState(userProfile?.age?.toString() || "");
+  const [ageError, setAgeError] = useState<string | null>(null);
   const [experienceLevel, setExperienceLevel] = useState(userProfile?.experience_level || "beginner");
   const [riskLevel, setRiskLevel] = useState(userProfile?.risk_level || "mid");
   const [_riskOverride, _setRiskOverride] = useState(false);
@@ -78,6 +90,7 @@ const Profile = () => {
       setFirstName(userProfile.first_name || "");
       setLastName(userProfile.last_name || "");
       setAge(userProfile.age?.toString() || "");
+      setAgeError(null);
       setExperienceLevel(userProfile.experience_level || "beginner");
       setRiskLevel(userProfile.risk_level || "mid");
     }
@@ -89,6 +102,12 @@ const Profile = () => {
 
     setIsSaving(true);
     try {
+      const nextAgeError = validateAge(age);
+      if (nextAgeError) {
+        setAgeError(nextAgeError);
+        return;
+      }
+
       const updates: {
         first_name?: string;
         last_name?: string;
@@ -292,15 +311,22 @@ const Profile = () => {
                     <Input
                       id="age"
                       type="number"
-                      min="13"
+                      min="18"
                       max="150"
                       value={age}
-                      onChange={(e) => setAge(e.target.value)}
+                      onChange={(e) => {
+                        const nextValue = e.target.value;
+                        setAge(nextValue);
+                        setAgeError(validateAge(nextValue));
+                      }}
                       placeholder="Enter your age"
-                      className="h-11 rounded-xl border-border/60 bg-background/70"
+                      className={cn(
+                        "h-11 rounded-xl border-border/60 bg-background/70",
+                        ageError && "border-destructive/60 focus-visible:ring-destructive/40",
+                      )}
                     />
-                    <p className="text-xs text-muted-foreground">
-                      Must be between 13 and 150.
+                    <p className={cn("text-xs", ageError ? "text-destructive" : "text-muted-foreground")}>
+                      {ageError || "Must be between 18 and 150."}
                     </p>
                   </div>
                 </section>

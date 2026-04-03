@@ -27,8 +27,8 @@ import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 
 const Learning = () => {
-  const { data: topics = [], isLoading: topicsLoading } = useLearningTopics();
-  const { data: achievements = [], isLoading: achievementsLoading } = useAchievements();
+  const { data: topics = [], isLoading: topicsLoading, error: topicsError } = useLearningTopics();
+  const { data: achievements = [], isLoading: achievementsLoading, error: achievementsError } = useAchievements();
   const { userProfile } = useAuth();
   const initializeTopics = useInitializeLearningTopics();
   const updateProgress = useUpdateLearningProgress();
@@ -92,6 +92,24 @@ const Learning = () => {
               <div key={i} className="h-16 bg-muted/30 rounded-xl animate-pulse" />
             ))}
           </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (topicsError || achievementsError) {
+    return (
+      <AppLayout title="Learning">
+        <div className="max-w-4xl mx-auto">
+          <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+            <CardContent className="py-16 text-center">
+              <BookOpen className="h-14 w-14 mx-auto mb-4 text-muted-foreground/20" />
+              <h2 className="text-lg font-semibold mb-2">Learning data unavailable</h2>
+              <p className="text-sm text-muted-foreground/70 max-w-md mx-auto">
+                Your curriculum could not be loaded right now. Please try again in a moment.
+              </p>
+            </CardContent>
+          </Card>
         </div>
       </AppLayout>
     );

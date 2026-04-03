@@ -52,7 +52,7 @@ function getPreviewText(chat: ChatWithMessages): string {
 
 const ChatHistory = () => {
   const navigate = useNavigate();
-  const { data: chats = [], isLoading } = useChats();
+  const { data: chats = [], isLoading, error } = useChats();
   const deleteChatMutation = useDeleteChat();
   const updateTitleMutation = useUpdateChatTitle();
 
@@ -108,6 +108,13 @@ const ChatHistory = () => {
 
   const handleOpenChat = (chatId: string) => {
     navigate(`/advisor?chat=${chatId}`);
+  };
+
+  const handleChatKeyDown = (event: React.KeyboardEvent<HTMLElement>, chatId: string) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      handleOpenChat(chatId);
+    }
   };
 
   if (isLoading) {
@@ -208,7 +215,19 @@ const ChatHistory = () => {
           </div>
         </section>
 
-        {chats.length === 0 ? (
+        {error ? (
+          <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/95 shadow-[0_24px_60px_-48px_rgba(15,23,42,0.7)] animate-in fade-in duration-300">
+            <CardContent className="py-16 text-center">
+              <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[20px] bg-muted">
+                <MessageSquare className="h-8 w-8 text-muted-foreground" />
+              </div>
+              <h2 className="text-xl font-semibold text-foreground">History unavailable</h2>
+              <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
+                Conversation history is temporarily unavailable. Start a new chat while we refresh the archive.
+              </p>
+            </CardContent>
+          </Card>
+        ) : chats.length === 0 ? (
           <Card className="overflow-hidden rounded-[28px] border-border/60 bg-card/95 shadow-[0_24px_60px_-48px_rgba(15,23,42,0.7)] animate-in fade-in duration-300">
             <CardContent className="py-16 text-center">
               <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-[20px] bg-primary/10">
@@ -245,12 +264,15 @@ const ChatHistory = () => {
                   {dateChats.map((chat, index) => (
                     <article
                       key={chat.id}
+                      role="button"
+                      tabIndex={0}
                       className={cn(
                         "group rounded-[18px] border border-border/60 bg-card/85 p-4 transition-all duration-200 hover:border-primary/20 hover:bg-card",
                         "animate-in fade-in slide-in-from-bottom-2",
                       )}
                       style={{ animationDelay: `${(groupIndex * 45) + (index * 30)}ms` }}
                       onClick={() => handleOpenChat(chat.id)}
+                      onKeyDown={(event) => handleChatKeyDown(event, chat.id)}
                     >
                       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                         <div className="flex min-w-0 flex-1 items-start gap-3">

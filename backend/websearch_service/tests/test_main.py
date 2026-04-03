@@ -8,11 +8,11 @@ def test_health_check(client: TestClient):
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
-    assert data["status"] == "healthy"
+    assert data["status"] == "ok"
     assert "timestamp" in data
-    assert "uptime_seconds" in data
-    assert data["version"] == "test-version"
-    assert data["environment"] == "test"
+    assert "services" in data
+    assert "supabase" in data["services"]
+    assert "openai" in data["services"]
 
 
 def test_liveness_check(client: TestClient):

@@ -15,6 +15,7 @@ import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { cn } from "@/lib/utils";
 import { rebuildPaperTradingState } from "@/services/paper-trading-sync";
+import { AnalyticsEvents } from "@/services/analytics";
 import type { OpenPosition, TradeJournalEntry } from "@/types/database";
 
 interface JournalFormData {
@@ -199,6 +200,17 @@ export function TradeJournal(props: TradeJournalProps) {
 
       await rebuildPaperTradingState(userId, [...journalEntries, createdEntry]);
       await refreshTradingQueries();
+      AnalyticsEvents.tradeExecuted(normalizedEntry.type, normalizedEntry.symbol, {
+        quantity: normalizedEntry.quantity,
+        price: normalizedEntry.price,
+        has_strategy: Boolean(normalizedEntry.strategy),
+        has_notes: Boolean(normalizedEntry.notes),
+        tag_count: normalizedEntry.tags?.length ?? 0,
+      });
+      AnalyticsEvents.tradeJournalEntry({
+        action: normalizedEntry.type,
+        symbol: normalizedEntry.symbol,
+      });
 
       clearPartialFingerprint(submissionFingerprint);
 

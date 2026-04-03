@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 import { getPythonApiUrl } from '@/lib/env';
 import { apiClient } from '@/lib/api-client';
-import type { PostgrestFilterBuilder } from '@supabase/postgrest-js';
+import { createStockSnapshotsApi, type StockSnapshotQuery } from '@/services/stock-cache';
 import type {
   NewsArticle,
   StockSnapshot,
@@ -182,35 +182,6 @@ async function performWebSearch(query: string, maxResults: number = 5): Promise<
   }
 }
 
-/**
- * Format web search results for inclusion in AI context.
- */
-function formatSearchResultsForAI(searchResponse: WebSearchResponse, intentType: 'news' | 'general'): string {
-  if (!searchResponse.results || searchResponse.results.length === 0) {
-    return '';
-  }
-
-  let context = '\n\n=== WEB SEARCH RESULTS ===\n';
-  context += `Search Query: "${searchResponse.query}"\n`;
-  context += `Results Found: ${searchResponse.results.length}\n\n`;
-
-  if (intentType === 'news') {
-    context += 'NEWS FROM WEB:\n';
-  } else {
-    context += 'SEARCH RESULTS:\n';
-  }
-
-  searchResponse.results.forEach((result, index) => {
-    context += `\n[${index + 1}] ${result.title}\n`;
-    context += `    ${result.snippet}\n`;
-    context += `    Source: ${result.url}\n`;
-  });
-
-  context += '\n=== END WEB SEARCH RESULTS ===\n';
-  context += 'IMPORTANT: Use the web search results above to answer the user\'s question. Cite sources when appropriate.\n';
-
-  return context;
-}
 
 export { portfolioApi, positionsApi, tradesApi, journalApi } from '@/services/trading-api';
 
@@ -329,327 +300,10 @@ export const newsApi = {
 };
 
 
-// === STOCK SNAPSHOT CACHE ===
-// In-memory cache to reduce database queries
-// Stores tickers 1-60 and refreshes every 5 minutes
-interface CacheEntry<T> {
-  data: T;
-  timestamp: number;
-}
-
-const stockCache = {
-  // Cache for individual tickers: { 'AAPL': { data: StockSnapshot, timestamp: 123456 } }
-  tickers: new Map<string, CacheEntry<StockSnapshot>>(),
-  // Cache for company name lookups (lowercase key)
-  companyNames: new Map<string, CacheEntry<StockSnapshot | null>>(),
-  // Cache for the main stock list (first 60 tickers)
-  mainList: null as CacheEntry<StockSnapshot[]> | null,
-  // Whether initial load has been done
-  initialized: false,
-  // Cache TTL in milliseconds (5 minutes)
-  TTL_MS: 5 * 60 * 1000,
-  // Number of stocks to pre-cache
-  PRELOAD_COUNT: 60,
-
-  isExpired(timestamp: number): boolean {
-    return Date.now() - timestamp > this.TTL_MS;
-  },
-
-  getTicker(ticker: string): StockSnapshot | null {
-    const entry = this.tickers.get(ticker.toUpperCase());
-    if (entry && !this.isExpired(entry.timestamp)) {
-      console.log('[Cache] Hit for ticker:', ticker);
-      return entry.data;
-    }
-    return null;
-  },
-
-  setTicker(ticker: string, data: StockSnapshot): void {
-    this.tickers.set(ticker.toUpperCase(), { data, timestamp: Date.now() });
-  },
-
-  getCompanyName(name: string): StockSnapshot | null | undefined {
-    const entry = this.companyNames.get(name.toLowerCase());
-    if (entry && !this.isExpired(entry.timestamp)) {
-      console.log('[Cache] Hit for company name:', name);
-      return entry.data;
-    }
-    return undefined; // undefined means not in cache, null means cached as "not found"
-  },
-
-  setCompanyName(name: string, data: StockSnapshot | null): void {
-    this.companyNames.set(name.toLowerCase(), { data, timestamp: Date.now() });
-  },
-
-  getMainList(): StockSnapshot[] | null {
-    if (this.mainList && !this.isExpired(this.mainList.timestamp)) {
-      console.log('[Cache] Hit for main stock list');
-      return this.mainList.data;
-    }
-    return null;
-  },
-
-  setMainList(data: StockSnapshot[]): void {
-    this.mainList = { data, timestamp: Date.now() };
-    // Also populate individual ticker cache from the list
-    data.forEach(snap => {
-      this.tickers.set(snap.ticker.toUpperCase(), { data: snap, timestamp: Date.now() });
-      if (snap.company_name) {
-        // Cache by company name too (lowercase for case-insensitive lookup)
-        this.companyNames.set(snap.company_name.toLowerCase(), { data: snap, timestamp: Date.now() });
-      }
-    });
-    console.log('[Cache] Stored', data.length, 'stocks in cache');
-  },
-
-  clear(): void {
-    this.tickers.clear();
-    this.companyNames.clear();
-    this.mainList = null;
-    this.initialized = false;
-    console.log('[Cache] Cleared');
-  },
-
-  getStats(): { tickers: number; companyNames: number; hasMainList: boolean; initialized: boolean } {
-    return {
-      tickers: this.tickers.size,
-      companyNames: this.companyNames.size,
-      hasMainList: this.mainList !== null,
-      initialized: this.initialized,
-    };
-  },
-};
-
-type StockSnapshotQuery = PostgrestFilterBuilder<
-  Database['market']['Tables']['stock_snapshots']['Row'],
-  Database['market']['Tables']['stock_snapshots']['Row'],
-  StockSnapshot[],
-  'stock_snapshots',
-  unknown
->;
-
 const fromStockSnapshots = () => supabase.schema('market').from('stock_snapshots') as StockSnapshotQuery;
 
-const runStockSnapshotsQuery = (buildQuery: (query: StockSnapshotQuery) => StockSnapshotQuery) =>
-  buildQuery(fromStockSnapshots());
-
 // Stock Snapshots API - Read financial data from database (with caching)
-export const stockSnapshotsApi = {
-  // Initialize cache by pre-loading first 60 stocks
-  async initializeCache(): Promise<void> {
-    if (stockCache.initialized && stockCache.mainList && !stockCache.isExpired(stockCache.mainList.timestamp)) {
-      console.log('[Cache] Already initialized and valid');
-      return;
-    }
-
-    console.log('[Cache] Initializing - loading first', stockCache.PRELOAD_COUNT, 'stocks...');
-
-    const { data, error } = await runStockSnapshotsQuery(query =>
-      query
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .limit(stockCache.PRELOAD_COUNT)
-    );
-
-    if (error) {
-      console.error('[Cache] Failed to initialize:', error);
-      throw error;
-    }
-
-    stockCache.setMainList(data || []);
-    stockCache.initialized = true;
-    console.log('[Cache] Initialization complete -', data?.length || 0, 'stocks cached');
-  },
-
-  // Get cache statistics
-  getCacheStats() {
-    return stockCache.getStats();
-  },
-
-  // Clear the cache (useful for forcing refresh)
-  clearCache(): void {
-    stockCache.clear();
-  },
-
-  // Get all stock snapshots (with caching)
-  async getAll(limit?: number): Promise<StockSnapshot[]> {
-    // Check cache first
-    const cached = stockCache.getMainList();
-    if (cached) {
-      return limit ? cached.slice(0, limit) : cached;
-    }
-
-    // Cache miss - fetch from database
-    console.log('[Cache] Miss for main list - fetching from database');
-    // Fetch at least PRELOAD_COUNT to populate cache, or more if requested
-    const fetchLimit = Math.max(limit || 0, stockCache.PRELOAD_COUNT);
-
-    const { data, error } = await runStockSnapshotsQuery(query =>
-      query
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .limit(fetchLimit)
-    );
-    if (error) throw error;
-
-    const result = data || [];
-    stockCache.setMainList(result);
-
-    return limit ? result.slice(0, limit) : result;
-  },
-
-  // Get stock snapshot by ticker symbol (with caching)
-  async getByTicker(ticker: string): Promise<StockSnapshot | null> {
-    // Check cache first
-    const cached = stockCache.getTicker(ticker);
-    if (cached) {
-      return cached;
-    }
-
-    // Cache miss - fetch from database
-    console.log('[Cache] Miss for ticker:', ticker, '- fetching from database');
-    const { data, error } = await runStockSnapshotsQuery(query =>
-      query
-        .select('*')
-        .eq('ticker', ticker.toUpperCase())
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    );
-
-    if (error) throw error;
-
-    if (data) {
-      stockCache.setTicker(ticker, data);
-    }
-    return data;
-  },
-
-  // Get stock snapshot by company name (with caching)
-  async getByCompanyName(companyName: string): Promise<StockSnapshot | null> {
-    // Check cache first
-    const cached = stockCache.getCompanyName(companyName);
-    if (cached !== undefined) {
-      return cached; // Could be null (meaning "not found" is cached)
-    }
-
-    // Cache miss - fetch from database
-    console.log('[Cache] Miss for company name:', companyName, '- fetching from database');
-    const { data, error } = await runStockSnapshotsQuery(query =>
-      query
-        .select('*')
-        .ilike('company_name', `%${companyName}%`)
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-    );
-
-    if (error) {
-      throw error;
-    }
-
-    // Cache the "not found" result too
-    if (!data) {
-      stockCache.setCompanyName(companyName, null);
-      return null;
-    }
-
-    stockCache.setCompanyName(companyName, data);
-    stockCache.setTicker(data.ticker, data); // Also cache by ticker
-    return data;
-  },
-
-  // Get stock snapshots by multiple tickers (with caching)
-  async getByTickers(tickers: string[]): Promise<StockSnapshot[]> {
-    const results: StockSnapshot[] = [];
-    const tickersToFetch: string[] = [];
-
-    // Check cache for each ticker
-    for (const ticker of tickers) {
-      const cached = stockCache.getTicker(ticker);
-      if (cached) {
-        results.push(cached);
-      } else {
-        tickersToFetch.push(ticker.toUpperCase());
-      }
-    }
-
-    // If all found in cache, return
-    if (tickersToFetch.length === 0) {
-      console.log('[Cache] All', tickers.length, 'tickers found in cache');
-      return results;
-    }
-
-    // Fetch missing tickers from database
-    console.log('[Cache] Fetching', tickersToFetch.length, 'missing tickers from database');
-    const { data, error } = await runStockSnapshotsQuery(query =>
-      query
-        .select('*')
-        .in('ticker', tickersToFetch)
-        .order('updated_at', { ascending: false })
-    );
-
-    if (error) throw error;
-
-    // Cache and add to results
-    if (data) {
-      data.forEach(snap => {
-        stockCache.setTicker(snap.ticker, snap);
-        results.push(snap);
-      });
-    }
-
-    return results;
-  },
-
-  // Get stock snapshots with signals (with caching for individual results)
-  async getWithSignals(limit?: number): Promise<StockSnapshot[]> {
-    // This query is dynamic (filtered by signal), so we fetch fresh but cache results
-    const { data, error } = await runStockSnapshotsQuery(query => {
-      let filteredQuery = query
-        .select('*')
-        .not('latest_signal', 'is', null)
-        .order('signal_timestamp', { ascending: false });
-
-      if (limit) {
-        filteredQuery = filteredQuery.limit(limit);
-      }
-
-      return filteredQuery;
-    });
-    if (error) throw error;
-
-    // Cache individual results
-    if (data) {
-      data.forEach(snap => {
-        stockCache.setTicker(snap.ticker, snap);
-      });
-    }
-
-    return data || [];
-  },
-
-  // Get recently updated stock snapshots
-  async getRecentlyUpdated(hours: number = 24, limit?: number): Promise<StockSnapshot[]> {
-    const cutoffTime = new Date();
-    cutoffTime.setHours(cutoffTime.getHours() - hours);
-
-    const { data, error } = await runStockSnapshotsQuery(query => {
-      let filteredQuery = query
-        .select('*')
-        .gte('updated_at', cutoffTime.toISOString())
-        .order('updated_at', { ascending: false });
-
-      if (limit) {
-        filteredQuery = filteredQuery.limit(limit);
-      }
-
-      return filteredQuery;
-    });
-    if (error) throw error;
-    return data || [];
-  },
-};
+export const stockSnapshotsApi = createStockSnapshotsApi(fromStockSnapshots);
 
 // ============================================================
 // Stock Ranking System
@@ -710,52 +364,43 @@ export interface StockScore {
   data_fresh: boolean;
 }
 
-export type Horizon = 'short' | 'long' | 'balanced';
-
 export interface TopStocksOptions {
   limit?: number;
   minScore?: number;
-  horizon?: Horizon;
 }
 
 export interface TopStocksResult {
   stocks: StockScore[];
-  hasStaleData: boolean;
-  hasMlData: boolean;
   totalScored: number;
-  horizon: Horizon;
+  lastRankedAt: string | null;
+  dataAgeHours: number | null;
 }
 
 // Calls GET /api/stocks/ranking on the Python backend.
-// The backend queries Supabase directly, scores all stocks server-side,
-// caches results for 10 min per horizon, and returns only the top-N ranked stocks.
+// The backend returns the current pre-computed daily ranking from market.trending_stocks.
 export const stockRankingApi = {
-  async getRanking(options: TopStocksOptions = {}, source?: string): Promise<TopStocksResult> {
-    const { limit = 20, minScore = 0, horizon = 'balanced' } = options;
+  async getRanking(options: TopStocksOptions = {}): Promise<TopStocksResult> {
+    const { limit = 20, minScore = 0 } = options;
     const backendUrl = getPythonApiUrl();
 
     const params = new URLSearchParams({
       limit: String(limit),
       min_score: String(minScore),
-      horizon,
     });
-    if (source) params.append('source', source);
 
     try {
       const data = await apiClient.get<{
         stocks: StockScore[];
-        has_stale_data: boolean;
-        has_ml_data: boolean;
-        total_scored: number;
-        horizon: Horizon;
+        total: number;
+        last_ranked_at: string | null;
+        data_age_hours: number | null;
       }>(`/api/stocks/ranking?${params}`);
 
       return {
         stocks: data.stocks,
-        hasStaleData: data.has_stale_data,
-        hasMlData: data.has_ml_data,
-        totalScored: data.total_scored,
-        horizon: data.horizon,
+        totalScored: data.total,
+        lastRankedAt: data.last_ranked_at,
+        dataAgeHours: data.data_age_hours,
       };
     } catch (error) {
       // Network or CSP error — log and re-throw with a clearer message
@@ -772,19 +417,20 @@ export const stockRankingApi = {
 type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 
 
-// Generate system prompt based on user's experience level
-// Note: experienceLevel can be null, which defaults to intermediate level
+// NOTE: System prompt assembly has moved to the backend (ai_proxy.py).
+// The backend builds the full IRIS prompt from experience_level, session_type, and raw context.
+// This stub is retained only to avoid breaking any residual callers; it is not used in new code.
 function getSystemPrompt(experienceLevel: ExperienceLevel, hasEyeData: boolean = false): string {
   // Default to intermediate if null
   const level = experienceLevel ?? 'intermediate';
 
   const baseRules = `
 IDENTITY:
-You are the AI behind The Eye — a proprietary financial intelligence platform. You are NOT a generic chatbot. You have real-time market data, signals, and analysis at your fingertips. Speak with that authority.
+You are the AI behind The Eye, a financial research platform. You are not a generic chatbot. Speak with clarity and analytical discipline.
 
 PERSONALITY:
 - Be direct. Say what you actually think. Don't hedge everything into meaninglessness.
-- When you have a view, own it: "I'd lean bullish here because..." not "It could potentially go either way."
+- When you have a view, frame it as analysis: "The case looks stronger because..." not "You should buy this."
 - Show your reasoning on complex questions. Walk through the logic — what the data says, what it implies, and what you'd do.
 - Challenge weak assumptions. If someone's thesis has holes, point them out.
 - Be human. Conversational tone, occasional dry wit. Never sound like a compliance form.
@@ -802,8 +448,9 @@ TOPIC RULES:
 - ONLY discuss finance, investing, trading, economics, personal finance, and money management.
 - Exception: you may answer real-world price/cost questions (e.g. "how much is a boat").
 - For unrelated topics, redirect with personality — not a cold refusal.
-- You MAY provide specific, actionable financial views (buy/sell/hold) when asked.
-- When giving actionable advice, include this exact one-line disclaimer once: "Test mode only. Not financial advice."
+- Do not tell users what they personally should buy, sell, or allocate.
+- You may explain analytical scenarios, trade-offs, and decision frameworks.
+- When using directional language, clearly label it as educational analysis and remind the user it is not personalised investment advice.
 
 WEB SEARCH (for NEWS and GENERAL KNOWLEDGE):
 - When web search results are provided, use them naturally. Cite sources.
@@ -816,13 +463,13 @@ THE EYE TRADE ENGINE (CONNECTED):
 - You have LIVE access to The Eye trade engine. The data below is REAL and CURRENT.
 - When answering about stocks, signals, prices, or market data — USE the data. It's yours.
 - Reference The Eye naturally: "The Eye is showing..." or "Looking at The Eye's data..."
-- Be confident. You HAVE the data. NEVER say "I don't have access" — because you do.
+- Be confident about the data you actually have. Do not overclaim certainty.
 - Connect data points when reasoning: "RSI at 72 combined with the volume spike suggests..."
 ` : `
 THE EYE TRADE ENGINE (NOT CONNECTED):
 - The Eye trade engine isn't connected right now.
-- For live prices, signals, or market data — let the user know The Eye is offline.
-- You can still reason about finance, use web search for news, and give general analysis.
+- For live prices, signals, or market data, say clearly that The Eye is offline.
+- You can still reason about finance, use web search for news, and give general educational analysis.
 `;
 
   const allRules = baseRules + eyeRules;
@@ -1057,9 +704,6 @@ export const pythonApi = {
       console.log('[AI] Skipping database query - not a stock-related question');
     }
 
-    const hasStockSnapshotsData = stockSnapshotsData.length > 0 || !!specificTickerSnapshot;
-    const hasAnyFinancialData = hasTradeEngineData || hasStockSnapshotsData;
-
     // Fetch recent news from Supabase news table for AI context, sorted by importance
     let supabaseNewsData: NewsArticle[] = [];
     try {
@@ -1071,530 +715,28 @@ export const pythonApi = {
       console.log('[AI] Supabase news fetch failed, continuing without news data:', error);
     }
 
-    const systemPrompt = getSystemPrompt(experienceLevel ?? null, hasAnyFinancialData);
-
-    // Build The Eye data context from LIVE Trade Engine connection AND database snapshots
-    let eyeDataContext = '';
-
-    if (hasTradeEngineData && tradeEngineContext) {
-      // Use the same ticker extraction logic as above (requestedTicker already extracted at the top)
-      // No need to re-extract - the requestedTicker variable from above is already available
-
-      // Find requested ticker in snapshots if mentioned
-      let requestedTickerSnapshot = null;
-      let requestedTickerSignal = null;
-      let isTickerTracked = false;
-
-      if (requestedTicker) {
-        // Check if ticker is tracked
-        isTickerTracked = tradeEngineContext.tracked_tickers.includes(requestedTicker);
-
-        // Find in snapshots
-        requestedTickerSnapshot = tradeEngineContext.ticker_snapshots.find(
-          snap => snap.ticker.toUpperCase() === requestedTicker
-        );
-
-        // Fallback: find in signals if not in snapshots
-        if (!requestedTickerSnapshot) {
-          requestedTickerSignal = tradeEngineContext.recent_signals.find(
-            sig => sig.ticker.toUpperCase() === requestedTicker
-          );
-        }
-      }
-
-      // Helper function to format number with null handling
-      const fmt = (val: number | null, decimals: number = 2, prefix: string = '', suffix: string = ''): string => {
-        if (val === null || val === undefined) return 'N/A';
-        return `${prefix}${val.toFixed(decimals)}${suffix}`;
-      };
-
-      // Helper function to format percentage
-      const fmtPct = (val: number | null): string => {
-        if (val === null || val === undefined) return 'N/A';
-        return `${val >= 0 ? '+' : ''}${val.toFixed(2)}%`;
-      };
-
-      eyeDataContext = '\n\n=== THE EYE TRADE ENGINE - LIVE DATABASE ACCESS ===\n';
-      eyeDataContext += `Data Generated: ${new Date(tradeEngineContext.generated_at).toLocaleString()}\n\n`;
-
-      // Engine Status
-      eyeDataContext += `Engine Status: ${tradeEngineContext.engine_status.is_running ? '🟢 RUNNING' : '🔴 STOPPED'}\n`;
-      if (tradeEngineContext.engine_status.last_price_tick) {
-        eyeDataContext += `Last Price Update: ${new Date(tradeEngineContext.engine_status.last_price_tick).toLocaleString()}\n`;
-      }
-      eyeDataContext += `Total Ticks Processed: ${tradeEngineContext.engine_status.total_ticks_processed.toLocaleString()}\n`;
-      eyeDataContext += `Total News Fetched: ${tradeEngineContext.engine_status.total_news_fetched.toLocaleString()}\n`;
-
-      // ============================================
-      // TIER 1: REQUESTED TICKER (FULL DETAIL)
-      // ============================================
-      if (requestedTicker && requestedTickerSnapshot) {
-        const snap = requestedTickerSnapshot;
-        const companyName = snap.company_name || snap.ticker;
-
-        eyeDataContext += `\n--- ${snap.ticker} DETAILED ANALYSIS (${companyName}) ---\n`;
-
-        // Price Data
-        eyeDataContext += `Price: ${fmt(snap.last_price, 2, '$')}`;
-        if (snap.price_change_pct !== null) {
-          eyeDataContext += ` (${fmtPct(snap.price_change_pct)})`;
-          if (snap.price_change_abs !== null) {
-            eyeDataContext += `, ${fmt(snap.price_change_abs, 2, '$')}`;
-          }
-        }
-        eyeDataContext += '\n';
-
-        if (snap.high_52w !== null || snap.low_52w !== null) {
-          eyeDataContext += `52W Range: ${fmt(snap.low_52w, 2, '$')} - ${fmt(snap.high_52w, 2, '$')}\n`;
-        }
-
-        // Volume
-        if (snap.volume !== null || snap.volume_ratio !== null) {
-          const volStr = snap.volume ? `${(snap.volume / 1000000).toFixed(1)}M` : 'N/A';
-          const volRatioStr = snap.volume_ratio ? `${snap.volume_ratio.toFixed(1)}x avg` : '';
-          eyeDataContext += `Volume: ${volStr}${volRatioStr ? ` (${volRatioStr})` : ''}`;
-          if (snap.volume_ratio && snap.volume_ratio > 1.5) {
-            eyeDataContext += ' ← Unusual volume activity';
-          }
-          eyeDataContext += '\n';
-        }
-
-        // Moving Averages
-        const hasSMA = snap.sma_10 !== null || snap.sma_20 !== null || snap.sma_50 !== null || snap.sma_100 !== null || snap.sma_200 !== null;
-        const hasEMA = snap.ema_10 !== null || snap.ema_20 !== null || snap.ema_50 !== null || snap.ema_200 !== null;
-
-        if (hasSMA || hasEMA) {
-          eyeDataContext += '\nMoving Averages:\n';
-          if (hasSMA) {
-            const smaParts: string[] = [];
-            if (snap.sma_10 !== null) smaParts.push(`SMA 10: ${fmt(snap.sma_10, 2, '$')}`);
-            if (snap.sma_20 !== null) smaParts.push(`SMA 20: ${fmt(snap.sma_20, 2, '$')}`);
-            if (snap.sma_50 !== null) smaParts.push(`SMA 50: ${fmt(snap.sma_50, 2, '$')}`);
-            if (snap.sma_100 !== null) smaParts.push(`SMA 100: ${fmt(snap.sma_100, 2, '$')}`);
-            if (snap.sma_200 !== null) smaParts.push(`SMA 200: ${fmt(snap.sma_200, 2, '$')}`);
-            if (smaParts.length > 0) eyeDataContext += `  ${smaParts.join(' | ')}\n`;
-          }
-          if (hasEMA) {
-            const emaParts: string[] = [];
-            if (snap.ema_10 !== null) emaParts.push(`EMA 10: ${fmt(snap.ema_10, 2, '$')}`);
-            if (snap.ema_20 !== null) emaParts.push(`EMA 20: ${fmt(snap.ema_20, 2, '$')}`);
-            if (snap.ema_50 !== null) emaParts.push(`EMA 50: ${fmt(snap.ema_50, 2, '$')}`);
-            if (snap.ema_200 !== null) emaParts.push(`EMA 200: ${fmt(snap.ema_200, 2, '$')}`);
-            if (emaParts.length > 0) eyeDataContext += `  ${emaParts.join(' | ')}\n`;
-          }
-
-          // Price Position
-          const positionParts: string[] = [];
-          if (snap.price_vs_sma_50 !== null) positionParts.push(`${fmtPct(snap.price_vs_sma_50)} above SMA 50`);
-          if (snap.price_vs_sma_200 !== null) {
-            positionParts.push(`${fmtPct(snap.price_vs_sma_200)} above SMA 200`);
-            if (snap.is_bullish) positionParts.push('(BULLISH trend)');
-          }
-          if (positionParts.length > 0) {
-            eyeDataContext += `  Price Position: ${positionParts.join(', ')}\n`;
-          }
-        }
-
-        // Momentum Indicators
-        const hasMomentum = snap.rsi_14 !== null || snap.rsi_9 !== null || snap.macd !== null ||
-                           snap.stochastic_k !== null || snap.williams_r !== null || snap.cci !== null;
-        if (hasMomentum) {
-          eyeDataContext += '\nMomentum:\n';
-          if (snap.rsi_14 !== null) {
-            const rsiStatus = snap.rsi_14 < 30 ? 'oversold' : snap.rsi_14 > 70 ? 'overbought' : 'neutral, not overbought';
-            eyeDataContext += `  RSI(14): ${fmt(snap.rsi_14, 1)} (${rsiStatus})\n`;
-          }
-          if (snap.rsi_9 !== null) eyeDataContext += `  RSI(9): ${fmt(snap.rsi_9, 1)} (short-term momentum)\n`;
-          if (snap.macd !== null || snap.macd_signal !== null || snap.macd_histogram !== null) {
-            const macdParts: string[] = [];
-            if (snap.macd !== null) macdParts.push(`MACD: ${fmt(snap.macd, 2)}`);
-            if (snap.macd_signal !== null) macdParts.push(`Signal: ${fmt(snap.macd_signal, 2)}`);
-            if (snap.macd_histogram !== null) {
-              const histStatus = snap.macd_histogram > 0 ? 'positive, bullish momentum' : 'negative';
-              macdParts.push(`Hist: ${fmt(snap.macd_histogram, 2)} (${histStatus})`);
-            }
-            if (macdParts.length > 0) eyeDataContext += `  ${macdParts.join(' | ')}\n`;
-          }
-          if (snap.stochastic_k !== null || snap.stochastic_d !== null) {
-            eyeDataContext += `  Stochastic: K=${fmt(snap.stochastic_k, 1)}, D=${fmt(snap.stochastic_d, 1)}\n`;
-          }
-          if (snap.williams_r !== null) eyeDataContext += `  Williams %R: ${fmt(snap.williams_r, 1)}\n`;
-          if (snap.cci !== null) eyeDataContext += `  CCI: ${fmt(snap.cci, 1)}\n`;
-        }
-
-        // Volatility Indicators
-        if (snap.bollinger_upper !== null || snap.bollinger_middle !== null || snap.bollinger_lower !== null || snap.atr !== null) {
-          eyeDataContext += '\nVolatility:\n';
-          if (snap.bollinger_upper !== null || snap.bollinger_middle !== null || snap.bollinger_lower !== null) {
-            eyeDataContext += `  Bollinger: Upper ${fmt(snap.bollinger_upper, 2, '$')} | Middle ${fmt(snap.bollinger_middle, 2, '$')} | Lower ${fmt(snap.bollinger_lower, 2, '$')}\n`;
-            if (snap.last_price !== null && snap.bollinger_middle !== null) {
-              const dist = ((snap.last_price - snap.bollinger_middle) / snap.bollinger_middle) * 100;
-              if (Math.abs(dist) < 2) eyeDataContext += '  Price is near middle band (normal volatility)\n';
-              else if (dist > 0) eyeDataContext += '  Price is above middle band\n';
-              else eyeDataContext += '  Price is below middle band\n';
-            }
-          }
-          if (snap.atr !== null) eyeDataContext += `  ATR: ${fmt(snap.atr, 2, '$')} (volatility measure)\n`;
-        }
-
-        // Trend Indicators
-        if (snap.adx !== null) {
-          eyeDataContext += '\nTrend:\n';
-          const trendStrength = snap.adx > 25 ? 'strong trend' : 'weak trend';
-          eyeDataContext += `  ADX: ${fmt(snap.adx, 1)} (${trendStrength})\n`;
-        }
-
-        // Fundamental Data
-        const hasFundamentals = snap.pe_ratio !== null || snap.forward_pe !== null || snap.peg_ratio !== null ||
-                               snap.price_to_book !== null || snap.price_to_sales !== null || snap.dividend_yield !== null ||
-                               snap.market_cap !== null || snap.eps !== null || snap.eps_growth !== null || snap.revenue_growth !== null;
-        if (hasFundamentals) {
-          eyeDataContext += '\nFundamentals:\n';
-          if (snap.pe_ratio !== null) {
-            const peNote = snap.pe_ratio < 20 ? ' (reasonable)' : snap.pe_ratio < 30 ? ' (moderate)' : ' (high)';
-            eyeDataContext += `  P/E: ${fmt(snap.pe_ratio, 1)}${peNote}\n`;
-          }
-          if (snap.forward_pe !== null) eyeDataContext += `  Forward P/E: ${fmt(snap.forward_pe, 1)}${snap.forward_pe < snap.pe_ratio ? ' (improving)' : ''}\n`;
-          if (snap.peg_ratio !== null) eyeDataContext += `  PEG: ${fmt(snap.peg_ratio, 2)}\n`;
-          if (snap.price_to_book !== null) eyeDataContext += `  P/B: ${fmt(snap.price_to_book, 1)}\n`;
-          if (snap.price_to_sales !== null) eyeDataContext += `  P/S: ${fmt(snap.price_to_sales, 1)}\n`;
-          if (snap.dividend_yield !== null) eyeDataContext += `  Dividend Yield: ${fmt(snap.dividend_yield, 2)}%\n`;
-          if (snap.market_cap !== null) {
-            const capStr = snap.market_cap >= 1e12 ? `${(snap.market_cap / 1e12).toFixed(1)}T` :
-                          snap.market_cap >= 1e9 ? `${(snap.market_cap / 1e9).toFixed(1)}B` :
-                          snap.market_cap >= 1e6 ? `${(snap.market_cap / 1e6).toFixed(1)}M` : `${snap.market_cap.toFixed(0)}`;
-            eyeDataContext += `  Market Cap: $${capStr}\n`;
-          }
-          if (snap.eps !== null) eyeDataContext += `  EPS: ${fmt(snap.eps, 2, '$')}\n`;
-          if (snap.eps_growth !== null) eyeDataContext += `  EPS Growth: ${fmt(snap.eps_growth, 1)}%\n`;
-          if (snap.revenue_growth !== null) eyeDataContext += `  Revenue Growth: ${fmt(snap.revenue_growth, 1)}%\n`;
-        }
-
-        // Signal
-        if (snap.latest_signal) {
-          const confStr = snap.signal_confidence ? `${(snap.signal_confidence * 100).toFixed(0)}%` : 'N/A';
-          const timeStr = snap.signal_timestamp ? new Date(snap.signal_timestamp).toLocaleString() : 'N/A';
-          eyeDataContext += `\nSignal: ${snap.latest_signal}${snap.signal_strategy ? ` (${snap.signal_strategy})` : ''}, ${confStr} confidence @ ${timeStr}\n`;
-        }
-      } else if (requestedTicker && isTickerTracked) {
-        // Tracked but no snapshot
-        eyeDataContext += `\n--- ${requestedTicker} STATUS ---\n`;
-        eyeDataContext += `${requestedTicker}: TRACKED (no current snapshot data)\n`;
-        if (requestedTickerSignal) {
-          eyeDataContext += `Recent Signal: ${requestedTickerSignal.signal} (${requestedTickerSignal.strategy}) @ ${new Date(requestedTickerSignal.timestamp).toLocaleString()}\n`;
-        }
-      }
-
-      // ============================================
-      // TIER 2: TOP 50 ACTIVE TICKERS (COMPACT)
-      // ============================================
-      if (tradeEngineContext.ticker_snapshots.length > 0) {
-        // Sort by volume (descending), then filter out requested ticker if shown
-        const otherSnapshots = requestedTickerSnapshot
-          ? tradeEngineContext.ticker_snapshots.filter(snap => snap.ticker.toUpperCase() !== requestedTicker)
-          : tradeEngineContext.ticker_snapshots;
-
-        // Sort by volume ratio or volume, then take top 50
-        const sortedByVolume = [...otherSnapshots].sort((a, b) => {
-          const volA = a.volume_ratio || (a.volume || 0);
-          const volB = b.volume_ratio || (b.volume || 0);
-          return volB - volA;
-        });
-
-        const top50 = sortedByVolume.slice(0, 50);
-
-        if (top50.length > 0) {
-          eyeDataContext += `\n--- TOP ${top50.length} ACTIVE TICKERS (by volume) ---\n`;
-          top50.forEach(snap => {
-            const priceStr = snap.last_price ? `$${snap.last_price.toFixed(2)}` : 'N/A';
-            const volStr = snap.volume ? `${(snap.volume / 1000000).toFixed(1)}M` : 'N/A';
-            const volRatioStr = snap.volume_ratio ? `(${snap.volume_ratio.toFixed(1)}x)` : '';
-            const rsiStr = snap.rsi_14 !== null ? snap.rsi_14.toFixed(0) : 'N/A';
-            const peStr = snap.pe_ratio !== null ? snap.pe_ratio.toFixed(1) : 'N/A';
-            const signalStr = snap.latest_signal || 'N/A';
-            eyeDataContext += `${snap.ticker.padEnd(6)}: ${priceStr.padStart(10)} | Vol: ${volStr.padStart(8)} ${volRatioStr.padStart(8)} | RSI: ${rsiStr.padStart(3)} | P/E: ${peStr.padStart(5)} | Signal: ${signalStr}\n`;
-          });
-        }
-      }
-
-      // ============================================
-      // TIER 3: ALL TICKERS WITH SIGNALS
-      // ============================================
-      const tickersWithSignals = tradeEngineContext.ticker_snapshots.filter(snap => snap.latest_signal && snap.latest_signal !== 'HOLD');
-      if (tickersWithSignals.length > 0) {
-        eyeDataContext += `\n--- ALL TICKERS WITH ACTIVE SIGNALS (${tickersWithSignals.length}) ---\n`;
-        tickersWithSignals.forEach(snap => {
-          const confStr = snap.signal_confidence ? `${(snap.signal_confidence * 100).toFixed(0)}%` : 'N/A';
-          const priceStr = snap.last_price ? `$${snap.last_price.toFixed(2)}` : 'N/A';
-          const rsiStr = snap.rsi_14 !== null ? snap.rsi_14.toFixed(0) : 'N/A';
-          const peStr = snap.pe_ratio !== null ? snap.pe_ratio.toFixed(1) : 'N/A';
-          const strategyStr = snap.signal_strategy || 'N/A';
-          eyeDataContext += `${snap.ticker.padEnd(6)}: ${snap.latest_signal.padEnd(11)} | Conf: ${confStr.padStart(4)} | Price: ${priceStr.padStart(10)} | RSI: ${rsiStr.padStart(3)} | P/E: ${peStr.padStart(5)} | Strategy: ${strategyStr}\n`;
-        });
-      }
-
-      // ============================================
-      // TIER 4: MARKET SUMMARY (AGGREGATED)
-      // ============================================
-      eyeDataContext += `\n--- MARKET SUMMARY (ALL ${tradeEngineContext.summary.total_tracked_tickers} TRACKED TICKERS) ---\n`;
-
-      // Coverage
-      eyeDataContext += 'Coverage:\n';
-      eyeDataContext += `  Tickers with price data: ${tradeEngineContext.summary.tickers_with_data}/${tradeEngineContext.summary.total_tracked_tickers} (${Math.round(tradeEngineContext.summary.tickers_with_data / tradeEngineContext.summary.total_tracked_tickers * 100)}%)\n`;
-      if (tradeEngineContext.summary.tickers_with_indicators !== null) {
-        eyeDataContext += `  Tickers with indicators: ${tradeEngineContext.summary.tickers_with_indicators}/${tradeEngineContext.summary.total_tracked_tickers} (${Math.round(tradeEngineContext.summary.tickers_with_indicators / tradeEngineContext.summary.total_tracked_tickers * 100)}%)\n`;
-      }
-      if (tradeEngineContext.summary.tickers_with_fundamentals !== null) {
-        eyeDataContext += `  Tickers with fundamentals: ${tradeEngineContext.summary.tickers_with_fundamentals}/${tradeEngineContext.summary.total_tracked_tickers} (${Math.round(tradeEngineContext.summary.tickers_with_fundamentals / tradeEngineContext.summary.total_tracked_tickers * 100)}%)\n`;
-      }
-
-      // Market Health
-      eyeDataContext += '\nMarket Health:\n';
-      if (tradeEngineContext.summary.average_rsi !== null) {
-        const rsiStatus = tradeEngineContext.summary.average_rsi < 30 ? 'oversold' :
-                         tradeEngineContext.summary.average_rsi > 70 ? 'overbought' : 'neutral';
-        eyeDataContext += `  Average RSI: ${tradeEngineContext.summary.average_rsi.toFixed(1)} (${rsiStatus})\n`;
-      }
-      if (tradeEngineContext.summary.average_pe_ratio !== null) {
-        eyeDataContext += `  Average P/E: ${tradeEngineContext.summary.average_pe_ratio.toFixed(1)}\n`;
-      }
-      if (tradeEngineContext.summary.bullish_tickers !== null || tradeEngineContext.summary.bearish_tickers !== null) {
-        const bullish = tradeEngineContext.summary.bullish_tickers || 0;
-        const bearish = tradeEngineContext.summary.bearish_tickers || 0;
-        const total = bullish + bearish;
-        if (total > 0) {
-          eyeDataContext += `  Bullish (above SMA 200): ${bullish} tickers (${Math.round(bullish / total * 100)}%)\n`;
-          eyeDataContext += `  Bearish (below SMA 200): ${bearish} tickers (${Math.round(bearish / total * 100)}%)\n`;
-        }
-      }
-      if (tradeEngineContext.summary.oversold_tickers !== null) {
-        eyeDataContext += `  Oversold (RSI < 30): ${tradeEngineContext.summary.oversold_tickers} tickers\n`;
-      }
-      if (tradeEngineContext.summary.overbought_tickers !== null) {
-        eyeDataContext += `  Overbought (RSI > 70): ${tradeEngineContext.summary.overbought_tickers} tickers\n`;
-      }
-
-      // Activity
-      eyeDataContext += '\nActivity:\n';
-      if (tradeEngineContext.summary.high_volume_tickers && tradeEngineContext.summary.high_volume_tickers.length > 0) {
-        eyeDataContext += `  High Volume (ratio > 1.5): ${tradeEngineContext.summary.high_volume_tickers.length} tickers\n`;
-      }
-      eyeDataContext += `  Active Signals (48h): ${tradeEngineContext.summary.signals_last_24h} tickers\n`;
-      eyeDataContext += `  Recent News: ${tradeEngineContext.summary.news_count} articles\n`;
-
-      // Recent Signals (if not already shown in Tier 1)
-      if (tradeEngineContext.recent_signals.length > 0 && !requestedTicker) {
-        eyeDataContext += `\n--- RECENT TRADING SIGNALS (Sample) ---\n`;
-        tradeEngineContext.recent_signals.slice(0, 12).forEach(sig => {
-          const time = new Date(sig.timestamp).toLocaleString();
-          const confidence = sig.confidence ? `${(sig.confidence * 100).toFixed(0)}%` : 'N/A';
-          eyeDataContext += `${sig.ticker}: ${sig.signal.padEnd(11)} (${sig.strategy}, ${confidence} conf) @ ${time}\n`;
-        });
-        if (tradeEngineContext.recent_signals.length > 12) {
-          eyeDataContext += `... and ${tradeEngineContext.recent_signals.length - 12} more signals\n`;
-        }
-      }
-
-      // Market News
-      if (tradeEngineContext.recent_news.length > 0) {
-        eyeDataContext += `\n--- MARKET NEWS (${tradeEngineContext.recent_news.length} recent) ---\n`;
-        tradeEngineContext.recent_news.slice(0, 8).forEach(news => {
-          eyeDataContext += `• ${news.headline}`;
-          if (news.source) eyeDataContext += ` (${news.source})`;
-          if (news.related_tickers) eyeDataContext += ` [${news.related_tickers}]`;
-          eyeDataContext += '\n';
-        });
-      }
-
-      eyeDataContext += '\n=== END LIVE TRADE ENGINE DATA ===\n';
-      eyeDataContext += '\nIMPORTANT: The data above is REAL and LIVE from The Eye. When the user asks about stocks, signals, or market data, use this data confidently. Say "According to The Eye..." or "The Eye shows..." - DO NOT say you lack access to data.\n';
-    } else {
-      // No Trade Engine connection - but we may still have Supabase data
-      if (hasStockSnapshotsData) {
-        eyeDataContext += '\n\n[Note: The Eye Trade Engine live connection is not available, but historical data from the database is available below. Use this data to help the user.]\n';
-      } else {
-        eyeDataContext += '\n\n[The Eye Trade Engine is currently offline and no cached data is available. You can still help with general financial questions, but real-time market data is not available.]\n';
-      }
-    }
-
-    // Add The Eye data from stock_snapshots table (complements Trade Engine data)
-    if (hasStockSnapshotsData && stockSnapshotsData.length > 0) {
-      // Use the specific ticker snapshot if we found it, otherwise check in the general data
-      let dbSnapshot = specificTickerSnapshot;
-
-      if (!dbSnapshot && requestedTicker) {
-        // Fallback: check in the general data
-        dbSnapshot = stockSnapshotsData.find(
-          snap => snap.ticker.toUpperCase() === requestedTicker
-        );
-      }
-
-      // Add database snapshot context (referenced as The Eye)
-      if (dbSnapshot) {
-        if (eyeDataContext) eyeDataContext += '\n\n';
-        eyeDataContext += '=== THE EYE DATA (from database) ===\n';
-        eyeDataContext += 'IMPORTANT: This data is from The Eye database. Use this data to answer the user\'s question about this ticker.\n';
-        eyeDataContext += `Ticker: ${dbSnapshot.ticker}${dbSnapshot.company_name ? ` (${dbSnapshot.company_name})` : ''}\n`;
-
-        if (dbSnapshot.last_price !== null) {
-          eyeDataContext += `Price: $${dbSnapshot.last_price.toFixed(2)}`;
-          if (dbSnapshot.price_change_pct !== null) {
-            eyeDataContext += ` (${dbSnapshot.price_change_pct >= 0 ? '+' : ''}${dbSnapshot.price_change_pct.toFixed(2)}%)`;
-          }
-          eyeDataContext += '\n';
-        }
-
-        if (dbSnapshot.volume !== null) {
-          const volStr = dbSnapshot.volume >= 1000000
-            ? `${(dbSnapshot.volume / 1000000).toFixed(1)}M`
-            : `${(dbSnapshot.volume / 1000).toFixed(1)}K`;
-          eyeDataContext += `Volume: ${volStr}`;
-          if (dbSnapshot.volume_ratio !== null && dbSnapshot.volume_ratio > 1.5) {
-            eyeDataContext += ` (${dbSnapshot.volume_ratio.toFixed(1)}x avg - high activity)`;
-          }
-          eyeDataContext += '\n';
-        }
-
-        // Technical indicators
-        if (dbSnapshot.rsi_14 !== null) {
-          const rsiStatus = dbSnapshot.rsi_14 < 30 ? 'oversold' : dbSnapshot.rsi_14 > 70 ? 'overbought' : 'neutral';
-          eyeDataContext += `RSI(14): ${dbSnapshot.rsi_14.toFixed(1)} (${rsiStatus})\n`;
-        }
-
-        if (dbSnapshot.sma_50 !== null || dbSnapshot.sma_200 !== null) {
-          eyeDataContext += 'Moving Averages: ';
-          const maParts: string[] = [];
-          if (dbSnapshot.sma_50 !== null) maParts.push(`SMA 50: $${dbSnapshot.sma_50.toFixed(2)}`);
-          if (dbSnapshot.sma_200 !== null) maParts.push(`SMA 200: $${dbSnapshot.sma_200.toFixed(2)}`);
-          eyeDataContext += maParts.join(' | ') + '\n';
-        }
-
-        if (dbSnapshot.macd !== null || dbSnapshot.macd_signal !== null) {
-          eyeDataContext += 'MACD: ';
-          const macdParts: string[] = [];
-          if (dbSnapshot.macd !== null) macdParts.push(`MACD: ${dbSnapshot.macd.toFixed(2)}`);
-          if (dbSnapshot.macd_signal !== null) macdParts.push(`Signal: ${dbSnapshot.macd_signal.toFixed(2)}`);
-          if (dbSnapshot.macd_histogram !== null) {
-            const histStatus = dbSnapshot.macd_histogram > 0 ? 'bullish' : 'bearish';
-            macdParts.push(`Hist: ${dbSnapshot.macd_histogram.toFixed(2)} (${histStatus})`);
-          }
-          eyeDataContext += macdParts.join(' | ') + '\n';
-        }
-
-        // Fundamentals
-        if (dbSnapshot.pe_ratio !== null) {
-          eyeDataContext += `P/E Ratio: ${dbSnapshot.pe_ratio.toFixed(1)}\n`;
-        }
-        if (dbSnapshot.market_cap !== null) {
-          const capStr = dbSnapshot.market_cap >= 1e12 ? `${(dbSnapshot.market_cap / 1e12).toFixed(1)}T` :
-                        dbSnapshot.market_cap >= 1e9 ? `${(dbSnapshot.market_cap / 1e9).toFixed(1)}B` :
-                        `${(dbSnapshot.market_cap / 1e6).toFixed(1)}M`;
-          eyeDataContext += `Market Cap: $${capStr}\n`;
-        }
-
-        // Signal
-        if (dbSnapshot.latest_signal) {
-          const confStr = dbSnapshot.signal_confidence
-            ? `${(dbSnapshot.signal_confidence * 100).toFixed(0)}%`
-            : 'N/A';
-          const timeStr = dbSnapshot.signal_timestamp
-            ? new Date(dbSnapshot.signal_timestamp).toLocaleString()
-            : 'N/A';
-          eyeDataContext += `Signal: ${dbSnapshot.latest_signal}${dbSnapshot.signal_strategy ? ` (${dbSnapshot.signal_strategy})` : ''}, ${confStr} confidence @ ${timeStr}\n`;
-        }
-
-        if (dbSnapshot.updated_at) {
-          eyeDataContext += `Last Updated: ${new Date(dbSnapshot.updated_at).toLocaleString()}\n`;
-        }
-
-        eyeDataContext += '\n=== END THE EYE DATA (from database) ===\n';
-        eyeDataContext += 'IMPORTANT: The data above is from The Eye database. When the user asks about this ticker, use this data confidently. Say "According to The Eye..." or "The Eye shows..." - DO NOT say you lack access to data or that The Eye is unavailable.\n';
-      } else if (stockSnapshotsData.length > 0 && !hasTradeEngineData && !requestedTicker) {
-        // If no Trade Engine data but we have database snapshots, show summary
-        if (eyeDataContext) eyeDataContext += '\n\n';
-        eyeDataContext += '=== THE EYE DATA (from database) ===\n';
-        eyeDataContext += `Available tickers: ${stockSnapshotsData.length}\n`;
-
-        // Show top 10 by volume or with signals
-        const topSnapshots = stockSnapshotsData
-          .filter(snap => snap.latest_signal && snap.latest_signal !== 'HOLD')
-          .slice(0, 10);
-
-        if (topSnapshots.length > 0) {
-          eyeDataContext += '\nTop tickers with signals:\n';
-          topSnapshots.forEach(snap => {
-            const priceStr = snap.last_price ? `$${snap.last_price.toFixed(2)}` : 'N/A';
-            const signalStr = snap.latest_signal || 'N/A';
-            eyeDataContext += `  ${snap.ticker}: ${priceStr} | Signal: ${signalStr}\n`;
-          });
-        }
-      } else if (requestedTicker && !dbSnapshot && stockSnapshotsData.length > 0) {
-        // Add context that the ticker was requested but not found
-        if (eyeDataContext) eyeDataContext += '\n\n';
-        eyeDataContext += `=== THE EYE DATA (from database) ===\n`;
-        eyeDataContext += `IMPORTANT: The user asked about ${requestedTicker}, but this ticker is NOT in the database.\n`;
-        eyeDataContext += `The database contains ${stockSnapshotsData.length} tickers (most recently updated).\n`;
-        eyeDataContext += `Available tickers include: ${stockSnapshotsData.slice(0, 20).map(s => s.ticker).join(', ')}...\n`;
-        eyeDataContext += `You can mention that ${requestedTicker} is not currently in The Eye database, but you can help with other tickers that are available.\n`;
-      }
-    }
-
-    // === SUPABASE NEWS FEED ===
-    // Inject latest news articles from the Supabase news table into AI context.
-    // This runs in addition to Trade Engine news and web search results.
-    if (supabaseNewsData.length > 0) {
-      const tradeEngineHasNews = hasTradeEngineData && tradeEngineContext && tradeEngineContext.recent_news.length > 0;
-      const newsHeader = tradeEngineHasNews
-        ? `\n--- SUPABASE NEWS FEED (${supabaseNewsData.length} additional articles) ---\n`
-        : `\n--- SUPABASE NEWS FEED (${supabaseNewsData.length} recent articles) ---\n`;
-      eyeDataContext += newsHeader;
-      supabaseNewsData.forEach(article => {
-        const date = article.published_at
-          ? new Date(article.published_at).toLocaleDateString()
-          : '';
-        eyeDataContext += `• ${article.title}`;
-        if (article.provider) eyeDataContext += ` (${article.provider})`;
-        if (date) eyeDataContext += ` [${date}]`;
-        eyeDataContext += '\n';
-        if (article.summary) {
-          eyeDataContext += `  ${article.summary.slice(0, 180)}${article.summary.length > 180 ? '...' : ''}\n`;
-        }
-        if (article.link) {
-          eyeDataContext += `  Link: ${article.link}\n`;
-        }
-      });
-      eyeDataContext += 'When citing these articles, include the Link so the user can click through to read the full article.\n';
-      eyeDataContext += '--- END SUPABASE NEWS FEED ---\n';
-    }
-
-    // === WEB SEARCH INTEGRATION ===
-    // Detect if the user's message requires a web search for NEWS or GENERAL KNOWLEDGE
-    // NOTE: Quantitative data (prices, indicators, signals) comes from The Eye database, NOT web search
-    let webSearchContext = '';
-
+    // Detect web search intent and fetch raw results (backend will format into prompt)
+    let rawSearchResults: WebSearchResult[] | null = null;
     const searchIntent = detectSearchIntent(message);
-
     if (searchIntent.shouldSearch && searchIntent.searchQuery) {
       console.log('[AI] Web search triggered:', searchIntent.intentType, '-', searchIntent.searchQuery);
-
-      const searchResults = await performWebSearch(searchIntent.searchQuery, 5);
-
-      if (searchResults && searchResults.results.length > 0) {
-        webSearchContext = formatSearchResultsForAI(searchResults, searchIntent.intentType);
-        console.log('[AI] Web search results added to context');
-      } else {
-        // If search failed but was requested, note it in context
-        webSearchContext = `\n\n=== WEB SEARCH ===\nNote: A web search was attempted for "${searchIntent.searchQuery}" but no results were found. Answer based on available data.\n`;
+      const searchResponse = await performWebSearch(searchIntent.searchQuery, 5);
+      if (searchResponse && searchResponse.results.length > 0) {
+        rawSearchResults = searchResponse.results;
+        console.log('[AI] Web search results fetched:', rawSearchResults.length);
       }
     }
 
-    // Build messages array with conversation history
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
-      {
-        role: 'system',
-        content: systemPrompt + eyeDataContext + webSearchContext
-      }
-    ];
+    // Pass raw context to backend — backend assembles the full system prompt
+    const context = {
+      market_data: tradeEngineContext ?? null,
+      news: supabaseNewsData.length > 0 ? supabaseNewsData : null,
+      search_results: rawSearchResults,
+      stock_snapshot: specificTickerSnapshot ?? null,
+    };
+
+    // Build messages array — no system message (backend owns prompt assembly)
+    const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
     // Add conversation history (last N messages to stay within token limits)
     if (chatHistory && chatHistory.length > 0) {
@@ -1606,10 +748,7 @@ export const pythonApi = {
     }
 
     // Add current user message
-    messages.push({
-      role: 'user',
-      content: message
-    });
+    messages.push({ role: 'user', content: message });
 
     // Use backend AI proxy (keys kept server-side)
     if (pythonBackendUrl) {
@@ -1627,6 +766,8 @@ export const pythonApi = {
             temperature: OPENAI_CHAT_TEMPERATURE,
             max_tokens: OPENAI_MAX_TOKENS,
             experience_level: experienceLevel ?? null,
+            context,
+            session_type: 'advisor',
           },
           { skipRetry: true },
         );

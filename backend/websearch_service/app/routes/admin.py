@@ -23,8 +23,13 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from ..services.auth import verify_service_role
+from ..services.auth import (
+    get_backend_service_role_key,
+    get_backend_supabase_url,
+    verify_service_role,
+)
 from ..services.dataapi_client import get_dataapi_client
+from ..services.ranking_engine import run_ranking_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +45,10 @@ async def _require_admin(request: Request) -> str:
 
     Supports two mechanisms (checked in order):
       1. ``Authorization: Bearer <service-role-jwt>`` — a Supabase
-         service-role JWT verified locally via ``SUPABASE_JWT_SECRET``.
-         Grants immediate access when the ``role`` claim is ``service_role``.
+         service-role JWT verified locally via ``SUPABASE_JWT_SECRET`` for
+         legacy symmetric tokens or via Supabase JWKS for modern asymmetric
+         tokens. Grants immediate access when the ``role`` claim is
+         ``service_role``.
       2. ``Authorization: Bearer <user-jwt>`` — the JWT is verified
          against Supabase, and the corresponding user must have
          ``userType = 'Admin'`` in ``core.users``.
@@ -49,40 +56,41 @@ async def _require_admin(request: Request) -> str:
     Returns the authenticated principal identifier (email or "service-role").
     Raises ``HTTPException(401/403)`` on failure.
     """
-    # --- Try service-role JWT first (fast, local verification) ---
-    try:
-        payload = await verify_service_role(request)
-        logger.info("Admin access granted via service-role JWT")
-        return "service-role"
-    except HTTPException as exc:
-        # If the token was present but invalid, re-raise immediately
-        auth_header = (request.headers.get("Authorization") or "").strip()
-        if not auth_header.lower().startswith("bearer "):
-            raise HTTPException(
-                status_code=401,
-                detail="Missing authentication. Provide Authorization: Bearer <token> header.",
-            )
-        # Token present but role != service_role — fall through to user-JWT path
-        if exc.status_code == 403:
-            pass  # not a service-role token; try user JWT path below
-        elif exc.status_code == 401:
-            pass  # could be a user JWT; try the Supabase path
-        else:
-            raise  # 500-level errors should propagate
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    if not auth_header.lower().startswith("bearer "):
+        raise HTTPException(
+            status_code=401,
+            detail="Missing authentication. Provide Authorization: Bearer <token> header.",
+        )
+
+    # --- Try service-role JWT first (fast local/JWKS verification) ---
+    jwt_secret = (os.getenv("SUPABASE_JWT_SECRET") or "").strip()
+    supabase_url = get_backend_supabase_url()
+    if jwt_secret or supabase_url:
+        try:
+            payload = await verify_service_role(request)
+            logger.info("Admin access granted via service-role JWT")
+            return "service-role"
+        except HTTPException as exc:
+            # Token present but role != service_role or signature invalid —
+            # fall through to the user-JWT path below.
+            if exc.status_code in (401, 403):
+                pass
+            else:
+                raise
+    else:
+        logger.info(
+            "Neither SUPABASE_JWT_SECRET nor SUPABASE_URL is configured; "
+            "skipping service-role JWT verification and falling back to "
+            "user-JWT admin verification."
+        )
 
     # --- Fallback: Supabase user JWT with admin check ---
     token = auth_header[7:].strip()
     if not token:
         raise HTTPException(status_code=401, detail="Empty bearer token")
 
-    supabase_url = (os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")).strip()
-    supabase_key = (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("VITE_SUPABASE_ANON_KEY")
-        or ""
-    ).strip()
+    supabase_key = get_backend_service_role_key()
     if not supabase_url or not supabase_key:
         raise HTTPException(status_code=503, detail="Supabase not configured on backend")
 
@@ -239,6 +247,17 @@ async def dataapi_query(
         raise HTTPException(status_code=502, detail=f"DataAPI request failed: {exc}") from exc
 
 
+@router.post("/api/admin/trigger-ranking")
+async def trigger_ranking(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Manually trigger a full ranking cycle and return the result."""
+    try:
+        result = await run_ranking_cycle()
+        return result
+    except Exception as exc:
+        logger.error("Ranking cycle failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Ranking cycle failed: {exc}") from exc
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -248,14 +267,8 @@ _start_time = time.time()
 
 async def _check_supabase() -> dict[str, Any]:
     """Check Supabase connectivity."""
-    url = (os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")).strip()
-    key = (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("VITE_SUPABASE_ANON_KEY")
-        or ""
-    ).strip()
+    url = get_backend_supabase_url()
+    key = get_backend_service_role_key()
     if not url or not key:
         return {"status": "not_configured", "message": "Supabase credentials not set"}
 
@@ -273,14 +286,8 @@ async def _check_supabase() -> dict[str, Any]:
 
 
 def _get_supabase_rest_config() -> tuple[str, str]:
-    url = (os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")).strip()
-    key = (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("VITE_SUPABASE_ANON_KEY")
-        or ""
-    ).strip()
+    url = get_backend_supabase_url()
+    key = get_backend_service_role_key()
     if not url or not key:
         raise HTTPException(status_code=503, detail="Supabase credentials not configured")
     return url.rstrip("/"), key

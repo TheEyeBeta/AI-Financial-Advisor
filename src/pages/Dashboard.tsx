@@ -22,6 +22,7 @@ const Dashboard = () => {
     accountValue,
     realizedPnl,
     isLoading,
+    error,
   } = usePaperTradingLedger();
 
   const greeting = userProfile?.first_name
@@ -68,7 +69,7 @@ const Dashboard = () => {
   const quickStats = [
     {
       label: "Portfolio Value",
-      value: latestValue > 0 ? `$${latestValue.toLocaleString()}` : "—",
+      value: latestValue > 0 ? `$${latestValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "—",
       icon: DollarSign,
       color: "text-primary",
       bgColor: "bg-primary/10",
@@ -106,6 +107,12 @@ const Dashboard = () => {
             Good {timeOfDay}. Here's your portfolio at a glance.
           </p>
         </div>
+
+        {error && (
+          <div className="rounded-xl border border-border/60 bg-card/70 px-4 py-3 text-sm text-muted-foreground">
+            Portfolio data is partially unavailable right now. Existing positions are still shown where possible.
+          </div>
+        )}
 
         {/* Quick Summary Stats */}
         <div className={`grid gap-3 grid-cols-2 lg:grid-cols-4 ${sectionAnimation}`} style={{ animationDelay: '50ms' }}>

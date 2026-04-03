@@ -11,8 +11,11 @@ export function AppLayout({ children, title }: AppLayoutProps) {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset>
-        <header className="sticky top-0 z-10 flex h-14 items-center gap-2 sm:gap-4 border-b bg-background/95 px-3 sm:px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+      <SidebarInset style={{ "--app-layout-header-height": "3.5rem" } as React.CSSProperties}>
+        <header
+          className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-3 sm:gap-4 sm:px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+          style={{ height: "var(--app-layout-header-height)" }}
+        >
           <SidebarTrigger className="h-8 w-8 shrink-0" />
           {title && <h1 className="text-base sm:text-lg font-semibold truncate">{title}</h1>}
           <div className="ml-auto shrink-0">

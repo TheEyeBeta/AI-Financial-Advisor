@@ -108,28 +108,38 @@ export const AnalyticsEvents = {
     analytics.track('sign_in', { method }),
   signOut: () =>
     analytics.track('sign_out'),
-  onboardingComplete: () =>
-    analytics.track('onboarding_complete'),
+  onboardingComplete: (properties?: AnalyticsProperties) =>
+    analytics.track('onboarding_complete', properties),
 
   // ── Core product ──
-  chatSent: (chatId?: string) =>
-    analytics.track('chat_message_sent', { chat_id: chatId }),
-  tradeExecuted: (action: string, symbol: string) =>
-    analytics.track('trade_executed', { action, symbol }),
-  tradeJournalEntry: () =>
-    analytics.track('trade_journal_entry_created'),
+  chatSent: (chatId?: string, properties?: AnalyticsProperties) =>
+    analytics.track('chat_message_sent', { chat_id: chatId, ...properties }),
+  chatResponseReceived: (chatId?: string, properties?: AnalyticsProperties) =>
+    analytics.track('chat_response_received', { chat_id: chatId, ...properties }),
+  chatResponseFailed: (properties?: AnalyticsProperties) =>
+    analytics.track('chat_response_failed', properties),
+  tradeExecuted: (action: string, symbol: string, properties?: AnalyticsProperties) =>
+    analytics.track('trade_executed', { action, symbol, ...properties }),
+  tradeJournalEntry: (properties?: AnalyticsProperties) =>
+    analytics.track('trade_journal_entry_created', properties),
 
   // ── Engagement / retention ──
-  learningTopicStarted: (topic: string) =>
-    analytics.track('learning_topic_started', { topic }),
-  learningTopicCompleted: (topic: string) =>
-    analytics.track('learning_topic_completed', { topic }),
-  newsArticleClicked: (provider?: string) =>
-    analytics.track('news_article_clicked', { provider }),
-  stockRankingViewed: () =>
-    analytics.track('stock_ranking_viewed'),
+  learningTopicStarted: (topic: string, properties?: AnalyticsProperties) =>
+    analytics.track('learning_topic_started', { topic, ...properties }),
+  learningTopicCompleted: (topic: string, properties?: AnalyticsProperties) =>
+    analytics.track('learning_topic_completed', { topic, ...properties }),
+  newsArticleClicked: (provider?: string | null, properties?: AnalyticsProperties) =>
+    analytics.track('news_article_clicked', { provider, ...properties }),
+  newsSortChanged: (sortOrder: string) =>
+    analytics.track('news_sort_changed', { sort_order: sortOrder }),
+  stockRankingViewed: (properties?: AnalyticsProperties) =>
+    analytics.track('stock_ranking_viewed', properties),
+  stockRankingFilterChanged: (properties?: AnalyticsProperties) =>
+    analytics.track('stock_ranking_filter_changed', properties),
+  stockDetailExpanded: (ticker: string, properties?: AnalyticsProperties) =>
+    analytics.track('stock_detail_expanded', { ticker, ...properties }),
 
   // ── Feature discovery ──
-  featureViewed: (feature: string) =>
-    analytics.track('feature_viewed', { feature }),
+  featureViewed: (feature: string, properties?: AnalyticsProperties) =>
+    analytics.track('feature_viewed', { feature, ...properties }),
 } as const;

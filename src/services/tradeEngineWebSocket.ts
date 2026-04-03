@@ -4,6 +4,7 @@
  */
 
 import { getPythonWebSocketUrl } from '@/lib/env';
+import { supabase } from '@/lib/supabase';
 import {
   WSConnectedMessage,
   WSMessage,
@@ -115,48 +116,58 @@ class TradeEngineWebSocket {
 
     this.setConnectionState('connecting');
 
-    try {
-      this.ws = new WebSocket(`${this.baseUrl}/ws/live`);
+    void supabase.auth.getSession()
+      .then(({ data: { session } }) => {
+        const accessToken = session?.access_token;
+        const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : "";
 
-      this.ws.onopen = () => {
-        console.log('[TradeEngine WS] Connected');
-        this.reconnectAttempts = 0;
-        this.setConnectionState('connected');
-        this.startPingInterval();
-      };
+        try {
+          this.ws = new WebSocket(`${this.baseUrl}/ws/live${tokenQuery}`);
 
-      this.ws.onmessage = (event) => {
-        this.handleMessage(event.data);
-      };
+          this.ws.onopen = () => {
+            console.log('[TradeEngine WS] Connected');
+            this.reconnectAttempts = 0;
+            this.setConnectionState('connected');
+            this.startPingInterval();
+          };
 
-      this.ws.onclose = (event) => {
-        console.log(`[TradeEngine WS] Disconnected (code: ${event.code})`);
-        this.stopPingInterval();
-        this._connectionId = null;
+          this.ws.onmessage = (event) => {
+            this.handleMessage(event.data);
+          };
 
-        if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-          this.setConnectionState('reconnecting');
-          const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-          console.log(
-            `[TradeEngine WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`
-          );
+          this.ws.onclose = (event) => {
+            console.log(`[TradeEngine WS] Disconnected (code: ${event.code})`);
+            this.stopPingInterval();
+            this._connectionId = null;
 
-          setTimeout(() => {
-            this.reconnectAttempts += 1;
-            this.connect();
-          }, delay);
-        } else {
+            if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
+              this.setConnectionState('reconnecting');
+              const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+              console.log(
+                `[TradeEngine WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`
+              );
+
+              setTimeout(() => {
+                this.reconnectAttempts += 1;
+                this.connect();
+              }, delay);
+            } else {
+              this.setConnectionState('disconnected');
+            }
+          };
+
+          this.ws.onerror = (error) => {
+            console.error('[TradeEngine WS] Error:', error);
+          };
+        } catch (error) {
+          console.error('[TradeEngine WS] Failed to create WebSocket:', error);
           this.setConnectionState('disconnected');
         }
-      };
-
-      this.ws.onerror = (error) => {
-        console.error('[TradeEngine WS] Error:', error);
-      };
-    } catch (error) {
-      console.error('[TradeEngine WS] Failed to create WebSocket:', error);
-      this.setConnectionState('disconnected');
-    }
+      })
+      .catch((error) => {
+        console.error('[TradeEngine WS] Failed to read auth session:', error);
+        this.setConnectionState('disconnected');
+      });
   }
 
   disconnect(): void {

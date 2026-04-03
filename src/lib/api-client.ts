@@ -1,5 +1,8 @@
 import { supabase } from '@/lib/supabase';
-import { getPythonApiUrl } from '@/lib/env';
+import type { StockDetail } from '@/types/database';
+
+const BASE_URL = import.meta.env.VITE_API_URL ||
+  'https://ai-financial-advisor-backend-production.up.railway.app';
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -71,7 +74,7 @@ async function request<T>(
     ...fetchOptions
   } = options;
 
-  const base = baseUrl ?? getPythonApiUrl();
+  const base = baseUrl ?? BASE_URL;
   const url = path.startsWith('http') ? path : `${base}${path}`;
 
   // Build headers
@@ -180,3 +183,7 @@ export const apiClient = {
     return request<T>(path, { ...options, method: 'DELETE' });
   },
 };
+
+export function getStockDetail(ticker: string): Promise<StockDetail> {
+  return apiClient.get<StockDetail>(`/api/stocks/detail/${encodeURIComponent(ticker)}`);
+}

@@ -585,18 +585,12 @@ export interface components {
         RankingResponse: {
             /** Stocks */
             stocks: components["schemas"]["StockScore"][];
-            /** Has Stale Data */
-            has_stale_data: boolean;
-            /** Has Ml Data */
-            has_ml_data: boolean;
-            /** Total Scored */
-            total_scored: number;
-            /** Horizon */
-            horizon: string;
-            /** Cached */
-            cached: boolean;
-            /** Cache Age Seconds */
-            cache_age_seconds: number;
+            /** Total */
+            total: number;
+            /** Last Ranked At */
+            last_ranked_at?: string | null;
+            /** Data Age Hours */
+            data_age_hours?: number | null;
         };
         /**
          * ScoreBreakdown
@@ -666,39 +660,42 @@ export interface components {
         StockScore: {
             /** Ticker */
             ticker: string;
-            /** Company Name */
-            company_name?: string | null;
-            /** Last Price */
-            last_price?: number | null;
-            /** Price Change Pct */
-            price_change_pct?: number | null;
+            /** Symbol */
+            symbol?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Change Percent */
+            change_percent?: number | null;
             /** Updated At */
             updated_at?: string | null;
             /** Composite Score */
             composite_score: number;
-            /** Rank Tier */
-            rank_tier: string;
-            /** Conviction */
-            conviction: string;
             /** Momentum Score */
-            momentum_score: number;
+            momentum_score?: number | null;
             /** Technical Score */
-            technical_score: number;
+            technical_score?: number | null;
             /** Fundamental Score */
-            fundamental_score: number;
-            /** Risk Score */
-            risk_score: number;
-            /** Quality Score */
-            quality_score: number;
-            /** Ml Score */
-            ml_score?: number | null;
-            /** Has Ml Data */
-            has_ml_data: boolean;
-            breakdown: components["schemas"]["ScoreBreakdown"];
-            /** Data Fresh */
-            data_fresh: boolean;
-            /** Dimensions Bullish */
-            dimensions_bullish: number;
+            fundamental_score?: number | null;
+            /** Consistency Score */
+            consistency_score?: number | null;
+            /** Signal Score */
+            signal_score?: number | null;
+            /** Momentum 1M */
+            momentum_1m?: number | null;
+            /** Momentum 3M */
+            momentum_3m?: number | null;
+            /** Momentum 6M */
+            momentum_6m?: number | null;
+            /** Momentum 12M */
+            momentum_12m?: number | null;
+            /** Fundamental Trend */
+            fundamental_trend?: string | null;
+            /** Rank Tier */
+            rank_tier?: string | null;
+            /** Conviction */
+            conviction?: string | null;
+            /** Ranked At */
+            ranked_at?: string | null;
         };
         /**
          * TickerSnapshot
@@ -1235,10 +1232,6 @@ export interface operations {
                 limit?: number;
                 /** @description Minimum composite score filter */
                 min_score?: number;
-                /** @description Investment horizon: 'short' (swing/days-weeks), 'long' (buy-and-hold/months-years), 'balanced' (default) */
-                horizon?: string;
-                /** @description Data source: supabase (default), dataapi, or auto */
-                source?: string;
             };
             header?: never;
             path?: never;

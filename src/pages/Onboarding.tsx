@@ -36,6 +36,7 @@ import { supabase, coreDb, meridianDb } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { academyApi, TIER_IDS } from "@/services/academy-api";
+import { AnalyticsEvents } from "@/services/analytics";
 import { getPythonApiUrl } from "@/lib/env";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -98,11 +99,11 @@ const AGE_OPTIONS: { value: AgeRange; label: string }[] = [
 ];
 
 const INCOME_OPTIONS: { value: IncomeRange; label: string }[] = [
-  { value: "<30k", label: "Less than \u20ac30,000" },
-  { value: "30-50k", label: "\u20ac30,000 – \u20ac50,000" },
-  { value: "50-80k", label: "\u20ac50,000 – \u20ac80,000" },
-  { value: "80-120k", label: "\u20ac80,000 – \u20ac120,000" },
-  { value: "120k+", label: "\u20ac120,000+" },
+  { value: "<30k", label: "Less than $30,000" },
+  { value: "30-50k", label: "$30,000 - $50,000" },
+  { value: "50-80k", label: "$50,000 - $80,000" },
+  { value: "80-120k", label: "$80,000 - $120,000" },
+  { value: "120k+", label: "$120,000+" },
 ];
 
 const EMERGENCY_FUND_OPTIONS: { value: string; label: string; numeric: number }[] = [
@@ -152,7 +153,7 @@ const RISK_QUESTIONS = [
   },
   {
     question:
-      "If you had \u20ac10,000 to invest, which option appeals most?",
+      "If you had $10,000 to invest, which option appeals most?",
     options: [
       { label: "A savings account with guaranteed 3% return", score: 1 },
       {
@@ -288,11 +289,11 @@ const Onboarding = () => {
 
   const totalSteps = 5;
 
-  // Redirect admins
-  if (userProfile?.userType === "Admin") {
-    navigate("/admin", { replace: true });
-    return null;
-  }
+  useEffect(() => {
+    if (userProfile?.userType === "Admin") {
+      navigate("/admin", { replace: true });
+    }
+  }, [navigate, userProfile?.userType]);
 
   // Check for existing Meridian profile
   useEffect(() => {
@@ -307,6 +308,10 @@ const Onboarding = () => {
       })
       .catch(() => setHasExistingProfile(false));
   }, [authUserId]);
+
+  if (userProfile?.userType === "Admin") {
+    return null;
+  }
 
   // ── Already completed ────────────────────────────────────────────────────
 
@@ -518,6 +523,11 @@ const Onboarding = () => {
 
       // Refresh auth context
       await refreshProfile();
+      AnalyticsEvents.onboardingComplete({
+        risk_profile: riskProfile,
+        investment_horizon: horizon,
+        goal_count: goalRows.length,
+      });
 
       toast({
         title: "Your financial profile is ready",
@@ -660,7 +670,7 @@ const Onboarding = () => {
                 </p>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    &euro;
+                    $
                   </span>
                   <Input
                     id="expenses"
@@ -685,7 +695,7 @@ const Onboarding = () => {
                 </p>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    &euro;
+                    $
                   </span>
                   <Input
                     id="debt"
@@ -741,7 +751,7 @@ const Onboarding = () => {
                 </p>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                    &euro;
+                    $
                   </span>
                   <Input
                     id="investable"
@@ -781,10 +791,10 @@ const Onboarding = () => {
                 RISK_QUESTIONS.map((q, qi) => {
                   const key = `q${qi + 1}` as keyof RiskQuizAnswers;
                   return (
-                    <div key={qi} className="space-y-3">
-                      <Label className="text-base font-medium">
+                    <fieldset key={qi} className="space-y-3">
+                      <legend className="text-base font-medium text-foreground">
                         {qi + 1}. {q.question}
-                      </Label>
+                      </legend>
                       <RadioGroup
                         value={
                           quizAnswers[key] > 0
@@ -814,7 +824,7 @@ const Onboarding = () => {
                           </div>
                         ))}
                       </RadioGroup>
-                    </div>
+                    </fieldset>
                   );
                 })
               )}
@@ -914,7 +924,7 @@ const Onboarding = () => {
                     <Label htmlFor={`amount-${goal.id}`}>Target amount</Label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                        &euro;
+                        $
                       </span>
                       <Input
                         id={`amount-${goal.id}`}
@@ -954,7 +964,7 @@ const Onboarding = () => {
                     </Label>
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
-                        &euro;
+                        $
                       </span>
                       <Input
                         id={`contrib-${goal.id}`}

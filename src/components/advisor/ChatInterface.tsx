@@ -207,7 +207,7 @@ export function ChatInterface({ messages, isThinking = false, onStreamingComplet
 
               <div
                 className={cn(
-                  "max-w-[85%] rounded-[24px] px-4 py-3",
+                  "max-w-[85%] rounded-[24px] px-4 py-3 [overflow-wrap:break-word] [word-break:break-word]",
                   isUser
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted/45 text-foreground",

@@ -162,7 +162,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
       if (aiGradeResults.some((r) => r === null)) {
         toast({
           title: "AI grading unavailable",
-          description: "The grading service is temporarily unavailable. Your answers are saved — please try submitting again.",
+          description: "The grading service is temporarily unavailable. Your answers were not submitted. Please try again.",
           variant: "destructive",
         });
         return;

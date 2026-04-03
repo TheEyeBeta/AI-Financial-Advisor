@@ -12,7 +12,11 @@ function getSymbols(symbols: string[]) {
 
 export function usePaperTradingLedger() {
   const { userId } = useAuth();
-  const { data: journalEntries = [], isLoading: isJournalLoading } = useTradeJournal();
+  const {
+    data: journalEntries = [],
+    isLoading: isJournalLoading,
+    error: journalError,
+  } = useTradeJournal();
   const [now, setNow] = useState(() => new Date());
 
   const symbols = useMemo(
@@ -30,17 +34,15 @@ export function usePaperTradingLedger() {
     };
   }, []);
 
-  const { data: snapshots = [], isLoading: isSnapshotsLoading } = useQuery({
+  const {
+    data: snapshots = [],
+    isLoading: isSnapshotsLoading,
+    error: snapshotsError,
+  } = useQuery({
     queryKey: ["paper-trading-ledger-snapshots", symbols],
     queryFn: async () => {
       if (symbols.length === 0) return [];
-
-      try {
-        return await stockSnapshotsApi.getByTickers(symbols);
-      } catch (error) {
-        console.warn("[paper-trading-ledger] Failed to load stock snapshots:", error);
-        return [];
-      }
+      return stockSnapshotsApi.getByTickers(symbols);
     },
     enabled: symbols.length > 0,
     staleTime: 30 * 1000,
@@ -67,5 +69,6 @@ export function usePaperTradingLedger() {
     journalEntries,
     isLoading: isJournalLoading || (symbols.length > 0 && isSnapshotsLoading),
     isJournalLoading,
+    error: journalError ?? snapshotsError ?? null,
   };
 }

@@ -47,15 +47,15 @@ export function TradeHistory({ trades: tradesProp, isLoading: isLoadingProp }: T
       <div className="flex items-center justify-between">
         <div>
           <p className="text-xs text-muted-foreground/70">
-            {visibleTrades.length} closed trades - {winningTrades} wins - {visibleTrades.length - winningTrades} losses
+            {visibleTrades.length} closed trades - {winningTrades} wins - {visibleTrades.length - winningTrades} {visibleTrades.length - winningTrades === 1 ? 'loss' : 'losses'}
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
+          <Button variant="ghost" size="sm" disabled className="h-8 gap-1.5 text-xs cursor-not-allowed opacity-50" title="Coming soon">
             <Filter className="h-3 w-3" />
             Filter
           </Button>
-          <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs">
+          <Button variant="ghost" size="sm" disabled className="h-8 gap-1.5 text-xs cursor-not-allowed opacity-50" title="Coming soon">
             <Download className="h-3 w-3" />
             Export
           </Button>

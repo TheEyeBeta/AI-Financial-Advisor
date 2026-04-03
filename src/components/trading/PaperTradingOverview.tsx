@@ -1,6 +1,6 @@
 import { Card, CardContent } from "@/components/ui/card";
 import { useMemo } from "react";
-import { Activity, DollarSign, LineChart, Trophy, Wallet } from "lucide-react";
+import { Activity, LineChart, Trophy, Wallet } from "lucide-react";
 import { useTradeEngineConnection } from "@/hooks/use-trade-engine";
 import { cn } from "@/lib/utils";
 import type { OpenPosition, PortfolioHistory, Trade } from "@/types/database";
@@ -27,7 +27,7 @@ export function PaperTradingOverview({
   portfolioHistory,
   isLoading = false,
 }: PaperTradingOverviewProps) {
-  const { isConnected } = useTradeEngineConnection();
+  const { isConnected: _isConnected } = useTradeEngineConnection();
 
   const summary = useMemo(() => {
     const markedPositions = positions.map((position) => {
@@ -49,7 +49,9 @@ export function PaperTradingOverview({
     const closedTradeCostBasis = trades.reduce((sum, trade) => sum + trade.entry_price * trade.quantity, 0);
     const fallbackBaseValue = openCostBasis + closedTradeCostBasis;
     const baseValue = portfolioHistory[0]?.value ?? fallbackBaseValue;
-    const totalReturnPct = baseValue > 0 ? (totalReturn / baseValue) * 100 : 0;
+    // Use (currentAccountValue − initialAccountValue) / initialAccountValue so
+    // this matches the Dashboard's PortfolioPerformance chart percentage exactly.
+    const totalReturnPct = baseValue > 0 ? ((accountValue - baseValue) / baseValue) * 100 : 0;
     const wins = trades.filter((trade) => (trade.pnl || 0) > 0).length;
     const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0;
 
@@ -124,22 +126,6 @@ export function PaperTradingOverview({
           </Card>
         );
       })}
-      <Card className="border-border/50 bg-card/60 backdrop-blur-sm md:col-span-2 xl:col-span-4">
-        <CardContent className="py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between text-xs">
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <DollarSign className="h-3.5 w-3.5" />
-            <span>
-              One workspace now anchors the account snapshot, execution flow, and review panels so the page reads as a portfolio cockpit instead of separate widgets.
-            </span>
-          </div>
-          <div className={cn(
-            'font-medium',
-            isConnected ? 'text-profit' : 'text-muted-foreground'
-          )}>
-            {isConnected ? 'Live feed connected' : summary.hasSnapshotPrices ? 'Prices from latest snapshots' : 'Using entry prices'}
-          </div>
-        </CardContent>
-      </Card>
     </div>
   );
 }

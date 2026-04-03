@@ -51,10 +51,10 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
     }
 
     const ageNum = parseInt(age, 10);
-    if (isNaN(ageNum) || ageNum < 13 || ageNum > 150) {
+    if (isNaN(ageNum) || ageNum < 18 || ageNum > 150) {
       toast({
         title: "Error",
-        description: "Please enter a valid age (13-150)",
+        description: "Please enter a valid age (18-150)",
         variant: "destructive",
       });
       return;
@@ -69,10 +69,10 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
       return;
     }
 
-    if (password.length < 6) {
+    if (password.length < 10) {
       toast({
         title: "Error",
-        description: "Password must be at least 6 characters",
+        description: "Password must be at least 10 characters",
         variant: "destructive",
       });
       return;
@@ -147,7 +147,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
 
         <div className="space-y-4 py-4 px-6 overflow-y-auto flex-1 min-h-0">
           <form onSubmit={handleEmailSignUp} className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="signup-first-name">First Name *</Label>
                 <Input
@@ -178,14 +178,14 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                 id="signup-age"
                 type="number"
                 placeholder="25"
-                min="13"
+                min="18"
                 max="150"
                 value={age}
                 onChange={(e) => setAge(e.target.value)}
                 required
               />
               <p className="text-xs text-muted-foreground">
-                Must be between 13 and 150
+                Must be between 18 and 150
               </p>
             </div>
 
@@ -210,10 +210,10 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                minLength={6}
+                minLength={10}
               />
               <p className="text-xs text-muted-foreground">
-                Must be at least 6 characters
+                Must be at least 10 characters
               </p>
             </div>
 

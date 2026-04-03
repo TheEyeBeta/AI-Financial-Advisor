@@ -1,9 +1,25 @@
+import logging
 import os
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+# Load environment variables from .env file BEFORE importing any local modules.
+# supabase_client.py (and auth.py) read env vars at import time, so dotenv must
+# run first — otherwise .env values are invisible to module-level initialisation.
+_env_paths = [
+    Path(__file__).parent.parent / ".env",          # backend/websearch_service/.env
+    Path(__file__).parent.parent.parent.parent / ".env",  # project root .env
+]
+for _env_path in _env_paths:
+    if _env_path.exists():
+        load_dotenv(_env_path)
+        break
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -14,20 +30,102 @@ from .routes.search import check_search_provider, router as search_router
 from .routes.news import router as news_router
 from .routes.trade_engine import router as trade_engine_router
 from .routes.stock_ranking import router as stock_ranking_router
+from .services.auth import validate_auth_configuration
+from .services.intelligence_engine import run_intelligence_cycle
+from .services.ranking_engine import run_ranking_cycle
 
-# Load environment variables from .env file if it exists
-# Check multiple locations: service directory, then project root
-env_paths = [
-    Path(__file__).parent.parent / ".env",  # backend/websearch_service/.env
-    Path(__file__).parent.parent.parent.parent / ".env",  # project root .env
-]
-for env_path in env_paths:
-    if env_path.exists():
-        load_dotenv(env_path)
-        break
-
+logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
+
+
+async def _run_scheduled_cycle() -> None:
+    """Scheduler callback: run one intelligence cycle and log the summary."""
+    try:
+        summary = await run_intelligence_cycle()
+        logger.info(
+            "Scheduled intelligence cycle: users_processed=%s digests_generated=%s errors=%s%s",
+            summary.get("users_processed", 0),
+            summary.get("digests_generated", 0),
+            len(summary.get("errors", [])),
+            " [skipped — previous cycle still running]" if summary.get("skipped") else "",
+        )
+    except Exception as exc:
+        # Belt-and-suspenders: run_intelligence_cycle() never raises, but if it
+        # ever does we must not let APScheduler swallow the exception silently.
+        logger.error(
+            "Scheduled intelligence cycle raised an unexpected exception: %s",
+            type(exc).__name__,
+        )
+
+
+async def _run_scheduled_ranking_cycle() -> None:
+    """Scheduler callback: run one ranking cycle and log the summary."""
+    try:
+        summary = await run_ranking_cycle()
+        if summary.get("skipped"):
+            logger.info("Scheduled ranking cycle: skipped — previous cycle still running")
+        else:
+            logger.info(
+                "Scheduled ranking cycle: tickers_scored=%s tickers_failed=%s "
+                "top_50_written=%s duration=%.1fs",
+                summary.get("tickers_scored", 0),
+                summary.get("tickers_failed", 0),
+                summary.get("top_50_written", 0),
+                summary.get("cycle_duration_seconds", 0.0),
+            )
+    except Exception as exc:
+        logger.error(
+            "Scheduled ranking cycle raised an unexpected exception: %s",
+            type(exc).__name__,
+        )
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Start schedulers on startup; shut them down on shutdown."""
+    scheduler = AsyncIOScheduler()
+
+    # Intelligence digest cycle — every 6 hours
+    scheduler.add_job(
+        _run_scheduled_cycle,
+        trigger="interval",
+        hours=6,
+        id="intelligence_cycle",
+        replace_existing=True,
+        # Allow up to 1 hour of lateness before skipping a missed execution.
+        misfire_grace_time=3600,
+    )
+
+    # Stock ranking cycle — daily at 01:00 UTC
+    # Runs after market close and before pg_cron cleanup at 02:00 UTC.
+    scheduler.add_job(
+        _run_scheduled_ranking_cycle,
+        trigger="cron",
+        hour=1,
+        minute=0,
+        timezone="UTC",
+        id="ranking_cycle",
+        replace_existing=True,
+        # Allow up to 30 minutes of lateness before skipping.
+        misfire_grace_time=1800,
+    )
+
+    scheduler.start()
+    logger.info("Schedulers started (intelligence=6h interval, ranking=daily 01:00 UTC)")
+
+    # Fire-and-forget: populate market.trending_stocks immediately on startup
+    # so the table is ready before the first user request arrives.
+    # asyncio.create_task is non-blocking — Railway health checks are not delayed.
+    import asyncio as _asyncio
+    _asyncio.create_task(_run_scheduled_ranking_cycle())
+    logger.info("Ranking cycle queued for immediate startup run (background)")
+
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
+        logger.info("Schedulers shut down")
 
 
 def create_app() -> FastAPI:
@@ -45,9 +143,12 @@ def create_app() -> FastAPI:
     - Run this service on its own URL, e.g. https://websearch.yourdomain.com
     - Point your AI orchestration logic at /api/search on this service.
     """
+    validate_auth_configuration()
+
     app = FastAPI(
         title="AI Financial Advisor - Web Search Service",
         version=os.getenv("APP_VERSION", "0.1.0"),
+        lifespan=_lifespan,
         description=(
             "A small FastAPI microservice that provides a unified web search "
             "API for the AI Financial Advisor agent. This service should be "
@@ -74,9 +175,21 @@ def create_app() -> FastAPI:
         allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
         allow_creds = True
     else:
-        # Development: allow all origins (credentials disabled to avoid CORS + cookie issues)
-        allowed_origins = ["*"]
-        allow_creds = False
+        # Development: use an explicit list of common local dev ports so that
+        # allow_credentials=True works correctly (wildcard '*' is incompatible
+        # with credentialed requests that carry an Authorization header).
+        default_dev_origins = [
+            "http://localhost:8080",   # Vite on custom port (this project)
+            "http://localhost:5173",   # Vite default
+            "http://localhost:3000",   # CRA / other
+            "http://127.0.0.1:8080",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+        ]
+        extra_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
+        # dict.fromkeys preserves insertion order and deduplicates
+        allowed_origins = list(dict.fromkeys(default_dev_origins + extra_origins))
+        allow_creds = True
 
     app.add_middleware(
         CORSMiddleware,
@@ -110,19 +223,38 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/health")
-    async def health_check() -> dict[str, str | float]:
-        # SECURITY: Do not expose version or environment in production health checks.
-        # These fields aid attackers in fingerprinting the deployment.
-        is_production = os.getenv("ENVIRONMENT") == "production"
-        response: dict[str, str | float] = {
-            "status": "healthy",
+    async def health_check() -> dict[str, object]:
+        import asyncio
+        from .services.supabase_client import supabase_client as _sb_client
+
+        # ── Supabase connectivity check ────────────────────────────────────
+        def _ping_supabase() -> str:
+            try:
+                _sb_client.schema("core").table("users").select("id").limit(1).execute()
+                return "ok"
+            except Exception:
+                return "error"
+
+        supabase_status = await asyncio.to_thread(_ping_supabase)
+
+        # ── OpenAI key presence check (no API call) ────────────────────────
+        # SECURITY: Only check presence — never echo the key value.
+        openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        _placeholders = ("sk-your", "your-key", "placeholder", "change-me", "xxxx")
+        openai_status = (
+            "ok"
+            if openai_key and not any(openai_key.lower().startswith(p) for p in _placeholders)
+            else "error"
+        )
+
+        return {
+            "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "services": {
+                "supabase": supabase_status,
+                "openai": openai_status,
+            },
         }
-        if not is_production:
-            response["uptime_seconds"] = round(time.time() - START_TIME, 2)
-            response["version"] = os.getenv("APP_VERSION", "unknown")
-            response["environment"] = os.getenv("ENVIRONMENT", "development")
-        return response
 
     @app.get("/health/live")
     async def liveness_check() -> dict[str, str]:

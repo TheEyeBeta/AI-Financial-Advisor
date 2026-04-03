@@ -84,6 +84,28 @@ export default function AcademyLanding() {
           .catch((err) => logTierEnrollmentError("Beginner", "enroll user", err));
       }
 
+      // Auto-unlock tiers based on the user's profile experience level so that
+      // intermediate/advanced users are not gated behind beginner lesson counts.
+      const experienceLevel = userProfile?.experience_level;
+      if (
+        (experienceLevel === "intermediate" || experienceLevel === "advanced") &&
+        !enrolledTierIds.has(TIER_IDS.INTERMEDIATE)
+      ) {
+        await academyApi
+          .enrollInTier(authUserId, TIER_IDS.INTERMEDIATE, "profile_level")
+          .then(() => enrolledTierIds.add(TIER_IDS.INTERMEDIATE))
+          .catch((err) => logTierEnrollmentError("Intermediate", "unlock via profile level", err));
+      }
+      if (
+        experienceLevel === "advanced" &&
+        !enrolledTierIds.has(TIER_IDS.ADVANCED)
+      ) {
+        await academyApi
+          .enrollInTier(authUserId, TIER_IDS.ADVANCED, "profile_level")
+          .then(() => enrolledTierIds.add(TIER_IDS.ADVANCED))
+          .catch((err) => logTierEnrollmentError("Advanced", "unlock via profile level", err));
+      }
+
       const completedLessonIds = new Set(
         progressData.filter((entry) => entry.status === "completed").map((entry) => entry.lesson_id),
       );
@@ -123,7 +145,7 @@ export default function AcademyLanding() {
     } finally {
       setLoading(false);
     }
-  }, [authUserId, displayName]);
+  }, [authUserId, displayName, userProfile?.experience_level]);
 
   useEffect(() => {
     if (!authUserId) return;
@@ -164,7 +186,7 @@ export default function AcademyLanding() {
     const lessonCount = getLessonCount(tier.id);
     const completedCount = getCompletedCount(tier.id);
 
-    if (lessonCount > 0 && completedCount === lessonCount) return "Chapter complete";
+    if (lessonCount > 0 && completedCount === lessonCount) return "Tier complete";
     if (completedCount > 0) return "In progress";
     return "Ready to begin";
   }
@@ -274,12 +296,12 @@ export default function AcademyLanding() {
               </Badge>
 
               <div className="mt-4 space-y-3">
-                <p className="text-sm font-medium text-primary/80">{welcomeName}, your next chapter is ready.</p>
+                <p className="text-sm font-medium text-primary/80">{welcomeName}, your next tier is ready.</p>
                 <h1 className="max-w-3xl text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
                   Make the Academy feel like a climb, not a checklist.
                 </h1>
                 <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-                  The path unfolds in chapters. Finish each stage, unlock the next, and keep moving from
+                  The path unfolds in tiers. Finish each stage, unlock the next, and keep moving from
                   foundations into higher-conviction investing decisions.
                 </p>
               </div>
@@ -298,7 +320,7 @@ export default function AcademyLanding() {
                     }
                   }}
                 >
-                  {nextRecommendedLesson ? "Continue next lesson" : "Open current chapter"}
+                  {nextRecommendedLesson ? "Continue next lesson" : "Open current tier"}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
                 <Button
@@ -345,13 +367,13 @@ export default function AcademyLanding() {
                   <div className="p-4">
                     <div className="flex items-center gap-2 text-xs uppercase tracking-[0.18em] text-muted-foreground">
                       <Trophy className="h-3.5 w-3.5" />
-                      Chapters
+                      Tiers
                     </div>
                     <p className="mt-3 text-2xl font-semibold text-foreground">
                       {completedTiers}
                       <span className="text-sm font-medium text-muted-foreground"> / {tiers.length}</span>
                     </p>
-                    <p className="mt-1 text-sm text-muted-foreground">Chapters fully completed so far.</p>
+                    <p className="mt-1 text-sm text-muted-foreground">Tiers fully completed so far.</p>
                   </div>
                 </Card>
               </div>
@@ -368,7 +390,7 @@ export default function AcademyLanding() {
                   </div>
                   {activeTier && (
                     <Badge variant="outline" className={cn("text-xs", getJourneyMeta(activeTier.id).badgeClass)}>
-                      {getJourneyMeta(activeTier.id).chapter}
+                      {getJourneyMeta(activeTier.id).tier}
                     </Badge>
                   )}
                 </div>
@@ -384,7 +406,7 @@ export default function AcademyLanding() {
                   </div>
                   <div className="space-y-1">
                     <p className="text-sm font-medium text-foreground">
-                      {activeTier ? getJourneyMeta(activeTier.id).hook : "Pick your first chapter."}
+                      {activeTier ? getJourneyMeta(activeTier.id).hook : "Pick your first tier."}
                     </p>
                     <p className="text-sm leading-6 text-muted-foreground">
                       {activeTier ? getJourneyMeta(activeTier.id).summary : DEFAULT_JOURNEY_META.summary}
@@ -426,7 +448,7 @@ export default function AcademyLanding() {
                   <div className="mt-5 rounded-2xl border border-success/20 bg-success/5 p-4">
                     <div className="flex items-center gap-2 text-sm font-medium text-foreground">
                       <CheckCircle2 className="h-4 w-4 text-success" />
-                      Every chapter is unlocked
+                      Every tier is unlocked
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
                       You can move freely through the full academy journey now.
@@ -452,7 +474,7 @@ export default function AcademyLanding() {
                 </h2>
               </div>
               <Badge variant="outline" className="hidden border-border/70 bg-card/60 text-muted-foreground sm:flex">
-                {unlockedTiers.length} of {tiers.length} chapters unlocked
+                {unlockedTiers.length} of {tiers.length} tiers unlocked
               </Badge>
             </div>
 
@@ -494,7 +516,7 @@ export default function AcademyLanding() {
 
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge variant="outline" className={cn("text-xs", meta.badgeClass)}>
-                                  {meta.chapter}
+                                  {meta.tier}
                                 </Badge>
                                 <Badge
                                   variant="outline"
@@ -576,7 +598,7 @@ export default function AcademyLanding() {
                           <div className="flex flex-col gap-2 md:items-end">
                             {unlockSnapshot && !unlocked && (
                               <p className="text-right text-xs text-muted-foreground">
-                                {Math.max(unlockSnapshot.target - unlockSnapshot.current, 0)} more lessons to open this chapter.
+                                {Math.max(unlockSnapshot.target - unlockSnapshot.current, 0)} more lessons to open this tier.
                               </p>
                             )}
                             <Button
@@ -585,7 +607,7 @@ export default function AcademyLanding() {
                               variant={unlocked ? "default" : "outline"}
                               onClick={() => navigate(`/academy/${tier.slug}`)}
                             >
-                              {unlocked ? (completedCount > 0 ? "Enter chapter" : "Start chapter") : "Chapter locked"}
+                              {unlocked ? (completedCount > 0 ? "Enter tier" : "Start tier") : "Tier locked"}
                               <ArrowRight className="h-4 w-4" />
                             </Button>
                           </div>
@@ -625,7 +647,7 @@ export default function AcademyLanding() {
                       You are caught up
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Review completed chapters or head into advanced material whenever you want.
+                      Review completed tiers or head into advanced material whenever you want.
                     </p>
                   </div>
                 )}
@@ -635,7 +657,7 @@ export default function AcademyLanding() {
             <Card className="rounded-[1.75rem] border-border/60 bg-card/90 shadow-sm">
               <div className="p-5">
                 <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Path Rules</p>
-                <h3 className="mt-2 text-lg font-semibold text-foreground">How chapters unlock</h3>
+                <h3 className="mt-2 text-lg font-semibold text-foreground">How tiers unlock</h3>
                 <div className="mt-5 space-y-4">
                   <div className="rounded-2xl border border-border/60 bg-background/75 p-4">
                     <p className="text-sm font-medium text-foreground">Beginner is always open</p>
@@ -648,7 +670,7 @@ export default function AcademyLanding() {
                       Intermediate unlocks after {UNLOCK_THRESHOLDS.INTERMEDIATE} Beginner lessons
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      The second chapter opens when you have enough reps in the fundamentals.
+                      The second tier opens when you have enough reps in the fundamentals.
                     </p>
                   </div>
                   <div className="rounded-2xl border border-border/60 bg-background/75 p-4">
@@ -656,7 +678,7 @@ export default function AcademyLanding() {
                       Advanced unlocks after {UNLOCK_THRESHOLDS.ADVANCED} Intermediate lessons
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      The final stage is reserved for users who have worked through the middle chapter.
+                      The final stage is reserved for users who have worked through the middle tier.
                     </p>
                   </div>
                 </div>

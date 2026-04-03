@@ -104,18 +104,21 @@ export function PerformanceCharts({
 
   // Calculate portfolio stats
   const portfolioStats = useMemo(() => {
-    const currentValue = portfolioHistory[portfolioHistory.length - 1]?.value ?? currentPortfolioValue;
     const totalCostBasis = positions.reduce((sum, pos) => sum + (pos.entry_price * pos.quantity), 0);
+    // Sort history ascending so [0] is always the oldest entry (same logic as PortfolioPerformance chart)
+    const sortedHistory = [...portfolioHistory].sort((a, b) => a.date.localeCompare(b.date));
+    const currentValue = sortedHistory.length > 0 ? sortedHistory[sortedHistory.length - 1].value : currentPortfolioValue;
+    const baseValue = sortedHistory.length > 0 ? sortedHistory[0].value : totalCostBasis;
+    // portfolioGain uses the same formula as the PortfolioPerformance chart so both widgets agree
+    const portfolioGain = currentValue - baseValue;
+    const percentReturn = baseValue > 0 ? ((portfolioGain / baseValue) * 100) : 0;
     const unrealizedPnL = positions.reduce((sum, pos) => {
       const currentPrice = pos.current_price ?? pos.entry_price;
       return sum + ((currentPrice - pos.entry_price) * pos.quantity);
     }, 0);
     const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
-    const baseValue = portfolioHistory.length > 0 ? portfolioHistory[0].value : totalCostBasis;
-    const totalReturn = realizedPnL + unrealizedPnL;
-    const percentReturn = baseValue > 0 ? ((totalReturn / baseValue) * 100) : 0;
-    
-    return { currentValue, totalReturn, percentReturn, unrealizedPnL, realizedPnL, totalPnL: unrealizedPnL + realizedPnL };
+
+    return { currentValue, totalReturn: portfolioGain, percentReturn, unrealizedPnL, realizedPnL, totalPnL: unrealizedPnL + realizedPnL };
   }, [portfolioHistory, currentPortfolioValue, positions, trades]);
 
   if (isLoading) {

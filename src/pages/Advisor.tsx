@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { formatDistanceToNow, isToday, isYesterday, parseISO } from "date-fns";
-import { Clock3, History, Plus } from "lucide-react";
+import { Clock3, History, Info, Plus, X } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ChatInterface } from "@/components/advisor/ChatInterface";
@@ -9,8 +9,13 @@ import { SuggestedTopics } from "@/components/advisor/SuggestedTopics";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
-import { useChat, useChats, useCreateChat, useSendChatMessage } from "@/hooks/use-data";
+import { toast } from "@/hooks/use-toast";
+import { useChat, useChats, useCreateChat, useSendChatMessage, useIntelligenceDigests } from "@/hooks/use-data";
+import type { IntelligenceDigest } from "@/types/database";
 import { AppLayout } from "@/components/layout/AppLayout";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { getErrorMessage } from "@/lib/error";
+import { AnalyticsEvents } from "@/services/analytics";
 
 const QUICK_PROMPTS = {
   beginner: [
@@ -45,17 +50,19 @@ const Advisor = () => {
   const isExplicitNewChat = searchParams.get("new") === "1";
 
   const { userId, isAuthenticated, userProfile } = useAuth();
-  const { data: chats = [], isLoading: chatsLoading } = useChats();
+  const { data: chats = [], isLoading: chatsLoading, error: chatsError } = useChats();
   const createChatMutation = useCreateChat();
   const sendMessageMutation = useSendChatMessage();
+  const { digests, markAsRead } = useIntelligenceDigests();
 
   const [currentChatId, setCurrentChatId] = useState<string | null>(chatFromUrl);
-  const { data: currentChat, isLoading: chatLoading } = useChat(currentChatId);
+  const { data: currentChat, isLoading: chatLoading, error: chatError } = useChat(currentChatId);
 
   const [showTopics, setShowTopics] = useState(true);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [streamingResponseContent, setStreamingResponseContent] = useState<string | null>(null);
   const [composerValue, setComposerValue] = useState("");
+  const [sendError, setSendError] = useState<string | null>(null);
   const isNewChatRef = useRef(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -107,20 +114,27 @@ const Advisor = () => {
 
   const handleSendMessage = async (content: string): Promise<boolean> => {
     const trimmedContent = content.trim();
+    let chatId = currentChatId;
+    let isFirstMessage = false;
 
     if (!trimmedContent) return false;
     if (!isAuthenticated || !userId) {
       console.error("User not authenticated");
+      const message = "Sign in again before sending a message.";
+      setSendError(message);
+      toast({
+        title: "Unable to send message",
+        description: message,
+        variant: "destructive",
+      });
       return false;
     }
 
+    setSendError(null);
     setPendingMessage(trimmedContent);
     setShowTopics(false);
 
     try {
-      let chatId = currentChatId;
-      let isFirstMessage = false;
-
       if (!chatId) {
         const newChat = await createChatMutation.mutateAsync("New Chat");
         chatId = newChat.id;
@@ -131,6 +145,11 @@ const Advisor = () => {
         isFirstMessage = true;
       }
 
+      AnalyticsEvents.chatSent(chatId, {
+        is_first_message: isFirstMessage,
+        message_length: trimmedContent.length,
+      });
+
       const result = await sendMessageMutation.mutateAsync({
         chatId,
         message: trimmedContent,
@@ -138,6 +157,10 @@ const Advisor = () => {
       });
 
       if (result?.response) {
+        AnalyticsEvents.chatResponseReceived(chatId, {
+          is_first_message: isFirstMessage,
+          response_length: result.response.length,
+        });
         setStreamingResponseContent(result.response);
       }
 
@@ -145,15 +168,30 @@ const Advisor = () => {
       return true;
     } catch (error) {
       console.error("Error sending message:", error);
+      const message = getErrorMessage(error) || "Your message could not be sent. Please try again.";
+      AnalyticsEvents.chatResponseFailed({
+        chat_id: chatId,
+        is_first_message: isFirstMessage,
+        message_length: trimmedContent.length,
+        error: message,
+      });
+      setSendError(message);
+      toast({
+        title: "Unable to send message",
+        description: message,
+        variant: "destructive",
+      });
       setPendingMessage(null);
       return false;
     }
   };
 
   const handleComposerSubmit = async () => {
-    const didSend = await handleSendMessage(composerValue);
-    if (didSend) {
-      setComposerValue("");
+    const currentValue = composerValue;
+    setComposerValue("");
+    const didSend = await handleSendMessage(currentValue);
+    if (!didSend) {
+      setComposerValue(currentValue);
     }
   };
 
@@ -170,6 +208,7 @@ const Advisor = () => {
     setPendingMessage(null);
     setStreamingResponseContent(null);
     setComposerValue("");
+    setSendError(null);
   };
 
   const handleNewChat = () => {
@@ -238,6 +277,7 @@ const Advisor = () => {
   const chatHeaderDescription = currentChat?.updated_at
     ? `Updated ${formatActivityTime(currentChat.updated_at)}`
     : "Ask follow-ups and keep the thread going.";
+  const fetchError = chatsError ?? chatError;
 
   return (
     <AppLayout title="Advisor">
@@ -245,23 +285,52 @@ const Advisor = () => {
         {isStarterState ? (
           <div className="flex flex-1 items-center overflow-y-auto px-4 py-8 sm:px-6">
             <div className="mx-auto w-full max-w-3xl">
+              {fetchError && (
+                <div className="mb-4 rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-sm text-muted-foreground">
+                  Conversation history is temporarily unavailable. You can still start a new chat.
+                </div>
+              )}
+              {sendError && (
+                <div className="mb-4 rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {sendError}
+                </div>
+              )}
               <div className="text-center">
                 <h1 className="text-4xl font-semibold tracking-tight text-foreground sm:text-5xl">
                   {getStarterHeading(userProfile?.first_name)}
                 </h1>
                 <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-                  Ask about markets, portfolio decisions, or financial planning. IRIS uses your profile and The Eye context when it is available.
+                  Ask about markets, portfolio decisions, or financial planning. IRIS provides educational analysis and uses your profile and The Eye context when they are available.
                 </p>
                 <div className="mt-4 flex justify-center">
-                  <div className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-1.5 text-xs text-muted-foreground">
-                    <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
-                    <span>Personalized for</span>
-                    <span className="font-medium text-foreground">{experienceLevelLabel}</span>
-                  </div>
+                  <TooltipProvider>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <div className="inline-flex cursor-default items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-1.5 text-xs text-muted-foreground">
+                          <span className="h-1.5 w-1.5 rounded-full bg-primary/70" />
+                          <span>Level: <span className="font-medium text-foreground">{experienceLevelLabel}</span> (profile setting)</span>
+                          <Info className="h-3 w-3 text-muted-foreground/50" />
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-[220px] text-center text-xs">
+                        This reflects the experience level set in your profile, not your Academy progress.
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 </div>
               </div>
 
-              <div className="mt-8">
+              <AdvisorDisclosure className="mt-8" />
+
+              <div className="mt-6">
+                <DigestStrip
+                  digest={digests[0] ?? null}
+                  onDismiss={(id) => void markAsRead(id)}
+                  onExpand={(headline) => {
+                    setComposerValue(`Tell me more about: ${headline}`);
+                    composerRef.current?.focus();
+                  }}
+                />
                 <AdvisorComposer
                   textareaRef={composerRef}
                   value={composerValue}
@@ -270,6 +339,7 @@ const Advisor = () => {
                   disabled={isLoading}
                   placeholder="Ask anything..."
                   helperText="Enter to send. Shift+Enter for a new line."
+                  ariaLabel="Ask IRIS a finance question"
                 />
               </div>
 
@@ -343,6 +413,18 @@ const Advisor = () => {
               </div>
             </div>
 
+            {(fetchError || sendError) && (
+              <div className="px-4 pb-3 sm:px-6">
+                <div className="rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-sm text-muted-foreground">
+                  {sendError || "Conversation history is temporarily unavailable. You can still start a new chat."}
+                </div>
+              </div>
+            )}
+
+            <div className="px-4 pb-3 sm:px-6">
+              <AdvisorDisclosure />
+            </div>
+
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6">
               <ChatInterface
                 messages={displayMessages}
@@ -353,6 +435,14 @@ const Advisor = () => {
 
               <div className="border-t border-border/60 px-4 py-4 sm:px-6">
                 <div className="mx-auto max-w-3xl">
+                  <DigestStrip
+                    digest={digests[0] ?? null}
+                    onDismiss={(id) => void markAsRead(id)}
+                    onExpand={(headline) => {
+                      setComposerValue(`Tell me more about: ${headline}`);
+                      composerRef.current?.focus();
+                    }}
+                  />
                   <AdvisorComposer
                     textareaRef={composerRef}
                     value={composerValue}
@@ -361,6 +451,7 @@ const Advisor = () => {
                   disabled={isLoading}
                   placeholder="Ask a follow-up..."
                   helperText="Enter to send. Shift+Enter for a new line."
+                  ariaLabel="Ask IRIS a follow-up finance question"
                 />
               </div>
             </div>
@@ -379,6 +470,7 @@ interface AdvisorComposerProps {
   disabled: boolean;
   placeholder: string;
   helperText: string;
+  ariaLabel: string;
 }
 
 const AdvisorComposer = ({
@@ -389,11 +481,13 @@ const AdvisorComposer = ({
   disabled,
   placeholder,
   helperText,
+  ariaLabel,
 }: AdvisorComposerProps) => {
   return (
     <div className="rounded-[30px] border border-border/60 bg-card/95 px-5 py-4 shadow-[0_20px_50px_-44px_rgba(15,23,42,0.5)]">
       <Textarea
         ref={textareaRef}
+        aria-label={ariaLabel}
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.target.value)}
@@ -422,6 +516,58 @@ const AdvisorComposer = ({
     </div>
   );
 };
+
+/**
+ * Subtle notification strip that surfaces one unread intelligence digest.
+ * Renders nothing when digest is null — no empty DOM container.
+ *
+ * - Clicking the strip body pre-populates the chat input (no auto-send).
+ * - Clicking X dismisses the digest and surfaces the next one immediately
+ *   via the optimistic cache update in useIntelligenceDigests.
+ */
+function DigestStrip({
+  digest,
+  onDismiss,
+  onExpand,
+}: {
+  digest: IntelligenceDigest | null;
+  onDismiss: (id: string) => void;
+  onExpand: (headline: string) => void;
+}) {
+  if (!digest) return null;
+
+  const headline = digest.headline ?? "New intelligence update";
+
+  return (
+    <div className="mb-3 flex items-center gap-3 rounded-2xl border border-border/60 bg-card/70 px-4 py-2.5 text-sm transition-colors hover:border-border/80 hover:bg-card">
+      <button
+        type="button"
+        onClick={() => onExpand(headline)}
+        className="flex min-w-0 flex-1 items-center gap-2.5 text-left"
+        aria-label="Ask IRIS about this update"
+      >
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary/70" />
+        <span className="truncate text-foreground/80">{headline}</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onDismiss(digest.id)}
+        className="shrink-0 rounded-full p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        aria-label="Dismiss"
+      >
+        <X className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function AdvisorDisclosure({ className = "" }: { className?: string }) {
+  return (
+    <div className={`rounded-2xl border border-border/60 bg-card/70 px-4 py-3 text-left text-xs leading-5 text-muted-foreground ${className}`.trim()}>
+      Educational analysis only. IRIS can explain frameworks, scenarios, and risk trade-offs, but it does not know your full financial picture and should not be treated as personalised investment advice.
+    </div>
+  );
+}
 
 function getQuickPrompts(experienceLevel: ExperienceLevel) {
   if (experienceLevel === "beginner") return QUICK_PROMPTS.beginner;

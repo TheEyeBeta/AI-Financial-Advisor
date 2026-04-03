@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from ..services.audit import audit_log
-from ..services.auth import AuthenticatedUser, require_auth
+from ..services.auth import AuthenticatedUser, require_auth, verify_service_role
 from ..services.rate_limit import rate_limiter
 from ..services.meridian_context import (
     build_iris_context,
@@ -22,6 +22,8 @@ from ..services.meridian_context import (
     run_meridian_onboard,
     update_knowledge_tier,
 )
+from ..services.market_context import build_market_context
+from ..services.subagents import classify_intent, get_subagent_block
 
 logger = logging.getLogger(__name__)
 
@@ -702,7 +704,6 @@ than they had before they asked.
 
 That is the standard. Hold it on every response.
 """
-" JSON or code blocks. Just write naturally.\n"
 )
 
 # ── Token estimation ───────────────────────────────────────────────────────────
@@ -719,6 +720,14 @@ class Message(BaseModel):
     content: str = Field(..., min_length=1, max_length=MAX_CHAT_MESSAGE_CONTENT_LENGTH)
 
 
+class ContextBlock(BaseModel):
+    """Raw context data sent by the frontend; the backend formats it into the system prompt."""
+    market_data: Optional[Dict[str, Any]] = None        # Trade Engine AI context JSON
+    news: Optional[List[Dict[str, Any]]] = None         # Supabase news articles
+    search_results: Optional[List[Dict[str, Any]]] = None  # Tavily web-search results
+    stock_snapshot: Optional[Dict[str, Any]] = None     # Single-ticker snapshot JSON
+
+
 class ChatRequest(BaseModel):
     messages: Optional[List[Message]] = None
     message: Optional[str] = Field(default=None, min_length=1, max_length=10000)
@@ -726,6 +735,8 @@ class ChatRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0, le=2)
     max_tokens: int = Field(default=2000, ge=1, le=16000)
     experience_level: Optional[str] = None
+    context: Optional[ContextBlock] = None
+    session_type: Optional[str] = "advisor"
 
 
 class ChatTitleRequest(BaseModel):
@@ -746,6 +757,107 @@ class MeridianOnboardRequest(BaseModel):
     goal_name: str = Field(..., min_length=1)
     target_amount: float = Field(..., gt=0)
     target_date: Optional[str] = None
+
+
+# ── Session-type instruction blocks ────────────────────────────────────────────
+
+_ACADEMY_TUTOR_BLOCK = (
+    "=== TUTOR MODE ===\n"
+    "You are operating in Academy Tutor mode. Guide the user through the lesson material "
+    "step by step. Check for understanding with targeted questions. Explain concepts at the "
+    "user's tier level. Be encouraging and connect new ideas to what the user already knows. "
+    "Do not rush ahead — confirm comprehension before moving on."
+)
+
+_ACADEMY_QUIZ_BLOCK = (
+    "=== QUIZ MODE ===\n"
+    "You are operating in Academy Quiz mode. Present each question clearly and wait for the "
+    "user's answer. Grade answers fairly: explain why they are correct or incorrect. Reinforce "
+    "key concepts through targeted feedback. Track what the user knows well and what needs more "
+    "practice. Keep the tone encouraging but accurate."
+)
+
+
+def _session_type_injection(session_type: Optional[str]) -> str:
+    if session_type == "academy_tutor":
+        return _ACADEMY_TUTOR_BLOCK
+    if session_type == "academy_quiz":
+        return _ACADEMY_QUIZ_BLOCK
+    return ""  # "advisor" — no additional block needed
+
+
+def _format_context_block(context: Optional[ContextBlock]) -> str:
+    """Format raw frontend context data into clearly labelled prompt sections."""
+    if not context:
+        return ""
+
+    parts: List[str] = []
+
+    if context.market_data:
+        parts.append("=== CURRENT MARKET DATA ===\n" + json.dumps(context.market_data, indent=2))
+
+    if context.news:
+        lines = ["=== RECENT NEWS ==="]
+        for item in context.news:
+            title = item.get("title") or ""
+            provider = item.get("provider") or ""
+            pub = (item.get("published_at") or "")[:10]
+            summary = item.get("summary") or ""
+            line = f"• {title}"
+            if provider:
+                line += f" ({provider})"
+            if pub:
+                line += f" [{pub}]"
+            lines.append(line)
+            if summary:
+                lines.append(f"  {summary[:180]}{'...' if len(summary) > 180 else ''}")
+        parts.append("\n".join(lines))
+
+    if context.search_results:
+        lines = ["=== WEB SEARCH RESULTS ==="]
+        for i, r in enumerate(context.search_results, 1):
+            lines.append(f"[{i}] {r.get('title', '')}")
+            snippet = r.get("snippet") or r.get("content") or ""
+            if snippet:
+                lines.append(f"    {snippet}")
+            url = r.get("url") or r.get("link") or ""
+            if url:
+                lines.append(f"    Source: {url}")
+        parts.append("\n".join(lines))
+
+    if context.stock_snapshot:
+        parts.append("=== STOCK DATA ===\n" + json.dumps(context.stock_snapshot, indent=2))
+
+    return "\n\n".join(parts)
+
+
+# ── Ticker detection ────────────────────────────────────────────────────────────
+
+# Common English words that match the uppercase-ticker pattern but are not tickers.
+# Single and two-letter words are the primary false-positive source.
+_TICKER_STOPWORDS = frozenset({
+    # Single letter
+    "A", "I",
+    # Two-letter common English words
+    "AM", "AN", "AS", "AT", "BE", "BY", "DO", "GO",
+    "HE", "IF", "IN", "IS", "IT", "ME", "MY", "NO",
+    "OF", "OK", "ON", "OR", "SO", "TO", "UP", "US", "WE",
+})
+
+_TICKER_RE = re.compile(r'\b[A-Z]{1,5}\b')
+
+
+def _extract_ticker(message: str) -> Optional[str]:
+    """Return the first plausible ticker symbol found in message, or None.
+
+    Matches sequences of 1–5 consecutive uppercase ASCII letters on word
+    boundaries. Common English abbreviations (I, A, AT, IN, IS, IT, OR, …)
+    are filtered via _TICKER_STOPWORDS so they are never returned as tickers.
+    """
+    for candidate in _TICKER_RE.findall(message):
+        if candidate not in _TICKER_STOPWORDS:
+            return candidate
+    return None
 
 
 # ── Header builders ────────────────────────────────────────────────────────────
@@ -1069,15 +1181,21 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
             "max_tokens": payload.get("max_output_tokens", 300),
         }
 
+    client = httpx.AsyncClient(timeout=60.0)
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(OPENAI_RESPONSES_ENDPOINT, headers=_build_headers(), json=payload)
+        response = await client.post(OPENAI_RESPONSES_ENDPOINT, headers=_build_headers(), json=payload)
+    except httpx.TimeoutException as exc:
+        raise HTTPException(status_code=504, detail="OpenAI request timed out") from exc
     except httpx.RequestError as exc:
         perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
         if perplexity_key:
             await audit_log("openai_fallback_perplexity", {"reason": "network_error", "error": str(exc)})
             return await _call_perplexity(_perplexity_fallback_payload())
         raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+    finally:
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose):
+            await aclose()
 
     if response.status_code == 429:
         perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
@@ -1099,6 +1217,10 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
             await audit_log("openai_fallback_perplexity", {"reason": "quota_exceeded_402"})
             return await _call_perplexity(_perplexity_fallback_payload())
         raise HTTPException(status_code=402, detail="OpenAI quota exceeded. Perplexity fallback not configured.")
+
+    if response.status_code == 401:
+        logger.warning("OpenAI Responses API returned HTTP 401 — API key invalid or expired")
+        raise HTTPException(status_code=401, detail="OpenAI API key invalid or expired.")
 
     if response.status_code != 200:
         logger.warning("OpenAI Responses API returned HTTP %d", response.status_code)
@@ -1188,17 +1310,29 @@ async def meridian_refresh_all(
 ) -> Dict[str, Any]:
     """
     Daily cron endpoint: refreshes ai.iris_context_cache for ALL users.
-    Protected by a shared secret (MERIDIAN_CRON_SECRET) rather than user auth,
-    since this runs as a scheduled job, not a user action.
+    In production this requires a Supabase service-role JWT.
+    Non-production keeps the legacy shared-secret fallback so local schedulers
+    and smoke tests can still exercise the path without minting a JWT.
 
     Schedule: 0 2 * * * (daily at 02:00 UTC)
     """
-    cron_secret = os.getenv("MERIDIAN_CRON_SECRET")
-    if not cron_secret:
-        raise HTTPException(status_code=501, detail="Cron secret not configured.")
-    provided = raw_request.headers.get("x-cron-secret", "")
-    if provided != cron_secret:
-        raise HTTPException(status_code=403, detail="Invalid cron secret.")
+    auth_header = (raw_request.headers.get("Authorization") or "").strip()
+    if auth_header.lower().startswith("bearer "):
+        await verify_service_role(raw_request)
+    else:
+        is_production = (os.getenv("ENVIRONMENT") or "").strip().lower() == "production"
+        if is_production:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing service-role authentication token.",
+            )
+
+        cron_secret = os.getenv("MERIDIAN_CRON_SECRET")
+        if not cron_secret:
+            raise HTTPException(status_code=501, detail="Cron secret not configured.")
+        provided = raw_request.headers.get("x-cron-secret", "")
+        if provided != cron_secret:
+            raise HTTPException(status_code=403, detail="Invalid cron secret.")
     result = await refresh_all_users_context()
     return {"success": True, **result}
 
@@ -1273,9 +1407,16 @@ async def chat_completion(
             {"classification": classification, "reasoning_effort": reasoning_effort, "user_id": verified_user_id},
         )
 
-        # Step 1b: Fetch Meridian personalisation context
-        # Returns "" until Meridian Phase 1 is built — no breaking change
-        meridian_context = await build_iris_context(verified_user_id)
+        # Step 1b: Fetch Meridian personalisation context — never fails the request
+        try:
+            meridian_context = await build_iris_context(verified_user_id)
+        except Exception as _meridian_exc:
+            logger.error(
+                "Meridian context fetch failed for user %s, continuing without context: %s",
+                verified_user_id,
+                _meridian_exc,
+            )
+            meridian_context = ""
 
         # Map frontend experience level to IRIS tier bands
         tier_map = {
@@ -1286,14 +1427,51 @@ async def chat_completion(
         tier_label = tier_map.get((request.experience_level or "beginner").lower(), "TIER 1 — FOUNDATION")
         tier_injection = f"USER TIER: {tier_label}. Calibrate your entire response to this tier.\n\n"
 
-        # Step 2: Build Responses API input
-        # Order: Meridian context → Tier injection → IRIS prompt → any existing frontend system message
-        existing_system = " ".join(m["content"] for m in messages if m.get("role") == "system")
-        combined_system = (
-            f"{meridian_context}{tier_injection}{FINANCIAL_ADVISOR_SYSTEM_PROMPT}\n\n---\n\n{existing_system}"
-            if existing_system
-            else f"{meridian_context}{tier_injection}{FINANCIAL_ADVISOR_SYSTEM_PROMPT}"
+        # Step 1c: Subagent intent routing — separate lightweight classification call.
+        # Falls back to "general" (empty block) within 3 s on any error or timeout,
+        # so the main response is never blocked by the classifier.
+        subagent_category = await classify_intent(last_user_text)
+        subagent_block = get_subagent_block(subagent_category, meridian_context)
+        logger.debug(
+            "IRIS subagent: %s for user %s",
+            subagent_category,
+            verified_user_id[-8:] if verified_user_id else "unknown",
         )
+
+        # Step 1d: Ticker detection + market context fetch.
+        # Detects the first ticker-like token in the user's message (if any),
+        # then fetches macro context (always) and ticker history (if applicable).
+        # Never fails the request — build_market_context always returns a string.
+        detected_ticker = _extract_ticker(last_user_text)
+        market_context = await build_market_context(ticker=detected_ticker)
+
+        # Step 2: Build the full system prompt in the canonical 7-section order:
+        #   1. IRIS base prompt
+        #   2. Meridian personalisation context
+        #   3. Knowledge tier injection
+        #   4. Context block (market data, news, search results, stock snapshot)
+        #   5. Market context (macro always; price + fundamentals when ticker detected)
+        #   6. Subagent specialist block
+        #   7. Session-type instruction (academy_tutor / academy_quiz; omitted for advisor)
+        context_block = _format_context_block(request.context)
+        session_block = _session_type_injection(request.session_type)
+
+        system_parts = [FINANCIAL_ADVISOR_SYSTEM_PROMPT]
+        if meridian_context and meridian_context.strip():
+            system_parts.append(meridian_context)
+        system_parts.append(tier_injection)
+        if context_block:
+            system_parts.append(context_block)
+        if market_context:
+            system_parts.append(market_context)
+        if subagent_block:
+            system_parts.append(subagent_block)
+        if session_block:
+            system_parts.append(session_block)
+
+        combined_system = "\n\n".join(p for p in system_parts if p.strip())
+
+        # Strip any legacy system messages the frontend may still send (transition safety net)
         conversation_turns = [m for m in messages if m.get("role") != "system"]
         input_messages = [{"role": "system", "content": combined_system}, *conversation_turns]
 
@@ -1398,6 +1576,24 @@ async def chat_completion(
             asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
 
         return {"response": final_answer}
+    except HTTPException as exc:
+        from fastapi.responses import JSONResponse
+        if exc.status_code == 401:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "ai_unavailable", "message": "AI service is temporarily unavailable."},
+            )
+        if exc.status_code == 429:
+            return JSONResponse(
+                status_code=429,
+                content={"error": "rate_limited", "message": "Too many requests. Please wait a moment."},
+            )
+        if exc.status_code == 504:
+            return JSONResponse(
+                status_code=504,
+                content={"error": "timeout", "message": "The AI took too long to respond. Please try again."},
+            )
+        raise
     finally:
         rate_limiter.release_request(raw_request, user_id=verified_user_id)
 

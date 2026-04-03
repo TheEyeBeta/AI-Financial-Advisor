@@ -3,10 +3,10 @@ import time
 
 import jwt as pyjwt
 import pytest
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.testclient import TestClient
 
-from app.services.auth import verify_service_role
+from app.services.auth import _verify_supabase_jwt, verify_service_role
 from .conftest import TEST_JWT_SECRET, _make_jwt
 
 
@@ -81,6 +81,49 @@ class TestVerifyServiceRole:
         c = self._client()
         resp = c.get("/protected", headers={"Authorization": f"Bearer {expired_token}"})
         assert resp.status_code == 401
+
+    def test_es256_service_role_jwt_uses_supabase_jwks(self, monkeypatch):
+        monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+        monkeypatch.setattr("app.services.auth._jwt_algorithm", lambda token: "ES256")
+
+        def _fake_verify(token: str, algorithm: str, *, required_claims):
+            assert token == "not-a-real-jwt"
+            assert algorithm == "ES256"
+            assert tuple(required_claims) == ("role", "iat")
+            return {"role": "service_role", "sub": "test-service"}
+
+        monkeypatch.setattr("app.services.auth._verify_jwt_with_supabase_jwks", _fake_verify)
+
+        c = self._client()
+        resp = c.get("/protected", headers={"Authorization": "Bearer not-a-real-jwt"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {"role": "service_role", "sub": "test-service"}
+
+    def test_es256_user_jwt_falls_back_to_supabase_rest_when_jwks_unavailable(self, monkeypatch):
+        monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+        monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+        monkeypatch.setenv("SUPABASE_ANON_KEY", "test-anon-key")
+        monkeypatch.setattr("app.services.auth._jwt_algorithm", lambda token: "ES256")
+
+        def _jwks_failure(token: str, algorithm: str, *, required_claims):
+            raise HTTPException(status_code=503, detail="Authentication service unavailable.")
+
+        monkeypatch.setattr("app.services.auth._verify_jwt_with_supabase_jwks", _jwks_failure)
+        monkeypatch.setattr(
+            "app.services.auth._verify_jwt_via_supabase_rest",
+            lambda token: {"sub": "user-123", "email": "user@example.com", "role": "authenticated"},
+        )
+
+        payload = _verify_supabase_jwt(
+            "not-a-real-jwt",
+            required_claims=("sub", "exp", "iat", "role"),
+            allow_rest_fallback=True,
+        )
+
+        assert payload == {"sub": "user-123", "email": "user@example.com", "role": "authenticated"}
 
     def test_missing_jwt_secret_returns_500(self, monkeypatch):
         monkeypatch.setenv("AUTH_REQUIRED", "true")

@@ -169,7 +169,20 @@ export default function Admin() {
       setSystemHealth(data);
     } catch (err) {
       console.error("System health check failed:", err);
-      setSystemHealth({ overall: "error", error: String(err), services: {} });
+      // Backend unreachable — check Supabase directly so the status reflects
+      // reality rather than defaulting to a generic "error" with no timestamp.
+      const { error: sbError } = await supabase
+        .schema("core")
+        .from("users")
+        .select("id", { count: "exact", head: true });
+      setSystemHealth({
+        overall: sbError ? "down" : "degraded",
+        timestamp: new Date().toISOString(),
+        services: {
+          supabase: { status: sbError ? "error" : "connected" },
+          backend: { status: "error", message: "Health check endpoint unreachable" },
+        },
+      });
     } finally {
       setHealthLoading(false);
     }
@@ -256,20 +269,28 @@ export default function Admin() {
 
   const fetchChatStats = async () => {
     try {
-      const headers = await getAuthHeaders();
-      const resp = await fetch(`${BACKEND_URL}/api/admin/chat-dashboard`, { headers });
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(body || `HTTP ${resp.status}`);
-      }
+      const today = new Date().toISOString().split("T")[0];
+      const [chatsResult, messagesResult, activeTodayResult, recentResult] = await Promise.all([
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chat_messages").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }).gte("updated_at", today),
+        supabase.schema("ai").from("chat_messages").select("id, user_id, role, created_at").order("created_at", { ascending: false }).limit(10),
+      ]);
 
-      const data = await resp.json();
       setChatStats({
-        totalChats: data.totalChats || 0,
-        totalMessages: data.totalMessages || 0,
-        activeToday: data.activeToday || 0,
+        totalChats: chatsResult.count ?? 0,
+        totalMessages: messagesResult.count ?? 0,
+        activeToday: activeTodayResult.count ?? 0,
       });
-      setRecentActivity(data.recentActivity || []);
+
+      setRecentActivity(
+        (recentResult.data ?? []).map((msg) => ({
+          id: msg.id as string,
+          user_email: "User",
+          action: msg.role === "user" ? "Sent message" : "Received AI response",
+          timestamp: msg.created_at as string,
+        }))
+      );
     } catch (error) {
       console.error("Error fetching chat stats:", error);
     }
@@ -498,7 +519,7 @@ export default function Admin() {
             },
             {
               title: "Trading activity",
-              value: tradingStats.totalPositions,
+              value: tradingStats.totalTrades + tradingStats.totalJournalEntries,
               description: `${tradingStats.totalTrades} trades · ${tradingStats.totalJournalEntries} journal logs`,
               icon: TrendingUp,
             },
@@ -843,7 +864,7 @@ export default function Admin() {
                 <h2 className="text-lg font-semibold">System health monitor</h2>
                 <p className="text-sm text-muted-foreground">Live connection status for Supabase, DataAPI, and the backend API.</p>
               </div>
-              <Button onClick={fetchSystemHealth} disabled={healthLoading} variant="outline" size="sm" className="w-full gap-2 rounded-xl sm:w-auto">
+              <Button type="button" onClick={(e) => { e.preventDefault(); void fetchSystemHealth(); }} disabled={healthLoading} variant="outline" size="sm" className="w-full gap-2 rounded-xl sm:w-auto">
                 <RefreshCw className={`h-4 w-4 ${healthLoading ? "animate-spin" : ""}`} />
                 Check health
               </Button>

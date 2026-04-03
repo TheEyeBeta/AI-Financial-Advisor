@@ -1,4 +1,4 @@
-import { aiDb } from '@/lib/supabase';
+import { aiDb, meridianDb, supabase } from '@/lib/supabase';
 import type { Chat, ChatMessage, ChatWithMessages } from '@/types/database';
 
 const MAX_MESSAGE_LENGTH = 10000;
@@ -251,3 +251,25 @@ export const chatApi = {
     if (error) throw error;
   },
 };
+
+// ── Intelligence Digests ──────────────────────────────────────────────────────
+
+/**
+ * Mark a single intelligence digest as read.
+ *
+ * Scopes the update to both the digest ID and the current authenticated user's
+ * ID so a user can never mark another user's digest as read — even if RLS is
+ * misconfigured.  Throws on any error; callers are responsible for handling.
+ */
+export async function markDigestRead(digestId: string): Promise<void> {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+
+  const { error } = await meridianDb
+    .from('intelligence_digests')
+    .update({ is_read: true })
+    .eq('id', digestId)
+    .eq('user_id', user.id);
+
+  if (error) throw error;
+}

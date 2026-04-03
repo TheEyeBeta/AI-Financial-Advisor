@@ -8,7 +8,7 @@ import {
   Newspaper,
   TrendingUp,
 } from "lucide-react";
-import { format, formatDistanceToNowStrict, parseISO } from "date-fns";
+import { formatDistanceToNowStrict, parseISO } from "date-fns";
 
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Badge } from "@/components/ui/badge";
@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useRecentNews } from "@/hooks/use-data";
 import { toSafeExternalUrl } from "@/lib/url";
 import { cn } from "@/lib/utils";
+import { AnalyticsEvents } from "@/services/analytics";
 import { scoreNewsImportance } from "@/services/news-api";
 
 type SortOrder = "latest" | "important";
@@ -37,14 +38,7 @@ type DisplayArticle = {
 const PAGE_SIZE = 30;
 const HIGH_IMPACT_THRESHOLD = 8;
 const FRESH_WINDOW_HOURS = 6;
-
-function formatMarketDate(date: string): string {
-  const parsedDate = parseISO(date);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return "Unknown date";
-  }
-  return format(parsedDate, "MMM d, yyyy 'at' h:mm a");
-}
+const FETCH_LIMIT = 90;
 
 function formatRelativeAge(date: string): string {
   const parsedDate = parseISO(date);
@@ -65,20 +59,20 @@ function getArticleAgeHours(date: string): number | null {
 function getImpactTone(score: number) {
   if (score >= 12) {
     return {
-      label: "High impact",
+      label: "Highest attention",
       className: "border-rose-500/25 bg-rose-500/10 text-rose-700 dark:text-rose-300",
     };
   }
 
   if (score >= HIGH_IMPACT_THRESHOLD) {
     return {
-      label: "Market moving",
+      label: "Priority watch",
       className: "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300",
     };
   }
 
   return {
-    label: "On watch",
+    label: "Watchlist",
     className: "border-border/70 bg-muted/70 text-muted-foreground",
   };
 }
@@ -114,26 +108,32 @@ function toPlainText(value?: string | null): string {
     return "";
   }
 
-  const withoutTags = input
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<\/(p|div|li|ul|ol|h[1-6]|blockquote)>/gi, " ")
+  // Use a sentinel to mark block-element boundaries before stripping tags,
+  // so we can later convert them to paragraph breaks instead of collapsing them.
+  const PARA_BREAK = "\x00P\x00";
+
+  const withSentinels = input
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6]|blockquote)>/gi, PARA_BREAK)
     .replace(/<[^>]*>/g, " ");
 
-  if (typeof DOMParser === "undefined") {
-    return withoutTags.replace(/\s+/g, " ").trim();
-  }
+  const raw =
+    typeof DOMParser !== "undefined"
+      ? new DOMParser().parseFromString(withSentinels, "text/html").documentElement.textContent ?? ""
+      : withSentinels;
 
-  const doc = new DOMParser().parseFromString(withoutTags, "text/html");
-  return (doc.documentElement.textContent || "").replace(/\s+/g, " ").trim();
+  return raw
+    .replace(new RegExp(PARA_BREAK, "g"), "\n\n")
+    .replace(/[ \t]+/g, " ")           // collapse horizontal whitespace only
+    .replace(/\n{3,}/g, "\n\n")        // max one blank line between paragraphs
+    .replace(/^\s+|\s+$/g, "");        // trim
 }
 
 const News = () => {
-  const source = "supabase" as const;
   const [sortOrder, setSortOrder] = useState<SortOrder>("latest");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  const { data: supabaseArticles = [], isLoading, error } = useRecentNews(24, 150);
-  const engineHealth = null;
+  const { data: supabaseArticles = [], isLoading, error } = useRecentNews(24, FETCH_LIMIT);
 
   const allArticles = useMemo<DisplayArticle[]>(() => {
     const normalized: DisplayArticle[] = supabaseArticles.map((article) => {
@@ -197,13 +197,25 @@ const News = () => {
   }, [allArticles]);
 
   const handleSortChange = (next: SortOrder) => {
+    if (next !== sortOrder) {
+      AnalyticsEvents.newsSortChanged(next);
+    }
     setSortOrder(next);
     setVisibleCount(PAGE_SIZE);
   };
 
+  const handleArticleClick = (article: DisplayArticle, section: "lead" | "spotlight" | "stream") => {
+    AnalyticsEvents.newsArticleClicked(article.provider, {
+      article_id: article.id,
+      section,
+      ticker: article.ticker ?? null,
+      has_link: Boolean(article.safeLink),
+    });
+  };
+
   const sourceTheme = {
     eyebrow: "Market News Desk",
-    description: "Track the latest headlines and rank them by recency or market impact.",
+    description: "Track the latest headlines and sort them by recency or by a simple market-attention heuristic.",
     statusLabel: "Live",
     statusNote: "Live headlines update as new stories land in the feed.",
   };
@@ -224,11 +236,10 @@ const News = () => {
                 </div>
                 <div>
                   <h1 className="max-w-3xl text-[clamp(2.35rem,4.8vw,4.5rem)] font-semibold tracking-[-0.05em] text-slate-950 dark:text-slate-50">
-                    Market-moving news, ranked by signal.
+                    Market news, ranked by attention.
                   </h1>
                   <p className="mt-4 max-w-2xl text-sm leading-7 text-slate-600 dark:text-slate-400 sm:text-base">
-                    Scan the latest headlines, sort by freshness or impact, and focus on the stories most likely to
-                    move markets.
+                    Scan the latest headlines, sort by freshness or attention, and focus on the stories that may deserve deeper research.
                   </p>
                 </div>
               </div>
@@ -242,7 +253,7 @@ const News = () => {
                 <div className="rounded-[22px] border border-slate-200/80 dark:border-slate-700/60 bg-white/76 dark:bg-slate-800/60 p-5 shadow-[0_20px_36px_-34px_rgba(15,23,42,0.28)] backdrop-blur-sm">
                   <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">High impact</p>
                   <p className="mt-3 text-3xl font-semibold text-slate-950 dark:text-slate-50">{highImpactCount}</p>
-                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Stories flagged by the scoring model</p>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">Stories flagged by a simple keyword-based heuristic</p>
                 </div>
                 <div className="rounded-[22px] border border-slate-200/80 dark:border-slate-700/60 bg-white/76 dark:bg-slate-800/60 p-5 shadow-[0_20px_36px_-34px_rgba(15,23,42,0.28)] backdrop-blur-sm">
                   <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">Fresh in 6h</p>
@@ -367,6 +378,7 @@ const News = () => {
                   href={leadArticle.safeLink ?? undefined}
                   target="_blank"
                   rel="noopener noreferrer"
+                  onClick={() => handleArticleClick(leadArticle, "lead")}
                   aria-label={`Open article: ${leadArticle.title}`}
                   aria-disabled={!leadArticle.safeLink}
                   className={cn("group block self-start", !leadArticle.safeLink && "pointer-events-none opacity-75")}
@@ -396,7 +408,7 @@ const News = () => {
                       <h2 className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl lg:text-[2.5rem] lg:leading-[1.05]">
                         {leadArticle.title}
                       </h2>
-                      <p className="mt-4 max-w-2xl text-sm leading-7 text-muted-foreground sm:text-base">
+                      <p className="mt-4 max-w-2xl text-sm leading-7 text-muted-foreground whitespace-pre-line sm:text-base">
                         {leadArticle.summary}
                       </p>
                     </div>
@@ -420,7 +432,7 @@ const News = () => {
                             </Badge>
                           );
                         })()}
-                        <span>{formatMarketDate(leadArticle.published_at)}</span>
+                        <span>{formatRelativeAge(leadArticle.published_at)}</span>
                       </div>
                       <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground transition-colors group-hover:text-primary">
                         Open coverage
@@ -442,6 +454,7 @@ const News = () => {
                         href={article.safeLink ?? undefined}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={() => handleArticleClick(article, "spotlight")}
                         aria-label={`Open article: ${article.title}`}
                         aria-disabled={!article.safeLink}
                         className={cn("group block", !article.safeLink && "pointer-events-none opacity-75")}
@@ -501,6 +514,7 @@ const News = () => {
                         href={article.safeLink ?? undefined}
                         target="_blank"
                         rel="noopener noreferrer"
+                        onClick={() => handleArticleClick(article, "stream")}
                         aria-label={`Open article: ${article.title}`}
                         aria-disabled={!article.safeLink}
                         className={cn("group block", wideCard && "xl:col-span-2", !article.safeLink && "pointer-events-none opacity-75")}
@@ -545,7 +559,7 @@ const News = () => {
                           </div>
 
                           <div className="mt-5 flex items-center justify-between gap-3 border-t border-border/60 pt-4 text-xs text-muted-foreground">
-                            <span className="truncate">{formatMarketDate(article.published_at)}</span>
+                            <span className="truncate">{formatRelativeAge(article.published_at)}</span>
                             <span className="inline-flex shrink-0 items-center gap-1.5 font-medium text-foreground transition-colors group-hover:text-primary">
                               Read
                               <ArrowUpRight className="h-3.5 w-3.5" />

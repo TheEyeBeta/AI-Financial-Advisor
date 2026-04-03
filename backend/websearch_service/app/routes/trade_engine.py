@@ -15,9 +15,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from ..services.auth import (
+    get_backend_anon_key,
+    get_backend_service_role_key,
+    get_backend_supabase_url,
+    require_websocket_auth,
+)
 from ..services.dataapi_client import get_dataapi_client
 
 logger = logging.getLogger(__name__)
@@ -386,14 +392,9 @@ def _query_stock_snapshots(client, columns: str = "*", limit: int | None = None,
 
 
 def _get_supabase_client():
-    """Lazy-init Supabase client using either prefixed or plain env vars."""
-    url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
-    key = (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("VITE_SUPABASE_ANON_KEY")
-    )
+    """Lazy-init Supabase client using backend-only env vars."""
+    url = get_backend_supabase_url()
+    key = get_backend_service_role_key() or get_backend_anon_key()
     if not url or not key:
         return None
     from supabase import create_client
@@ -468,6 +469,13 @@ async def websocket_live(websocket: WebSocket) -> None:
     No live price streaming — sends engine_status on connect so the
     frontend knows the engine is in stub mode.
     """
+    try:
+        await require_websocket_auth(websocket)
+    except HTTPException as exc:
+        reason = exc.detail if isinstance(exc.detail, str) else "Authentication required."
+        await websocket.close(code=4401, reason=reason[:123])
+        return
+
     await websocket.accept()
     connection_id = str(uuid.uuid4())
     subscriptions: set[str] = set()

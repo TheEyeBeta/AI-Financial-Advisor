@@ -1,16 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { chatApi, chatsApi } from '@/services/chat-api';
+import { chatApi, chatsApi, markDigestRead } from '@/services/chat-api';
 import { newsApi } from '@/services/news-api';
-import { stockRankingApi } from '@/services/stock-ranking-api';
+import { apiClient } from '@/lib/api-client';
 import { tradeEngineApi } from '@/services/trade-engine-api';
 import { portfolioApi, positionsApi, tradesApi, journalApi } from '@/services/trading-api';
 import { achievementsApi, learningApi, marketApi } from '@/services/user-data-api';
 import { pythonApi } from '@/services/python-api';
+import { meridianDb } from '@/lib/supabase';
 import { useAuth } from './use-auth';
 import { useDataSource, sourceParam } from './use-data-source';
 import type {
   OpenPosition,
   TradeJournalEntry,
+  IntelligenceDigest,
+  StockScore,
+  TopStocksResult,
 } from '@/types/database';
 
 // Portfolio hooks
@@ -221,15 +225,14 @@ export function useSendChatMessage() {
         console.log('[AI] Trade Engine not available, will use Supabase data fallback');
       }
       
-      // Get AI response with user's experience level, conversation history, and live Eye data
+      // Get AI response — experience_level and session_type flow through to the backend
       const experienceLevel = userProfile?.experience_level ?? null;
       const aiResponse = await pythonApi.getChatResponse(
-        message, 
-        userId, 
-        experienceLevel, 
-        chatHistory, 
-        null,  // No snapshots - using live data only
-        tradeEngineContext  // Live Trade Engine data
+        message,
+        userId,
+        experienceLevel,
+        chatHistory,
+        tradeEngineContext  // Live Trade Engine data; session_type 'advisor' is set inside getChatResponse
       );
       
       // Save AI response
@@ -445,18 +448,87 @@ export function useTradeEngineHealth() {
   });
 }
 
-// Top stocks ranking hook — supports investment horizon and data source toggle
-export function useTopStocks(limit = 20, minScore = 0, horizon: 'short' | 'long' | 'balanced' = 'balanced') {
-  const { dataSource } = useDataSource();
-  const src = sourceParam(dataSource);
+// Top stocks ranking hook — data is pre-computed server-side, updated daily at 01:00 UTC
+export function useTopStocks(limit = 20, minScore = 0) {
   return useQuery({
-    queryKey: ['top-stocks', limit, minScore, horizon, src],
-    queryFn: () => stockRankingApi.getRanking({ limit, minScore, horizon }, src),
+    queryKey: ['top-stocks', limit, minScore],
+    queryFn: async (): Promise<TopStocksResult> => {
+      const params = new URLSearchParams({
+        limit: String(limit),
+        min_score: String(minScore),
+      });
+      const data = await apiClient.get<{
+        stocks: StockScore[];
+        total: number;
+        last_ranked_at: string | null;
+        data_age_hours: number | null;
+      }>(
+        `/api/stocks/ranking?${params}`,
+      );
+      return {
+        stocks: data.stocks,
+        totalScored: data.total,
+        lastRankedAt: data.last_ranked_at,
+        dataAgeHours: data.data_age_hours,
+      };
+    },
     staleTime: 5 * 60 * 1000,
-    refetchInterval: 10 * 60 * 1000,
+    refetchInterval: 60 * 60 * 1000,
     retry: 2,
   });
 }
 
 // Export pythonApi and tradeEngineApi for use in components
 export { pythonApi, tradeEngineApi };
+
+// ── Intelligence Digests ──────────────────────────────────────────────────────
+
+/**
+ * Fetch the current user's unread intelligence digests (newest-first, max 5).
+ * Polls every 5 minutes.  markAsRead optimistically removes the digest from
+ * the local cache for an instant UI response, then syncs with the server.
+ */
+export function useIntelligenceDigests() {
+  // intelligence_digests.user_id references auth.users(id), so we must use
+  // the Supabase auth UUID — not the app-level core.users.id (userId).
+  const { authUserId } = useAuth();
+  const queryClient = useQueryClient();
+  const queryKey = ['intelligence-digests', authUserId];
+
+  const { data: digests = [], isLoading } = useQuery({
+    queryKey,
+    queryFn: async (): Promise<IntelligenceDigest[]> => {
+      if (!authUserId) return [];
+      const { data, error } = await meridianDb
+        .from('intelligence_digests')
+        .select('*')
+        .eq('user_id', authUserId)
+        .eq('is_read', false)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return data ?? [];
+    },
+    enabled: !!authUserId,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+
+  const markAsRead = async (digestId: string) => {
+    // Optimistically remove from cache so the next digest surfaces immediately.
+    queryClient.setQueryData<IntelligenceDigest[]>(queryKey, (old) =>
+      (old ?? []).filter((d) => d.id !== digestId),
+    );
+    try {
+      await markDigestRead(digestId);
+    } catch (err) {
+      // Restore cache state from server if the API call fails.
+      queryClient.invalidateQueries({ queryKey });
+      throw err instanceof Error ? err : new Error('Could not dismiss this alert. Please try again.');
+    }
+    // Sync cache with server after successful update.
+    queryClient.invalidateQueries({ queryKey });
+  };
+
+  return { digests, isLoading, markAsRead };
+}

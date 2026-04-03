@@ -146,9 +146,72 @@ export interface Database {
         Update: { ticker_id?: number; ticker?: string; company_name?: string | null; last_price?: number | null; last_price_ts?: string | null; price_change_pct?: number | null; price_change_abs?: number | null; high_52w?: number | null; low_52w?: number | null; updated_at?: string | null; volume?: number | null; avg_volume_10d?: number | null; avg_volume_30d?: number | null; volume_ratio?: number | null; sma_10?: number | null; sma_20?: number | null; sma_50?: number | null; sma_100?: number | null; sma_200?: number | null; ema_10?: number | null; ema_20?: number | null; ema_50?: number | null; ema_200?: number | null; rsi_14?: number | null; rsi_9?: number | null; stochastic_k?: number | null; stochastic_d?: number | null; williams_r?: number | null; cci?: number | null; macd?: number | null; macd_signal?: number | null; macd_histogram?: number | null; adx?: number | null; bollinger_upper?: number | null; bollinger_middle?: number | null; bollinger_lower?: number | null; pe_ratio?: number | null; forward_pe?: number | null; peg_ratio?: number | null; price_to_book?: number | null; price_to_sales?: number | null; dividend_yield?: number | null; market_cap?: number | null; eps?: number | null; eps_growth?: number | null; revenue_growth?: number | null; price_vs_sma_50?: number | null; price_vs_sma_200?: number | null; price_vs_ema_50?: number | null; price_vs_ema_200?: number | null; price_vs_bollinger_middle?: number | null; is_bullish?: boolean | null; is_oversold?: boolean | null; is_overbought?: boolean | null; latest_signal?: string | null; signal_strategy?: string | null; signal_confidence?: number | null; signal_timestamp?: string | null; last_news_ts?: string | null; news_count_24h?: number | null; synced_at?: string };
       };
       trending_stocks: {
-        Row: { id: string; symbol: string; name: string; change_percent: number; updated_at: string | null };
-        Insert: { id?: string; symbol: string; name: string; change_percent: number; updated_at?: string | null };
-        Update: { id?: string; symbol?: string; name?: string; change_percent?: number; updated_at?: string | null };
+        Row: {
+          id: string;
+          symbol: string;
+          name: string;
+          change_percent: number;
+          updated_at: string | null;
+          ticker: string | null;
+          composite_score: number | null;
+          momentum_score: number | null;
+          technical_score: number | null;
+          fundamental_score: number | null;
+          consistency_score: number | null;
+          signal_score: number | null;
+          momentum_1m: number | null;
+          momentum_3m: number | null;
+          momentum_6m: number | null;
+          momentum_12m: number | null;
+          fundamental_trend: string | null;
+          rank_tier: string | null;
+          conviction: string | null;
+          ranked_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          symbol: string;
+          name: string;
+          change_percent: number;
+          updated_at?: string | null;
+          ticker?: string | null;
+          composite_score?: number | null;
+          momentum_score?: number | null;
+          technical_score?: number | null;
+          fundamental_score?: number | null;
+          consistency_score?: number | null;
+          signal_score?: number | null;
+          momentum_1m?: number | null;
+          momentum_3m?: number | null;
+          momentum_6m?: number | null;
+          momentum_12m?: number | null;
+          fundamental_trend?: string | null;
+          rank_tier?: string | null;
+          conviction?: string | null;
+          ranked_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          symbol?: string;
+          name?: string;
+          change_percent?: number;
+          updated_at?: string | null;
+          ticker?: string | null;
+          composite_score?: number | null;
+          momentum_score?: number | null;
+          technical_score?: number | null;
+          fundamental_score?: number | null;
+          consistency_score?: number | null;
+          signal_score?: number | null;
+          momentum_1m?: number | null;
+          momentum_3m?: number | null;
+          momentum_6m?: number | null;
+          momentum_12m?: number | null;
+          fundamental_trend?: string | null;
+          rank_tier?: string | null;
+          conviction?: string | null;
+          ranked_at?: string | null;
+        };
       };
     };
   };
@@ -165,9 +228,9 @@ export interface Database {
         Update: { id?: string; goal_id?: string; snapshot_date?: string; actual_amount?: number | null; plan_amount?: number | null; variance_pct?: number | null; on_track?: boolean | null };
       };
       intelligence_digests: {
-        Row: { id: string; user_id: string; created_at: string | null; digest_type: string | null; content: Record<string, unknown> | null; delivered: boolean | null; delivered_at: string | null };
-        Insert: { id?: string; user_id: string; created_at?: string | null; digest_type?: string | null; content?: Record<string, unknown> | null; delivered?: boolean | null; delivered_at?: string | null };
-        Update: { id?: string; user_id?: string; created_at?: string | null; digest_type?: string | null; content?: Record<string, unknown> | null; delivered?: boolean | null; delivered_at?: string | null };
+        Row: { id: string; user_id: string; created_at: string | null; digest_type: string | null; headline: string | null; body: string | null; content: Record<string, unknown> | null; is_read: boolean | null; delivered: boolean | null; delivered_at: string | null };
+        Insert: { id?: string; user_id: string; created_at?: string | null; digest_type?: string | null; headline?: string | null; body?: string | null; content?: Record<string, unknown> | null; is_read?: boolean | null; delivered?: boolean | null; delivered_at?: string | null };
+        Update: { id?: string; user_id?: string; created_at?: string | null; digest_type?: string | null; headline?: string | null; body?: string | null; content?: Record<string, unknown> | null; is_read?: boolean | null; delivered?: boolean | null; delivered_at?: string | null };
       };
       life_events: {
         Row: { id: string; user_id: string; event_type: string | null; event_date: string | null; notes: string | null; plan_recalculated: boolean | null; created_at: string | null };
@@ -255,9 +318,110 @@ export type MarketIndex = Database['market']['Tables']['market_indices']['Row'];
 export type TrendingStock = Database['market']['Tables']['trending_stocks']['Row'];
 export type NewsArticle = Database['market']['Tables']['news']['Row'];
 export type StockSnapshot = Database['market']['Tables']['stock_snapshots']['Row'];
+export type IntelligenceDigest = Database['meridian']['Tables']['intelligence_digests']['Row'];
 
 export interface ChatWithMessages extends Chat {
   messages: ChatMessage[];
   messageCount: number;
   lastMessage?: ChatMessage;
+}
+
+// ── Stock Ranking (market.trending_stocks via GET /api/stocks/ranking) ────────
+
+export interface StockScore {
+  ticker: string;
+  symbol: string;
+  name: string;
+  change_percent: number | null;
+  composite_score: number;
+  momentum_score: number | null;
+  technical_score: number | null;
+  fundamental_score: number | null;
+  consistency_score: number | null;
+  signal_score: number | null;
+  momentum_1m: number | null;
+  momentum_3m: number | null;
+  momentum_6m: number | null;
+  momentum_12m: number | null;
+  fundamental_trend: string | null;
+  rank_tier: string | null;
+  conviction: string | null;
+  ranked_at: string | null;
+  updated_at?: string | null;
+}
+
+export interface TopStocksResult {
+  stocks: StockScore[];
+  totalScored: number;
+  lastRankedAt: string | null;
+  dataAgeHours: number | null;
+}
+
+// ── Stock Detail (GET /api/stocks/detail/{ticker}) ────────────────────────────
+
+export interface StockDetailTechnicals {
+  rsi_14: number | null;
+  rsi_9: number | null;
+  macd: number | null;
+  macd_signal: number | null;
+  macd_histogram: number | null;
+  macd_above_signal: boolean | null;
+  adx: number | null;
+  stochastic_k: number | null;
+  stochastic_d: number | null;
+  williams_r: number | null;
+  cci: number | null;
+  bollinger_upper: number | null;
+  bollinger_lower: number | null;
+  bollinger_position: number | null;
+  golden_cross: boolean | null;
+}
+
+export interface StockDetailFundamentals {
+  pe_ratio: number | null;
+  forward_pe: number | null;
+  peg_ratio: number | null;
+  price_to_book: number | null;
+  price_to_sales: number | null;
+  eps: number | null;
+  eps_growth: number | null;
+  revenue_growth: number | null;
+  dividend_yield: number | null;
+  market_cap: number | null;
+}
+
+export interface StockDetailSignals {
+  is_bullish: boolean | null;
+  is_oversold: boolean | null;
+  is_overbought: boolean | null;
+  latest_signal: string | null;
+  signal_strategy: string | null;
+  signal_confidence: number | null;
+}
+
+export interface StockDetailRanking {
+  composite_score: number | null;
+  smoothed_score: number | null;
+  rank_tier: string | null;
+  conviction: string | null;
+  dimension_scores: Record<string, unknown>;
+}
+
+export interface StockDetail {
+  ticker: string;
+  company_name: string | null;
+  last_price: number | null;
+  price_change_pct: number | null;
+  high_52w: number | null;
+  low_52w: number | null;
+  volume: number | null;
+  avg_volume_10d: number | null;
+  volume_ratio: number | null;
+  price_vs_sma_50: number | null;
+  price_vs_sma_200: number | null;
+  high_52w_position: number | null;
+  technicals: StockDetailTechnicals;
+  fundamentals: StockDetailFundamentals;
+  signals: StockDetailSignals;
+  ranking: StockDetailRanking | null;
 }

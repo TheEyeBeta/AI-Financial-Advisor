@@ -118,8 +118,7 @@ class TestRateLimitingIntegration:
         # We need to reset the rate limiter state for this test to be predictable.
         # Import and reset the global rate limiter.
         from app.services.rate_limit import rate_limiter
-        original_state = dict(rate_limiter._state)
-        rate_limiter._state.clear()
+        rate_limiter.clear_state()
 
         try:
             # First request
@@ -152,9 +151,7 @@ class TestRateLimitingIntegration:
                 f"Remaining should decrease: {remaining1} -> {remaining2}"
             )
         finally:
-            # Restore original state
-            rate_limiter._state.clear()
-            rate_limiter._state.update(original_state)
+            rate_limiter.clear_state()
 
     @patch("app.routes.ai_proxy._call_openai_responses", new_callable=AsyncMock)
     def test_rate_limit_exceeded_returns_429(

@@ -121,8 +121,6 @@ export function getStockRanking(
   const params = new URLSearchParams();
   if (options?.limit !== undefined) params.set('limit', String(options.limit));
   if (options?.min_score !== undefined) params.set('min_score', String(options.min_score));
-  if (options?.horizon) params.set('horizon', options.horizon);
-  if (options?.source) params.set('source', options.source);
   const qs = params.toString();
   return apiClient.get(`/api/stocks/ranking${qs ? `?${qs}` : ''}`);
 }

@@ -122,7 +122,7 @@ def _make_supabase_mock():
 @pytest.mark.asyncio
 async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
     """Onboard with sample data, verify cache structure, then chat returns goal-aware response."""
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     mock_supabase = _make_supabase_mock()
 
@@ -138,7 +138,7 @@ async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
     }
 
     # 1) POST /api/meridian/onboard
-    with patch("app.services.meridian_context._get_supabase_client", return_value=mock_supabase):
+    with patch("app.services.meridian_context.supabase_client", new=mock_supabase):
         onboard_resp = client.post("/api/meridian/onboard", json=sample_body)
     assert onboard_resp.status_code == 200
     data = onboard_resp.json()
@@ -189,7 +189,7 @@ async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
     mock_http = AsyncMock()
     mock_http.post = AsyncMock(return_value=MagicMock(status_code=200, json=lambda: mock_response_data, text=""))
 
-    with patch("app.services.meridian_context._get_supabase_client", return_value=mock_supabase), \
+    with patch("app.services.meridian_context.supabase_client", new=mock_supabase), \
          patch("httpx.AsyncClient", return_value=mock_http):
         chat_resp = client.post(
             "/api/chat",

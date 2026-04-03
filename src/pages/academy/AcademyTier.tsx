@@ -166,7 +166,7 @@ export default function AcademyTier() {
   }
 
   const chapterMeta = getJourneyMeta(tier.id);
-  const ChapterIcon = chapterMeta.icon;
+  const ChapterIcon = chapterMeta.icon;  // variable names kept for minimal diff
   const completedCount = lessons.filter((lesson) => getLessonStatus(lesson.id) === "completed").length;
   const inProgressCount = lessons.filter((lesson) => getLessonStatus(lesson.id) === "in_progress").length;
   const totalMinutes = lessons.reduce((total, lesson) => total + lesson.estimated_minutes, 0);
@@ -195,7 +195,7 @@ export default function AcademyTier() {
 
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className={cn("text-xs", chapterMeta.badgeClass)}>
-                  {chapterMeta.chapter}
+                  {chapterMeta.tier}
                 </Badge>
                 <Badge variant="outline" className="border-border/70 bg-background/70 text-foreground">
                   {completedCount} of {lessons.length} lessons complete
@@ -225,7 +225,7 @@ export default function AcademyTier() {
 
               <div className="mt-6 space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Chapter progress</span>
+                  <span className="text-muted-foreground">Tier progress</span>
                   <span className="font-medium text-foreground">{progressPct}%</span>
                 </div>
                 <Progress value={progressPct} className="h-2.5" />
@@ -241,7 +241,7 @@ export default function AcademyTier() {
                   }}
                   disabled={!nextLesson}
                 >
-                  {nextLesson ? "Continue this chapter" : "Chapter complete"}
+                  {nextLesson ? "Continue this tier" : "Tier complete"}
                   <ArrowRight className="h-4 w-4" />
                 </Button>
                 <Button
@@ -261,9 +261,9 @@ export default function AcademyTier() {
 
             <Card className="border-border/60 bg-background/80 shadow-none backdrop-blur">
               <div className="p-5">
-                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Chapter Pulse</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Tier Pulse</p>
                 <h2 className="mt-2 text-lg font-semibold text-foreground">
-                  {nextLesson ? "Next recommended lesson" : "You cleared this chapter"}
+                  {nextLesson ? "Next recommended lesson" : "You cleared this tier"}
                 </h2>
 
                 <div className="mt-5 grid grid-cols-2 gap-3">
@@ -304,7 +304,7 @@ export default function AcademyTier() {
                       Every lesson here is completed
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      Revisit lessons any time or return to the Academy map for the next chapter.
+                      Revisit lessons any time or return to the Academy map for the next tier.
                     </p>
                   </div>
                 )}
@@ -317,7 +317,7 @@ export default function AcademyTier() {
           <Card className="rounded-[1.75rem] border-border/60 bg-card/90 shadow-sm">
             <CardContent className="py-16 text-center">
               <BookOpen className="mx-auto mb-4 h-12 w-12 text-muted-foreground/20" />
-              <p className="text-sm text-muted-foreground">No lessons available yet for this chapter.</p>
+              <p className="text-sm text-muted-foreground">No lessons available yet for this tier.</p>
             </CardContent>
           </Card>
         ) : (
@@ -330,7 +330,7 @@ export default function AcademyTier() {
               <div>
                 <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Lesson Path</p>
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
-                  Move through this chapter lesson by lesson.
+                  Move through this tier lesson by lesson.
                 </h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
                   Each lesson builds on the last, so the path reads more like a guided run-through than a loose list.
@@ -420,7 +420,7 @@ export default function AcademyTier() {
             <div className="space-y-4">
               <Card className="rounded-[1.75rem] border-border/60 bg-card/90 shadow-sm">
                 <div className="p-5">
-                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Chapter Rhythm</p>
+                  <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Tier Rhythm</p>
                   <h3 className="mt-2 text-lg font-semibold text-foreground">How to work through this stage</h3>
 
                   <div className="mt-5 space-y-4">
@@ -430,7 +430,7 @@ export default function AcademyTier() {
                         Start with the next incomplete lesson
                       </div>
                       <p className="mt-1 text-sm text-muted-foreground">
-                        The chapter is ordered intentionally, so the next unfinished lesson is the right default move.
+                        The tier is ordered intentionally, so the next unfinished lesson is the right default move.
                       </p>
                     </div>
 

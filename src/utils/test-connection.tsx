@@ -169,6 +169,7 @@ export function SupabaseConnectionTest() {
         </div>
 
         <button
+          type="button"
           onClick={testConnection}
           className="text-sm text-primary hover:underline"
         >

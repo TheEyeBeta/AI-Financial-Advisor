@@ -11,7 +11,7 @@ from app.services.rate_limit import rate_limiter
 async def test_chat_endpoint_success(client: TestClient):
     """Test successful chat completion."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     # Responses API format: classifier + main chat both return this mock.
     # Classifier will parse it, find no "complexity" key, and default to "medium".
@@ -49,7 +49,7 @@ async def test_chat_endpoint_success(client: TestClient):
 @pytest.mark.asyncio
 async def test_chat_endpoint_success_with_top_level_output_text(client: TestClient):
     """Test chat completion when Responses API returns top-level output_text."""
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     fa_text = (
         '{"needs_clarification": false, "clarification_questions": [], '
@@ -79,7 +79,7 @@ async def test_chat_endpoint_success_with_top_level_output_text(client: TestClie
 @pytest.mark.asyncio
 async def test_chat_endpoint_appends_test_disclaimer_for_actionable_advice(client: TestClient):
     """Actionable recommendations should include the test-mode disclaimer."""
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     fa_text = (
         '{"needs_clarification": false, "clarification_questions": [], '
@@ -111,7 +111,7 @@ async def test_chat_endpoint_appends_test_disclaimer_for_actionable_advice(clien
 def test_chat_endpoint_missing_api_key(client: TestClient, monkeypatch):
     """Test chat endpoint when API key is missing."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     
     response = client.post("/api/chat", json={"message": "Hello"})
@@ -128,7 +128,7 @@ def test_chat_endpoint_missing_message(client: TestClient):
 def test_chat_endpoint_with_messages(client: TestClient):
     """Test chat endpoint with messages array."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     fa_text = (
         '{"needs_clarification": false, "clarification_questions": [], '
@@ -173,7 +173,7 @@ def test_chat_endpoint_message_too_long(client: TestClient):
 def test_chat_endpoint_empty_response(client: TestClient):
     """Test chat endpoint when provider returns empty response."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     # Both classifier and main chat receive empty text.
     # Classifier falls back to default classification; main chat raises 502.
@@ -199,7 +199,7 @@ def test_chat_endpoint_empty_response(client: TestClient):
 @pytest.mark.asyncio
 async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: TestClient):
     """Retry once when output budget is fully consumed by reasoning tokens."""
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     classifier_json = '{"complexity":"high","requires_calculation":true,"high_risk_decision":false}'
     exhausted_response_data = {
@@ -216,6 +216,7 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
         '"final_answer": "Recovered answer after retry.", "confidence": 0.9}'
     )
 
+    # call[0]: complexity classifier (_classify_query) — Responses API
     classifier_response = MagicMock()
     classifier_response.status_code = 200
     classifier_response.json.return_value = {
@@ -224,11 +225,21 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
     }
     classifier_response.text = ""
 
+    # call[1]: subagent intent classifier (classify_intent) — Chat Completions API
+    subagent_classifier_response = MagicMock()
+    subagent_classifier_response.status_code = 200
+    subagent_classifier_response.json.return_value = {
+        "choices": [{"message": {"content": "general"}}]
+    }
+    subagent_classifier_response.text = ""
+
+    # call[2]: main chat — first call, reasoning budget exhausted
     exhausted_response = MagicMock()
     exhausted_response.status_code = 200
     exhausted_response.json.return_value = exhausted_response_data
     exhausted_response.text = ""
 
+    # call[3]: main chat — retry with lower effort
     retry_response = MagicMock()
     retry_response.status_code = 200
     retry_response.json.return_value = {
@@ -238,7 +249,9 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
     retry_response.text = ""
 
     mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=[classifier_response, exhausted_response, retry_response])
+    mock_client.post = AsyncMock(
+        side_effect=[classifier_response, subagent_classifier_response, exhausted_response, retry_response]
+    )
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
@@ -248,8 +261,9 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
         assert response.json()["response"] == "Recovered answer after retry."
 
         call_args = mock_client.post.await_args_list
-        first_chat_payload = call_args[1].kwargs["json"]
-        retry_chat_payload = call_args[2].kwargs["json"]
+        # [0] complexity classifier, [1] subagent intent classifier, [2] first chat, [3] retry
+        first_chat_payload = call_args[2].kwargs["json"]
+        retry_chat_payload = call_args[3].kwargs["json"]
         assert first_chat_payload["max_output_tokens"] == 8000
         assert retry_chat_payload["reasoning"]["effort"] == "low"
         assert retry_chat_payload["max_output_tokens"] == 8000
@@ -258,7 +272,7 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
 def test_chat_endpoint_rate_limit(client: TestClient):
     """Test chat endpoint rate limiting."""
     # Clear rate limit state before test
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     fa_text = (
         '{"needs_clarification": false, "clarification_questions": [], '
@@ -311,7 +325,7 @@ def test_chat_endpoint_rate_limit(client: TestClient):
 async def test_chat_title_endpoint(client: TestClient):
     """Test chat title generation endpoint."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
     
     mock_response_data = {
         "choices": [{"message": {"content": "Financial Planning Discussion"}}],
@@ -342,7 +356,7 @@ async def test_chat_title_endpoint(client: TestClient):
 @pytest.mark.asyncio
 async def test_chat_title_endpoint_with_content_array(client: TestClient):
     """Title generation should support content arrays returned by providers."""
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     mock_response_data = {
         "choices": [{"message": {"content": [{"type": "output_text", "text": "Portfolio Risk Review"}]}}],
@@ -377,7 +391,7 @@ def test_chat_title_endpoint_empty_message(client: TestClient):
 async def test_analyze_quantitative_endpoint(client: TestClient):
     """Test quantitative analysis endpoint."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
     
     mock_response_data = {
         "choices": [{"message": {"content": "Analysis: Strong performance"}}],
@@ -417,7 +431,7 @@ def test_analyze_quantitative_endpoint_invalid_data(client: TestClient):
 async def test_chat_endpoint_temperature_validation(client: TestClient):
     """Test chat endpoint temperature parameter validation."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     fa_text = (
         '{"needs_clarification": false, "clarification_questions": [], '
@@ -453,7 +467,7 @@ async def test_chat_endpoint_temperature_validation(client: TestClient):
         assert response.status_code == 422
         
         # Clear rate limit before valid test
-        rate_limiter._state.clear()
+        rate_limiter.clear_state()
         # Test valid temperature
         response = client.post(
             "/api/chat",
@@ -466,7 +480,7 @@ async def test_chat_endpoint_temperature_validation(client: TestClient):
 async def test_chat_endpoint_max_tokens_validation(client: TestClient):
     """Test chat endpoint max_tokens parameter validation."""
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     fa_text = (
         '{"needs_clarification": false, "clarification_questions": [], '
@@ -502,7 +516,7 @@ async def test_chat_endpoint_max_tokens_validation(client: TestClient):
         assert response.status_code == 422
         
         # Clear rate limit before valid test
-        rate_limiter._state.clear()
+        rate_limiter.clear_state()
         # Test valid max_tokens
         response = client.post(
             "/api/chat",
@@ -514,7 +528,7 @@ async def test_chat_endpoint_max_tokens_validation(client: TestClient):
 @pytest.mark.asyncio
 async def test_chat_endpoint_plain_text_response(client: TestClient):
     """Test chat endpoint with natural language (non-JSON) model response."""
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     plain_text = "AAPL is currently trading at $185.50, up 1.2% today. The RSI is at 62, suggesting neutral momentum."
     mock_response_data = {
@@ -540,7 +554,7 @@ async def test_chat_endpoint_plain_text_response(client: TestClient):
 @pytest.mark.asyncio
 async def test_chat_title_fallback_on_empty_response(client: TestClient):
     """Title generation should fall back to message-based title when model returns empty."""
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     mock_response_data = {
         "choices": [{"message": {"content": ""}}],
@@ -574,7 +588,7 @@ async def test_chat_endpoint_network_error(client: TestClient):
     import httpx
 
     # Clear rate limit state
-    rate_limiter._state.clear()
+    rate_limiter.clear_state()
 
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(side_effect=httpx.RequestError("Connection failed"))

@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import {
-  AlertTriangle,
   ChevronDown,
   ChevronUp,
-  Info,
-  Lock,
+  Minus,
   RefreshCw,
   Shield,
   Star,
@@ -18,10 +18,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTopStocks } from "@/hooks/use-data";
+import { ApiError, getStockDetail } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
-import type { StockScore, Horizon } from "@/services/stock-ranking-api";
+import { AnalyticsEvents } from "@/services/analytics";
+import type { StockDetail, StockScore } from "@/types/database";
 
-const EMPTY_VALUE = "-";
+const EMPTY_VALUE = "—";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -54,6 +56,23 @@ function tierBadge(tier: string) {
   }
 }
 
+function tierLabel(tier: string) {
+  switch (tier) {
+    case "Strong Buy":
+      return "Top score";
+    case "Buy":
+      return "Above average";
+    case "Hold":
+      return "Neutral";
+    case "Underperform":
+      return "Below average";
+    case "Sell":
+      return "Lowest score";
+    default:
+      return tier;
+  }
+}
+
 function convictionBadge(conviction: string) {
   switch (conviction) {
     case "High":
@@ -65,105 +84,35 @@ function convictionBadge(conviction: string) {
   }
 }
 
-function stabilityLabel(cycles: number): { text: string; className: string } | null {
-  if (cycles < 3) return null;
-  if (cycles >= 18) {
-    return { text: "Stable 3h+", className: "border-profit/30 bg-profit/10 text-profit" };
+function convictionLabel(conviction: string) {
+  switch (conviction) {
+    case "High":
+      return "High agreement";
+    case "Medium":
+      return "Moderate agreement";
+    default:
+      return "Low agreement";
   }
-  if (cycles >= 6) {
-    return {
-      text: `Stable ${Math.round((cycles * 10) / 60)}h+`,
-      className: "border-profit/25 bg-profit/5 text-profit/80",
-    };
-  }
-  return {
-    text: "Holding",
-    className: "border-border/50 bg-muted/30 text-muted-foreground",
-  };
 }
 
-function fmtPct(value: number | null, decimals = 1): string {
-  if (value === null) return EMPTY_VALUE;
+function fmtPct(value: number | null | undefined, decimals = 1): string {
+  if (value == null) return EMPTY_VALUE;
   const sign = value >= 0 ? "+" : "";
   return `${sign}${value.toFixed(decimals)}%`;
 }
 
-function fmtPrice(value: number | null): string {
-  if (value === null) return EMPTY_VALUE;
-  return `$${value.toFixed(2)}`;
-}
-
-function fmtMult(value: number | null, decimals = 2): string {
-  if (value === null) return EMPTY_VALUE;
-  return `${value.toFixed(decimals)}x`;
-}
-
-function fmtNum(value: number | null, decimals = 1): string {
-  if (value === null) return EMPTY_VALUE;
+function fmtNum(value: number | null | undefined, decimals = 2): string {
+  if (value == null) return EMPTY_VALUE;
   return value.toFixed(decimals);
 }
 
-function fmtCap(value: number | null): string {
-  if (value === null) return EMPTY_VALUE;
-  if (value >= 1e12) return `$${(value / 1e12).toFixed(1)}T`;
+function fmtMktCap(value: number | null | undefined): string {
+  if (value == null) return EMPTY_VALUE;
+  if (value >= 1e12) return `$${(value / 1e12).toFixed(2)}T`;
   if (value >= 1e9) return `$${(value / 1e9).toFixed(1)}B`;
-  if (value >= 1e6) return `$${(value / 1e6).toFixed(0)}M`;
+  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
   return `$${value.toFixed(0)}`;
 }
-
-// ── Dimension weights per horizon (must match backend) ────────────────────────
-
-const HORIZON_WEIGHTS: Record<
-  Horizon,
-  {
-    momentum: string;
-    technical: string;
-    fundamental: string;
-    risk: string;
-    quality: string;
-    ml: string;
-  }
-> = {
-  short: {
-    momentum: "25%",
-    technical: "28%",
-    fundamental: "7%",
-    risk: "10%",
-    quality: "5%",
-    ml: "25%",
-  },
-  long: {
-    momentum: "7%",
-    technical: "8%",
-    fundamental: "35%",
-    risk: "15%",
-    quality: "22%",
-    ml: "13%",
-  },
-  balanced: {
-    momentum: "15%",
-    technical: "20%",
-    fundamental: "25%",
-    risk: "12%",
-    quality: "10%",
-    ml: "18%",
-  },
-};
-
-const HORIZON_LABELS: Record<Horizon, { label: string; description: string }> = {
-  short: {
-    label: "Short-term",
-    description: "Swing trading over days to weeks with more weight on momentum, technicals, and ML signals.",
-  },
-  long: {
-    label: "Long-term",
-    description: "Buy-and-hold ranking for months to years with more weight on fundamentals, quality, and risk.",
-  },
-  balanced: {
-    label: "Balanced",
-    description: "Middle-ground ranking for position trades with a more even blend across all dimensions.",
-  },
-};
 
 function FilterGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -178,7 +127,7 @@ function FilterGroup({ label, children }: { label: string; children: React.React
 
 // ── Score Bar Component ───────────────────────────────────────────────────────
 
-function ScoreBar({ label, score, weight }: { label: string; score: number; weight: string }) {
+function ScoreBar({ label, score }: { label: string; score: number }) {
   return (
     <div className="rounded-[16px] border border-border/60 bg-background/70 p-3">
       <div className="flex items-center justify-between gap-3 text-[11px]">
@@ -202,232 +151,388 @@ function ScoreBar({ label, score, weight }: { label: string; score: number; weig
           style={{ width: `${Math.min(100, score)}%` }}
         />
       </div>
-      <p className="mt-1 text-[10px] text-muted-foreground/70">{weight}</p>
     </div>
   );
 }
 
-// ── Breakdown Section ─────────────────────────────────────────────────────────
+// ── Detail Cell ────────────────────────────────────────────────────────────────
 
-function BreakdownRow({ stock }: { stock: StockScore }) {
-  const b = stock.breakdown;
+type CellColor = "positive" | "negative" | "warning" | "neutral";
 
-  const technicalItems: { label: string; value: string; positive?: boolean }[] = [
-    {
-      label: "RSI (14)",
-      value: b.rsi_14 !== null ? b.rsi_14.toFixed(1) : "—",
-      positive: b.rsi_14 !== null && b.rsi_14 >= 40 && b.rsi_14 <= 70,
-    },
-    {
-      label: "RSI (9)",
-      value: b.rsi_9 !== null ? b.rsi_9.toFixed(1) : "—",
-      positive: b.rsi_9 !== null && b.rsi_9 >= 40 && b.rsi_9 <= 70,
-    },
-    {
-      label: "MACD",
-      value: b.macd_above_signal === null ? "—" : b.macd_above_signal ? "Above signal" : "Below signal",
-      positive: b.macd_above_signal === true,
-    },
-    {
-      label: "MACD Hist.",
-      value: b.macd_histogram !== null ? fmtNum(b.macd_histogram, 3) : "—",
-      positive: b.macd_histogram !== null && b.macd_histogram > 0,
-    },
-    {
-      label: "Golden Cross",
-      value: b.golden_cross === null ? "—" : b.golden_cross ? "Yes (SMA50>200)" : "No",
-      positive: b.golden_cross === true,
-    },
-    {
-      label: "ADX",
-      value: b.adx !== null ? fmtNum(b.adx) : "—",
-      positive: b.adx !== null && b.adx >= 25,
-    },
-    {
-      label: "Stochastic K/D",
-      value:
-        b.stochastic_k !== null && b.stochastic_d !== null
-          ? `${fmtNum(b.stochastic_k)}/${fmtNum(b.stochastic_d)}`
-          : "—",
-      positive: b.stochastic_k !== null && b.stochastic_k > (b.stochastic_d ?? 0) && b.stochastic_k < 80,
-    },
-    {
-      label: "Williams %R",
-      value: b.williams_r !== null ? fmtNum(b.williams_r) : "—",
-      positive: b.williams_r !== null && b.williams_r > -80 && b.williams_r < -20,
-    },
-    {
-      label: "CCI",
-      value: b.cci !== null ? fmtNum(b.cci) : "—",
-      positive: b.cci !== null && b.cci > 0 && b.cci < 200,
-    },
-    {
-      label: "BB Position",
-      value: b.bollinger_position !== null ? `${(b.bollinger_position * 100).toFixed(0)}%` : "—",
-      positive: b.bollinger_position !== null && b.bollinger_position >= 0.4 && b.bollinger_position <= 0.8,
-    },
-  ];
-
-  const momentumItems: { label: string; value: string; positive?: boolean }[] = [
-    {
-      label: "Volume ratio",
-      value: b.volume_ratio !== null ? fmtMult(b.volume_ratio) : "—",
-      positive: b.volume_ratio !== null && b.volume_ratio > 1,
-    },
-    {
-      label: "vs SMA 50",
-      value: b.price_vs_sma_50 !== null ? fmtPct(b.price_vs_sma_50 * 100) : "—",
-      positive: b.price_vs_sma_50 !== null && b.price_vs_sma_50 > 0,
-    },
-    {
-      label: "vs SMA 200",
-      value: b.price_vs_sma_200 !== null ? fmtPct(b.price_vs_sma_200 * 100) : "—",
-      positive: b.price_vs_sma_200 !== null && b.price_vs_sma_200 > 0,
-    },
-    {
-      label: "52W Position",
-      value: b.fifty_two_week_position !== null ? `${(b.fifty_two_week_position * 100).toFixed(0)}%` : "—",
-      positive: b.fifty_two_week_position !== null && b.fifty_two_week_position >= 0.3 && b.fifty_two_week_position <= 0.85,
-    },
-  ];
-
-  const fundamentalItems: { label: string; value: string; positive?: boolean }[] = [
-    {
-      label: "P/E",
-      value: b.pe_ratio !== null ? fmtMult(b.pe_ratio, 1) : "—",
-      positive: b.pe_ratio !== null && b.pe_ratio > 0 && b.pe_ratio < 25,
-    },
-    {
-      label: "Fwd P/E",
-      value: b.forward_pe !== null ? fmtMult(b.forward_pe, 1) : "—",
-      positive: b.forward_pe !== null && b.forward_pe > 0 && b.forward_pe < 20,
-    },
-    {
-      label: "PEG",
-      value: b.peg_ratio !== null ? fmtMult(b.peg_ratio, 2) : "—",
-      positive: b.peg_ratio !== null && b.peg_ratio > 0 && b.peg_ratio < 1.5,
-    },
-    {
-      label: "P/B",
-      value: b.price_to_book !== null ? fmtMult(b.price_to_book, 1) : "—",
-      positive: b.price_to_book !== null && b.price_to_book > 0 && b.price_to_book < 5,
-    },
-    {
-      label: "P/S",
-      value: b.price_to_sales !== null ? fmtMult(b.price_to_sales, 1) : "—",
-      positive: b.price_to_sales !== null && b.price_to_sales > 0 && b.price_to_sales < 5,
-    },
-    {
-      label: "EPS",
-      value: b.eps !== null ? `$${b.eps.toFixed(2)}` : "—",
-      positive: b.eps !== null && b.eps > 0,
-    },
-    {
-      label: "EPS Growth",
-      value: fmtPct(b.eps_growth !== null ? b.eps_growth * 100 : null),
-      positive: b.eps_growth !== null && b.eps_growth > 0,
-    },
-    {
-      label: "Rev. Growth",
-      value: fmtPct(b.revenue_growth !== null ? b.revenue_growth * 100 : null),
-      positive: b.revenue_growth !== null && b.revenue_growth > 0,
-    },
-    {
-      label: "Div. Yield",
-      value: b.dividend_yield !== null ? fmtPct(b.dividend_yield * 100) : "—",
-      positive: b.dividend_yield !== null && b.dividend_yield > 0.01,
-    },
-    {
-      label: "Mkt Cap",
-      value: fmtCap(b.market_cap),
-      positive: b.market_cap !== null && b.market_cap >= 10e9,
-    },
-  ];
-
-  const signalItems: { label: string; value: string; positive?: boolean }[] = [
-    {
-      label: "Signal",
-      value:
-        b.signal_confidence === null
-          ? "—"
-          : `${(b.signal_confidence * 100).toFixed(0)}% ${b.is_bullish ? "bullish" : "bearish"}`,
-      positive: b.is_bullish === true,
-    },
-    {
-      label: "Strategy",
-      value: b.signal_strategy ?? "—",
-      positive: b.signal_strategy !== null,
-    },
-  ];
-
-  const renderSection = (
-    title: string,
-    items: { label: string; value: string; positive?: boolean }[],
-  ) => (
-    <div className="space-y-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/70">
-        {title}
+function DetailCell({
+  label,
+  value,
+  color = "neutral",
+}: {
+  label: string;
+  value: string;
+  color?: CellColor;
+}) {
+  return (
+    <div className="rounded-[14px] border border-border/50 bg-card/60 px-3 py-2">
+      <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
+      <p
+        className={cn(
+          "mt-1 text-sm font-semibold tabular-nums",
+          value === EMPTY_VALUE
+            ? "text-muted-foreground/50"
+            : color === "positive"
+              ? "text-profit"
+              : color === "negative"
+                ? "text-destructive"
+                : color === "warning"
+                  ? "text-yellow-500"
+                  : "text-foreground",
+        )}
+      >
+        {value}
       </p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        {items.map(({ label, value, positive }) => (
-          <div
-            key={label}
-            className="rounded-[14px] border border-border/50 bg-card/60 px-3 py-2"
-          >
-            <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
-              {label}
-            </p>
-            <p
-              className={cn(
-                "mt-1 text-sm font-semibold tabular-nums",
-                value === "—"
-                  ? "text-muted-foreground/50"
-                  : positive
-                    ? "text-profit"
-                    : "text-destructive",
-              )}
-            >
-              {value}
-            </p>
-          </div>
-        ))}
-      </div>
     </div>
   );
+}
+
+// ── Breakdown Section (Show details expansion) ────────────────────────────────
+
+function BreakdownRow({
+  stock,
+  detail,
+  detailLoading,
+  detailError,
+}: {
+  stock: StockScore;
+  detail: StockDetail | null;
+  detailLoading: boolean;
+  detailError: boolean;
+}) {
+  const momentumItems: { label: string; value: string; positive?: boolean }[] = [
+    {
+      label: "1M Return",
+      value: fmtPct(stock.momentum_1m),
+      positive: stock.momentum_1m !== null && stock.momentum_1m > 0,
+    },
+    {
+      label: "3M Return",
+      value: fmtPct(stock.momentum_3m),
+      positive: stock.momentum_3m !== null && stock.momentum_3m > 0,
+    },
+    {
+      label: "6M Return",
+      value: fmtPct(stock.momentum_6m),
+      positive: stock.momentum_6m !== null && stock.momentum_6m > 0,
+    },
+    {
+      label: "12M Return",
+      value: fmtPct(stock.momentum_12m),
+      positive: stock.momentum_12m !== null && stock.momentum_12m > 0,
+    },
+  ];
+
+  const tech = detail?.technicals;
+  const fund = detail?.fundamentals;
+  const sig = detail?.signals;
+
+  // ── Technical cells ──────────────────────────────────────────────────────
+
+  const rsiColor = (v: number | null | undefined): CellColor => {
+    if (v == null) return "neutral";
+    if (v > 70) return "negative";
+    if (v < 30) return "positive";
+    return "neutral";
+  };
+
+  const macdText =
+    tech?.macd_above_signal === true
+      ? "Above signal"
+      : tech?.macd_above_signal === false
+        ? "Below signal"
+        : EMPTY_VALUE;
+  const macdColor: CellColor =
+    tech?.macd_above_signal === true
+      ? "positive"
+      : tech?.macd_above_signal === false
+        ? "negative"
+        : "neutral";
+
+  const goldenCrossText =
+    tech?.golden_cross === true
+      ? "Yes (SMA50>200)"
+      : tech?.golden_cross === false
+        ? "No (SMA50<200)"
+        : EMPTY_VALUE;
+  const goldenCrossColor: CellColor =
+    tech?.golden_cross === true ? "positive" : tech?.golden_cross === false ? "negative" : "neutral";
+
+  const stochText =
+    tech?.stochastic_k != null && tech?.stochastic_d != null
+      ? `${fmtNum(tech.stochastic_k, 1)} / ${fmtNum(tech.stochastic_d, 1)}`
+      : EMPTY_VALUE;
+
+  const williamsColor = (v: number | null | undefined): CellColor => {
+    if (v == null) return "neutral";
+    if (v < -80) return "positive";
+    if (v > -20) return "negative";
+    return "neutral";
+  };
+
+  const cciColor = (v: number | null | undefined): CellColor => {
+    if (v == null) return "neutral";
+    if (v > 100) return "negative";
+    if (v < -100) return "positive";
+    return "neutral";
+  };
+
+  const bbPosText =
+    tech?.bollinger_position != null ? `${tech.bollinger_position}%` : EMPTY_VALUE;
+  const bbPosColor: CellColor =
+    tech?.bollinger_position != null
+      ? tech.bollinger_position > 80
+        ? "negative"
+        : tech.bollinger_position < 20
+          ? "positive"
+          : "neutral"
+      : "neutral";
+
+  // ── Signal cell ──────────────────────────────────────────────────────────
+
+  const signalText =
+    sig?.latest_signal != null
+      ? `${sig.latest_signal}${sig.signal_confidence != null ? ` (${Math.round(sig.signal_confidence * 100)}%)` : ""}`
+      : EMPTY_VALUE;
+  const signalColor: CellColor =
+    sig?.is_bullish === true ? "positive" : sig?.is_bullish === false ? "negative" : "neutral";
+
+  const strategyText = sig?.signal_strategy
+    ? sig.signal_strategy.replace(/_/g, " ")
+    : EMPTY_VALUE;
 
   return (
     <div className="mt-4 rounded-[18px] border border-border/60 bg-background/70 p-4">
       <div className="space-y-4 border-t border-border/50 pt-4">
-        {renderSection("Technical Indicators", technicalItems)}
-        {renderSection("Momentum", momentumItems)}
-        {renderSection("Fundamentals & Valuation", fundamentalItems)}
-        {signalItems.some((item) => item.value !== "—") &&
-          renderSection("ML / Signals", signalItems)}
+
+        {/* ── 1. MOMENTUM (Multi-Horizon) ────────────────────────────────── */}
+        <div className="space-y-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/70">
+            Momentum (Multi-Horizon)
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {momentumItems.map(({ label, value, positive }) => (
+              <div
+                key={label}
+                className="rounded-[14px] border border-border/50 bg-card/60 px-3 py-2"
+              >
+                <p className="text-[10px] uppercase tracking-[0.14em] text-muted-foreground">
+                  {label}
+                </p>
+                <p
+                  className={cn(
+                    "mt-1 text-sm font-semibold tabular-nums",
+                    value === EMPTY_VALUE
+                      ? "text-muted-foreground/50"
+                      : positive
+                        ? "text-profit"
+                        : "text-destructive",
+                  )}
+                >
+                  {value}
+                </p>
+              </div>
+            ))}
+          </div>
+
+          {/* Extra momentum items from detail */}
+          {detailLoading && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {[...Array(4)].map((_, i) => (
+                <Skeleton key={i} className="h-[52px] rounded-[14px]" />
+              ))}
+            </div>
+          )}
+          {!detailLoading && !detailError && detail && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <DetailCell
+                label="Volume Ratio"
+                value={detail.volume_ratio != null ? `${detail.volume_ratio.toFixed(2)}x` : EMPTY_VALUE}
+                color={detail.volume_ratio != null ? (detail.volume_ratio >= 1 ? "positive" : "negative") : "neutral"}
+              />
+              <DetailCell
+                label="VS SMA 50"
+                value={fmtPct(detail.price_vs_sma_50)}
+                color={detail.price_vs_sma_50 != null ? (detail.price_vs_sma_50 >= 0 ? "positive" : "negative") : "neutral"}
+              />
+              <DetailCell
+                label="VS SMA 200"
+                value={fmtPct(detail.price_vs_sma_200)}
+                color={detail.price_vs_sma_200 != null ? (detail.price_vs_sma_200 >= 0 ? "positive" : "negative") : "neutral"}
+              />
+              <DetailCell
+                label="52W Position"
+                value={detail.high_52w_position != null ? `${detail.high_52w_position}%` : EMPTY_VALUE}
+                color={detail.high_52w_position != null ? (detail.high_52w_position > 50 ? "positive" : "negative") : "neutral"}
+              />
+            </div>
+          )}
+        </div>
+
+        {/* Loading / error state for all remaining detail sections */}
+        {detailLoading && (
+          <div className="space-y-3">
+            <Skeleton className="h-4 w-44 rounded" />
+            <div className="grid gap-2 sm:grid-cols-2">
+              {[...Array(10)].map((_, i) => (
+                <Skeleton key={i} className="h-[52px] rounded-[14px]" />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!detailLoading && detailError && (
+          <p className="text-xs text-muted-foreground py-1">Detail data unavailable</p>
+        )}
+
+        {!detailLoading && !detailError && detail && tech && (
+          <>
+            {/* ── 2. TECHNICAL INDICATORS ──────────────────────────────────── */}
+            <div className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                Technical Indicators
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <DetailCell label="RSI (14)" value={fmtNum(tech.rsi_14, 1)} color={rsiColor(tech.rsi_14)} />
+                <DetailCell label="RSI (9)" value={fmtNum(tech.rsi_9, 1)} color={rsiColor(tech.rsi_9)} />
+                <DetailCell label="MACD" value={macdText} color={macdColor} />
+                <DetailCell
+                  label="MACD HIST."
+                  value={fmtNum(tech.macd_histogram, 3)}
+                  color={tech.macd_histogram != null ? (tech.macd_histogram >= 0 ? "positive" : "negative") : "neutral"}
+                />
+                <DetailCell label="GOLDEN CROSS" value={goldenCrossText} color={goldenCrossColor} />
+                <DetailCell
+                  label="ADX"
+                  value={fmtNum(tech.adx, 1)}
+                  color={tech.adx != null ? (tech.adx > 25 ? "warning" : "neutral") : "neutral"}
+                />
+                <DetailCell label="STOCHASTIC K/D" value={stochText} />
+                <DetailCell label="WILLIAMS %R" value={fmtNum(tech.williams_r, 1)} color={williamsColor(tech.williams_r)} />
+                <DetailCell label="CCI" value={fmtNum(tech.cci, 1)} color={cciColor(tech.cci)} />
+                <DetailCell label="BB POSITION" value={bbPosText} color={bbPosColor} />
+              </div>
+            </div>
+
+            {/* ── 3. FUNDAMENTALS & VALUATION ──────────────────────────────── */}
+            {fund && (
+              <div className="space-y-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                  Fundamentals &amp; Valuation
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <DetailCell label="P/E" value={fmtNum(fund.pe_ratio, 1)} />
+                  <DetailCell label="FWD P/E" value={fmtNum(fund.forward_pe, 1)} />
+                  <DetailCell label="PEG" value={fmtNum(fund.peg_ratio, 2)} />
+                  <DetailCell label="P/B" value={fmtNum(fund.price_to_book, 2)} />
+                  <DetailCell label="P/S" value={fmtNum(fund.price_to_sales, 2)} />
+                  <DetailCell
+                    label="EPS"
+                    value={fmtNum(fund.eps, 2)}
+                    color={fund.eps != null ? (fund.eps >= 0 ? "neutral" : "negative") : "neutral"}
+                  />
+                  <DetailCell
+                    label="EPS GROWTH"
+                    value={fmtPct(fund.eps_growth)}
+                    color={fund.eps_growth != null ? (fund.eps_growth >= 0 ? "positive" : "negative") : "neutral"}
+                  />
+                  <DetailCell
+                    label="REV. GROWTH"
+                    value={fmtPct(fund.revenue_growth)}
+                    color={fund.revenue_growth != null ? (fund.revenue_growth >= 0 ? "positive" : "negative") : "neutral"}
+                  />
+                  <DetailCell
+                    label="DIV. YIELD"
+                    value={fund.dividend_yield != null ? `${fund.dividend_yield.toFixed(2)}%` : EMPTY_VALUE}
+                  />
+                  <DetailCell label="MKT CAP" value={fmtMktCap(fund.market_cap)} />
+                </div>
+              </div>
+            )}
+
+            {/* ── 4. ML / SIGNALS ──────────────────────────────────────────── */}
+            {sig && (
+              <div className="space-y-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-foreground/70">
+                  ML / Signals
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <DetailCell label="SIGNAL" value={signalText} color={signalColor} />
+                  <DetailCell label="STRATEGY" value={strategyText} />
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
     </div>
+  );
+}
+
+// ── Fundamental Trend Badge ────────────────────────────────────────────────────
+
+function FundamentalTrendBadge({ trend }: { trend: string | null }) {
+  if (!trend) return null;
+
+  const styles: Record<string, string> = {
+    improving: "border-profit/25 bg-profit/10 text-profit",
+    stable: "border-border/50 bg-muted/50 text-muted-foreground",
+    deteriorating: "border-destructive/30 bg-destructive/10 text-destructive",
+  };
+  const labels: Record<string, string> = {
+    improving: "Improving",
+    stable: "Stable",
+    deteriorating: "Deteriorating",
+  };
+
+  const style = styles[trend];
+  const label = labels[trend];
+  if (!style || !label) return null;
+
+  return (
+    <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0 h-4 gap-0.5", style)}>
+      {trend === "improving" && <TrendingUp className="h-2.5 w-2.5" />}
+      {trend === "stable" && <Minus className="h-2.5 w-2.5" />}
+      {trend === "deteriorating" && <TrendingDown className="h-2.5 w-2.5" />}
+      {label}
+    </Badge>
   );
 }
 
 // ── Stock Card ────────────────────────────────────────────────────────────────
 
-function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; horizon: Horizon }) {
-  const [expanded, setExpanded] = useState(false);
+function StockCard({
+  stock,
+  rank,
+  expanded,
+  onToggle,
+  detail,
+  detailLoading,
+  detailError,
+}: {
+  stock: StockScore;
+  rank: number;
+  expanded: boolean;
+  onToggle: () => void;
+  detail: StockDetail | null;
+  detailLoading: boolean;
+  detailError: boolean;
+}) {
   const pctColor =
-    stock.price_change_pct === null
+    stock.change_percent === null
       ? "text-muted-foreground"
-      : stock.price_change_pct >= 0
+      : stock.change_percent >= 0
       ? "text-profit"
       : "text-loss";
   const PctIcon =
-    stock.price_change_pct !== null && stock.price_change_pct >= 0 ? TrendingUp : TrendingDown;
+    stock.change_percent !== null && stock.change_percent >= 0 ? TrendingUp : TrendingDown;
 
   return (
-    <Card
-      className={cn(
-        "group overflow-hidden rounded-[22px] border border-border/60 bg-card/90 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.55)] transition-all duration-200 hover:border-primary/25 hover:bg-card animate-in fade-in duration-300",
-        !stock.data_fresh && "opacity-80"
-      )}
-    >
+    <Card className="group overflow-hidden rounded-[22px] border border-border/60 bg-card/90 shadow-[0_18px_45px_-38px_rgba(15,23,42,0.55)] transition-all duration-200 hover:border-primary/25 hover:bg-card animate-in fade-in duration-300">
       <CardContent className="p-5">
         {/* Top row: rank + ticker + composite */}
         <div className="flex items-start justify-between gap-3">
@@ -436,38 +541,31 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
               #{rank}
             </span>
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-bold text-foreground">{stock.ticker}</span>
-                {!stock.data_fresh && (
-                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-3.5 border-yellow-500/40 text-yellow-500">
-                    STALE
-                  </Badge>
-                )}
-              </div>
-              {stock.company_name && (
+              <span className="text-sm font-bold text-foreground">{stock.ticker}</span>
+              {stock.name && (
                 <p className="text-[11px] text-muted-foreground truncate max-w-[140px]">
-                  {stock.company_name}
+                  {stock.name}
                 </p>
               )}
             </div>
           </div>
 
-          {/* Smoothed composite score badge */}
+          {/* Composite score badge */}
           <Badge
             variant="outline"
-            className={cn("text-sm font-bold px-2.5 py-1 h-auto shrink-0", scoreBadge(stock.smoothed_score))}
+            className={cn("text-sm font-bold px-2.5 py-1 h-auto shrink-0", scoreBadge(stock.composite_score))}
           >
-            {stock.smoothed_score.toFixed(0)}
+            {stock.composite_score.toFixed(0)}
           </Badge>
         </div>
 
-        {/* Tier + Conviction row */}
-        <div className="flex items-center gap-1.5 mt-1.5">
+        {/* Tier + Conviction + Fundamental Trend row */}
+        <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
           <Badge
             variant="outline"
             className={cn("text-[9px] px-1.5 py-0 h-4 font-semibold", tierBadge(stock.rank_tier))}
           >
-            {stock.rank_tier}
+            {tierLabel(stock.rank_tier)}
           </Badge>
           <Badge
             variant="outline"
@@ -475,64 +573,40 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
           >
             {stock.conviction === "High" && <Star className="h-2.5 w-2.5" />}
             {stock.conviction === "Medium" && <Shield className="h-2.5 w-2.5" />}
-            {stock.conviction} conviction
+            {convictionLabel(stock.conviction)}
           </Badge>
-          {(() => {
-            const stability = stabilityLabel(stock.tier_held_cycles);
-            if (!stability) return null;
-            return (
-              <Badge variant="outline" className={cn("text-[9px] px-1.5 py-0 h-4 gap-0.5", stability.className)}>
-                <Lock className="h-2 w-2" />
-                {stability.text}
-              </Badge>
-            );
-          })()}
-          <span className="text-[9px] text-muted-foreground/50">
-            {stock.dimensions_bullish}/{stock.has_ml_data ? 6 : 5} bullish
-          </span>
+          <FundamentalTrendBadge trend={stock.fundamental_trend} />
         </div>
 
-        {/* Price row */}
-        <div className="flex items-center gap-3 mt-2">
-          <span className="text-sm font-semibold text-foreground tabular-nums">
-            {fmtPrice(stock.last_price)}
-          </span>
-          <div className={cn("flex items-center gap-0.5 text-xs font-medium", pctColor)}>
-            <PctIcon className="h-3 w-3" />
-            {fmtPct(stock.price_change_pct)}
-          </div>
+        {/* Change percent row */}
+        <div className={cn("flex items-center gap-0.5 text-xs font-medium mt-2", pctColor)}>
+          <PctIcon className="h-3 w-3" />
+          {fmtPct(stock.change_percent)}
         </div>
 
-        {/* Smoothed composite score bar */}
+        {/* Composite score bar */}
         <div className="mt-3 space-y-0.5">
           <div className="flex items-center justify-between text-[10px]">
             <span className="text-muted-foreground font-medium">Composite</span>
-            <span className={cn("font-semibold", stock.smoothed_score >= 70 ? "text-profit" : stock.smoothed_score >= 50 ? "text-yellow-500" : "text-destructive")}>
-              {stock.smoothed_score.toFixed(1)} / 100
+            <span className={cn("font-semibold", (stock.composite_score ?? 0) >= 70 ? "text-profit" : (stock.composite_score ?? 0) >= 50 ? "text-yellow-500" : "text-destructive")}>
+              {stock.composite_score != null ? stock.composite_score.toFixed(1) : EMPTY_VALUE} / 100
             </span>
           </div>
           <div className="h-1.5 rounded-full bg-muted/50">
             <div
-              className={cn("h-full rounded-full transition-all", scoreBar(stock.smoothed_score))}
-              style={{ width: `${Math.min(100, stock.smoothed_score)}%` }}
+              className={cn("h-full rounded-full transition-all", scoreBar(stock.composite_score))}
+              style={{ width: `${Math.min(100, stock.composite_score)}%` }}
             />
           </div>
         </div>
 
-        {/* Dimension scores — 6 dimensions in 3×2 grid with horizon-aware weights */}
+        {/* Dimension scores — 5 dimensions */}
         <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {(() => { const hw = HORIZON_WEIGHTS[horizon]; return (<>
-            <ScoreBar label="Momentum" score={stock.momentum_score} weight={hw.momentum} />
-            <ScoreBar label="Technical" score={stock.technical_score} weight={hw.technical} />
-            <ScoreBar label="Fundamental" score={stock.fundamental_score} weight={hw.fundamental} />
-            <ScoreBar label="Risk-Adj." score={stock.risk_score} weight={hw.risk} />
-            <ScoreBar label="Quality" score={stock.quality_score} weight={hw.quality} />
-            <ScoreBar
-              label={stock.has_ml_data ? "ML Signal" : "ML Signal (-)"}
-              score={stock.ml_score ?? 50}
-              weight={stock.has_ml_data ? hw.ml : "redistributed"}
-            />
-          </>); })()}
+          <ScoreBar label="Momentum" score={stock.momentum_score ?? 50} />
+          <ScoreBar label="Technical" score={stock.technical_score ?? 50} />
+          <ScoreBar label="Fundamental" score={stock.fundamental_score ?? 50} />
+          <ScoreBar label="Consistency" score={stock.consistency_score ?? 50} />
+          <ScoreBar label="Signal" score={stock.signal_score ?? 50} />
         </div>
 
         {/* Expand/collapse breakdown */}
@@ -540,13 +614,20 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
           variant="ghost"
           size="sm"
           className="mt-4 h-10 rounded-full border border-border/70 bg-background/70 px-4 text-xs font-medium text-muted-foreground gap-1 hover:bg-background hover:text-foreground"
-          onClick={() => setExpanded((e) => !e)}
+          onClick={onToggle}
         >
           {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           {expanded ? "Hide details" : "Show details"}
         </Button>
 
-        {expanded && <BreakdownRow stock={stock} />}
+        {expanded && (
+          <BreakdownRow
+            stock={stock}
+            detail={detail}
+            detailLoading={detailLoading}
+            detailError={detailError}
+          />
+        )}
       </CardContent>
     </Card>
   );
@@ -554,21 +635,144 @@ function StockCard({ stock, rank, horizon }: { stock: StockScore; rank: number; 
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-const LIMIT_OPTIONS = [20, 50, 100] as const;
+const LIMIT_OPTIONS = [20, 50] as const;
 const MIN_SCORE_OPTIONS = [0, 40, 60] as const;
-const HORIZON_OPTIONS: Horizon[] = ["short", "balanced", "long"];
+
+function useIsLargeStocksViewport() {
+  const [isLargeViewport, setIsLargeViewport] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 1024px)").matches : false,
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const mediaQuery = window.matchMedia("(min-width: 1024px)");
+    const updateViewport = () => setIsLargeViewport(mediaQuery.matches);
+
+    updateViewport();
+    mediaQuery.addEventListener("change", updateViewport);
+
+    return () => mediaQuery.removeEventListener("change", updateViewport);
+  }, []);
+
+  return isLargeViewport;
+}
 
 const TopStocks = () => {
   const [limit, setLimit] = useState<number>(20);
   const [minScore, setMinScore] = useState<number>(0);
-  const [horizon, setHorizon] = useState<Horizon>("balanced");
+  const [expandedTickers, setExpandedTickers] = useState<Record<string, boolean>>({});
+  const [detailCache, setDetailCache] = useState<Record<string, StockDetail>>({});
+  const [detailLoading, setDetailLoading] = useState<Record<string, boolean>>({});
+  const [detailError, setDetailError] = useState<Record<string, boolean>>({});
+  const [detailNotFound, setDetailNotFound] = useState<Record<string, boolean>>({});
 
-  const { data, isLoading, error, refetch, isRefetching } = useTopStocks(limit, minScore, horizon);
+  const queryClient = useQueryClient();
+  const { data, isLoading, error, isRefetching } = useTopStocks(limit, minScore);
 
-  const stocks = data?.stocks ?? [];
-  const hasStaleData = data?.hasStaleData ?? false;
-  const hasMlData = data?.hasMlData ?? false;
+  const stocks = useMemo(() => data?.stocks ?? [], [data?.stocks]);
   const totalScored = data?.totalScored ?? 0;
+  const dataAgeHours = data?.dataAgeHours ?? null;
+  const isLargeViewport = useIsLargeStocksViewport();
+  const columnCount = isLargeViewport ? 2 : 1;
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const hasTrackedRankingViewRef = useRef(false);
+  const previousFiltersRef = useRef<{ limit: number; minScore: number } | null>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  const stockRows = useMemo(() => {
+    const rows: Array<Array<{ stock: StockScore; rank: number }>> = [];
+
+    for (let index = 0; index < stocks.length; index += columnCount) {
+      rows.push(
+        stocks.slice(index, index + columnCount).map((stock, offset) => ({
+          stock,
+          rank: index + offset + 1,
+        })),
+      );
+    }
+
+    return rows;
+  }, [columnCount, stocks]);
+
+  const rowVirtualizer = useWindowVirtualizer({
+    count: stockRows.length,
+    estimateSize: () => (columnCount === 2 ? 480 : 620),
+    overscan: 4,
+    scrollMargin,
+  });
+
+  useEffect(() => {
+    const updateScrollMargin = () => {
+      if (!listRef.current) return;
+      setScrollMargin(listRef.current.getBoundingClientRect().top + window.scrollY);
+    };
+
+    updateScrollMargin();
+
+    if (typeof ResizeObserver === "undefined" || !listRef.current) {
+      window.addEventListener("resize", updateScrollMargin);
+      return () => window.removeEventListener("resize", updateScrollMargin);
+    }
+
+    const resizeObserver = new ResizeObserver(updateScrollMargin);
+    resizeObserver.observe(listRef.current);
+    window.addEventListener("resize", updateScrollMargin);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", updateScrollMargin);
+    };
+  }, [columnCount, limit, minScore, stockRows.length, totalScored]);
+
+  useEffect(() => {
+    if (!data || hasTrackedRankingViewRef.current) return;
+    AnalyticsEvents.stockRankingViewed({
+      limit,
+      min_score: minScore,
+      total_scored: totalScored,
+      data_age_hours: data.dataAgeHours,
+    });
+    hasTrackedRankingViewRef.current = true;
+  }, [data, limit, minScore, totalScored]);
+
+  useEffect(() => {
+    const previousFilters = previousFiltersRef.current;
+    if (previousFilters && (previousFilters.limit !== limit || previousFilters.minScore !== minScore)) {
+      AnalyticsEvents.stockRankingFilterChanged({
+        limit,
+        min_score: minScore,
+      });
+    }
+    previousFiltersRef.current = { limit, minScore };
+  }, [limit, minScore]);
+
+  const handleToggleExpanded = async (ticker: string) => {
+    const expanding = !expandedTickers[ticker];
+    setExpandedTickers((current) => ({ ...current, [ticker]: expanding }));
+
+    if (expanding) {
+      AnalyticsEvents.stockDetailExpanded(ticker);
+    }
+
+    if (expanding && !detailCache[ticker] && !detailNotFound[ticker]) {
+      setDetailLoading((current) => ({ ...current, [ticker]: true }));
+      setDetailError((current) => ({ ...current, [ticker]: false }));
+      try {
+        const detail = await getStockDetail(ticker);
+        setDetailCache((current) => ({ ...current, [ticker]: detail }));
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          // Ticker has no snapshot data — not an error, just skip the detail sections
+          setDetailNotFound((current) => ({ ...current, [ticker]: true }));
+        } else {
+          setDetailError((current) => ({ ...current, [ticker]: true }));
+        }
+      } finally {
+        setDetailLoading((current) => ({ ...current, [ticker]: false }));
+      }
+    }
+  };
 
   return (
     <AppLayout title="Top Stocks">
@@ -578,14 +782,14 @@ const TopStocks = () => {
           <div className="space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-muted/50 px-3 py-1 text-[11px] uppercase tracking-[0.22em] text-muted-foreground">
               <Trophy className="h-3.5 w-3.5" />
-              Top Stocks
+              Top Ranked Stocks
             </div>
             <div>
               <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-                Scan the market leaders faster.
+                Review the highest-scoring names faster.
               </h1>
               <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-                Review ranked names, tighten the score filter, and shift time horizon from one clean surface.
+                Review ranked names, tighten the score filter, and compare 5-dimension scores from one clean surface.
               </p>
             </div>
           </div>
@@ -593,7 +797,7 @@ const TopStocks = () => {
           <div className="flex flex-wrap gap-2">
             <Button
               variant="outline"
-              onClick={() => refetch()}
+              onClick={() => queryClient.invalidateQueries({ queryKey: ['top-stocks'] })}
               disabled={isLoading || isRefetching}
               className="h-10 rounded-full px-4"
             >
@@ -603,7 +807,7 @@ const TopStocks = () => {
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-3">
+        <div className="mt-5 grid gap-3 lg:grid-cols-2">
           <FilterGroup label="Show ranked set">
             {LIMIT_OPTIONS.map((n) => (
               <Button
@@ -641,26 +845,6 @@ const TopStocks = () => {
               </Button>
             ))}
           </FilterGroup>
-
-          <FilterGroup label="Time horizon">
-            {HORIZON_OPTIONS.map((h) => (
-              <Button
-                key={h}
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  "h-9 rounded-full px-4 text-xs font-medium transition-all",
-                  horizon === h
-                    ? "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground"
-                    : "border border-border/60 bg-card/70 text-muted-foreground hover:bg-background hover:text-foreground",
-                )}
-                onClick={() => setHorizon(h)}
-                title={HORIZON_LABELS[h].description}
-              >
-                {HORIZON_LABELS[h].label}
-              </Button>
-            ))}
-          </FilterGroup>
         </div>
 
         <div className="mt-5 flex flex-wrap gap-2 text-sm">
@@ -675,38 +859,11 @@ const TopStocks = () => {
               {minScore === 0 ? "All scores" : `Score >= ${minScore}`}
             </span>
           </div>
-          <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
-            <span className="font-semibold text-foreground">{HORIZON_LABELS[horizon].label}</span>
-          </div>
-
-          {hasStaleData && (
-            <Badge
-              variant="outline"
-              className="h-auto rounded-full border-yellow-500/40 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-500"
-            >
-              <AlertTriangle className="mr-1 h-3.5 w-3.5" />
-              Some data may be stale (&gt;24h)
-            </Badge>
-          )}
-
-          {!isLoading && !hasMlData && stocks.length > 0 && (
-            <Badge
-              variant="outline"
-              className="h-auto rounded-full border-border/70 bg-background/70 px-3 py-2 text-xs text-muted-foreground"
-            >
-              <Info className="mr-1 h-3.5 w-3.5" />
-              ML signals unavailable - weight redistributed
-            </Badge>
-          )}
         </div>
 
         <div className="mt-4 rounded-[20px] border border-border/60 bg-background/70 p-4">
-          <p className="text-sm leading-6 text-muted-foreground">
-            <span className="font-medium text-foreground/80">{HORIZON_LABELS[horizon].label}:</span>{" "}
-            {HORIZON_LABELS[horizon].description}
-          </p>
-          <p className="mt-2 text-xs leading-5 text-muted-foreground/80">
-            6-dimension scoring across 30+ metrics with EMA smoothing and tier hysteresis for more stable rankings. Not financial advice.
+          <p className="text-xs leading-5 text-muted-foreground/80">
+            5-dimension scoring using 12 months of market data. Consistency-weighted for stable, reliable rankings. Provided for research only — not personalised investment advice.
           </p>
         </div>
         </section>
@@ -736,7 +893,7 @@ const TopStocks = () => {
                   <Skeleton className="h-3 w-16" />
                   <Skeleton className="h-1.5 w-full rounded-full" />
                   <div className="grid grid-cols-2 gap-2">
-                    {[...Array(6)].map((_, j) => (
+                    {[...Array(5)].map((_, j) => (
                       <Skeleton key={j} className="h-8 w-full" />
                     ))}
                   </div>
@@ -754,16 +911,56 @@ const TopStocks = () => {
               <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-muted-foreground">
                 {minScore > 0
                   ? `Try lowering the minimum score threshold. It is currently set to >= ${minScore}.`
-                  : "No stock data is available. Make sure the Trade Engine is running."}
+                  : "No stock data is available. Make sure the backend is running."}
               </p>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4 lg:grid-cols-2">
-            {stocks.map((stock, index) => (
-              <StockCard key={stock.ticker} stock={stock} rank={index + 1} horizon={horizon} />
-            ))}
+          <div ref={listRef} className="relative">
+            <div
+              className="relative w-full"
+              style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const row = stockRows[virtualRow.index];
+                if (!row) return null;
+
+                return (
+                  <div
+                    key={row.map(({ stock }) => stock.ticker).join(":")}
+                    ref={rowVirtualizer.measureElement}
+                    data-index={virtualRow.index}
+                    className="absolute left-0 top-0 w-full"
+                    style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
+                  >
+                    <div className={cn("grid gap-4", columnCount === 2 && "lg:grid-cols-2")}>
+                      {row.map(({ stock, rank }) => (
+                        <StockCard
+                          key={stock.ticker}
+                          stock={stock}
+                          rank={rank}
+                          expanded={Boolean(expandedTickers[stock.ticker])}
+                          onToggle={() => handleToggleExpanded(stock.ticker)}
+                          detail={detailCache[stock.ticker] ?? null}
+                          detailLoading={Boolean(detailLoading[stock.ticker])}
+                          detailError={Boolean(detailError[stock.ticker])}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
+        )}
+
+        {/* Data freshness footer */}
+        {!isLoading && (
+          <p className="text-center text-xs text-muted-foreground pb-4">
+            {dataAgeHours === null || dataAgeHours > 24
+              ? "Rankings updating soon"
+              : `Rankings updated daily · Last ranked ${Math.round(dataAgeHours)} hours ago`}
+          </p>
         )}
       </div>
     </AppLayout>

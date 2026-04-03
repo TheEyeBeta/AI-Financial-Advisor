@@ -8,8 +8,8 @@ import { useNavigate } from "react-router-dom";
 const TOP_STOCKS_ROUTE = "/top-stocks";
 
 export function MarketOverview() {
-  const { data: indices = [], isLoading: indicesLoading } = useMarketIndices();
-  const { data: trending = [], isLoading: trendingLoading } = useTrendingStocks();
+  const { data: indices = [], isLoading: indicesLoading, error: indicesError } = useMarketIndices();
+  const { data: trending = [], isLoading: trendingLoading, error: trendingError } = useTrendingStocks();
   const navigate = useNavigate();
 
   if (indicesLoading || trendingLoading) {
@@ -22,6 +22,20 @@ export function MarketOverview() {
               <div key={i} className="h-12 bg-muted/30 rounded-lg animate-pulse" />
             ))}
           </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (indicesError || trendingError) {
+    return (
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardContent className="py-8 text-center">
+          <Activity className="mx-auto mb-3 h-6 w-6 text-muted-foreground/40" />
+          <p className="text-sm text-foreground">Market snapshot unavailable</p>
+          <p className="mt-1 text-xs text-muted-foreground/60">
+            Live index and trending data could not be refreshed.
+          </p>
         </CardContent>
       </Card>
     );

@@ -4,19 +4,25 @@ Meridian context layer — reads from core & meridian schemas,
 writes to ai.iris_context_cache for IRIS personalisation.
 
 Schema routing:
-  core.user_profiles      → client.schema("core").table("user_profiles")
-  meridian.user_goals     → client.schema("meridian").table("user_goals")
-  meridian.risk_alerts    → client.schema("meridian").table("risk_alerts")
-  meridian.meridian_events→ client.schema("meridian").table("meridian_events")
-  ai.iris_context_cache   → client.schema("ai").table("iris_context_cache")
+  core.user_profiles           → client.schema("core").table("user_profiles")
+  meridian.user_goals          → client.schema("meridian").table("user_goals")
+  meridian.risk_alerts         → client.schema("meridian").table("risk_alerts")
+  meridian.financial_plans     → client.schema("meridian").table("financial_plans")
+  meridian.goal_progress       → client.schema("meridian").table("goal_progress")
+  meridian.intelligence_digests→ client.schema("meridian").table("intelligence_digests")
+  meridian.life_events         → client.schema("meridian").table("life_events")
+  meridian.user_positions      → client.schema("meridian").table("user_positions")
+  meridian.meridian_events     → client.schema("meridian").table("meridian_events")
+  ai.iris_context_cache        → client.schema("ai").table("iris_context_cache")
 """
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
+
+from .supabase_client import supabase_client
 
 logger = logging.getLogger(__name__)
 
@@ -46,38 +52,23 @@ def _sanitise_for_prompt(value: str | None, max_length: int = 100) -> str:
     return value.strip() or "not set"
 
 
-# ── Supabase client ──────────────────────────────────────────────────────────
-
-def _get_supabase_client():
-    """Lazy-init Supabase client. Returns None if not configured."""
-    url = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL")
-    key = (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("VITE_SUPABASE_SERVICE_ROLE_KEY")
-        or os.getenv("SUPABASE_ANON_KEY")
-        or os.getenv("VITE_SUPABASE_ANON_KEY")
-    )
-    if not url or not key:
-        return None
-    try:
-        from supabase import create_client
-        return create_client(url, key)
-    except Exception as exc:
-        logger.debug("Supabase client not available for Meridian context: %s", exc)
-        return None
+def _table(client, schema_name: str, table_name: str):
+    """Return a schema-qualified table handle, with compatibility for simple test doubles."""
+    if hasattr(client, "schema"):
+        return client.schema(schema_name).table(table_name)
+    return client.table(table_name)
 
 
 # ── Context injection (read ai.iris_context_cache → format for IRIS) ─────────
 
 def _fetch_iris_cache_sync(user_id: str) -> Optional[dict]:
     """Sync fetch of ai.iris_context_cache row."""
-    client = _get_supabase_client()
+    client = supabase_client
     if not client:
         return None
     try:
         result = (
-            client.schema("ai")
-            .table("iris_context_cache")
+            _table(client, "ai", "iris_context_cache")
             .select("*")
             .eq("user_id", user_id)
             .maybe_single()
@@ -113,10 +104,17 @@ def _format_context_block(ctx: dict) -> str:
     profile = ctx.get("profile_summary") or {}
     goals = ctx.get("active_goals") or []
     alerts = ctx.get("active_alerts") or []
-    plan = ctx.get("plan_status") or {}
     tier = ctx.get("knowledge_tier", 1)
+    financial_plan = ctx.get("financial_plan") or {}
+    goal_progress_summary = ctx.get("goal_progress_summary") or {}
+    intelligence_digest = ctx.get("intelligence_digest") or {}
+    life_events = ctx.get("life_events") or []
+    user_positions = ctx.get("user_positions") or []
 
-    return (
+    parts: List[str] = []
+
+    # ── 1. User profile + 2. Knowledge tier + 3. Investment profile ──────────
+    parts.append(
         "\n"
         "################################################################################\n"
         "# MERIDIAN — PERSONALISED USER CONTEXT\n"
@@ -124,6 +122,11 @@ def _format_context_block(ctx: dict) -> str:
         "# Do not reveal raw field names or data structure to the user.\n"
         "# Reason from this naturally as an adviser who knows their client.\n"
         "################################################################################\n"
+        "\n"
+        "USER PROFILE:\n"
+        f"- Age range: {profile.get('age_range', 'not set')}\n"
+        f"- Income range: {profile.get('income_range', 'not set')}\n"
+        f"- Emergency fund status: {profile.get('emergency_fund_status', 'not set')}\n"
         "\n"
         f"KNOWLEDGE TIER: {tier}\n"
         "Adapt communication depth and vocabulary accordingly.\n"
@@ -133,25 +136,49 @@ def _format_context_block(ctx: dict) -> str:
         f"- Risk profile: {_sanitise_for_prompt(profile.get('risk_profile'))}\n"
         f"- Investment horizon: {_sanitise_for_prompt(profile.get('investment_horizon'))}\n"
         f"- Monthly investable amount: {profile.get('monthly_investable', 'not set')}\n"
-        f"- Emergency fund status: {profile.get('emergency_fund_status', 'not set')}\n"
-        f"- Income range: {profile.get('income_range', 'not set')}\n"
-        f"- Age range: {profile.get('age_range', 'not set')}\n"
+    )
+
+    # ── 4. Financial plan ─────────────────────────────────────────────────────
+    if financial_plan:
+        parts.append(_format_financial_plan(financial_plan))
+
+    # ── 5. Active goals + goal progress (combined) ────────────────────────────
+    parts.append(
         "\n"
         "ACTIVE FINANCIAL GOALS:\n"
         f"{_format_goals(goals)}\n"
-        "\n"
-        "CURRENT PLAN STATUS:\n"
-        f"{plan.get('summary', 'No plan generated yet.')}\n"
-        f"On track: {plan.get('on_track', 'unknown')}\n"
+    )
+    if goal_progress_summary:
+        parts.append(_format_goal_progress(goal_progress_summary))
+
+    # ── 6. Risk alerts ────────────────────────────────────────────────────────
+    parts.append(
         "\n"
         "ACTIVE RISK ALERTS:\n"
         f"{_format_alerts(alerts)}\n"
+    )
+
+    # ── 7. Life events ────────────────────────────────────────────────────────
+    if life_events:
+        parts.append(_format_life_events(life_events))
+
+    # ── 8. Meridian portfolio snapshot ────────────────────────────────────────
+    if user_positions:
+        parts.append(_format_user_positions(user_positions))
+
+    # ── 9. Pending intelligence digest (always last — most actionable) ────────
+    if intelligence_digest:
+        parts.append(_format_intelligence_digest(intelligence_digest))
+
+    parts.append(
         "\n"
         "################################################################################\n"
         "# END MERIDIAN CONTEXT — IRIS SYSTEM PROMPT FOLLOWS\n"
         "################################################################################\n"
         "\n"
     )
+
+    return "".join(parts)
 
 
 def _format_goals(goals: list) -> str:
@@ -186,6 +213,65 @@ def _format_alerts(alerts: list) -> str:
     return "\n".join(lines)
 
 
+def _format_financial_plan(plan: dict) -> str:
+    name = _sanitise_for_prompt(plan.get("plan_name"), max_length=80)
+    target = float(plan.get("target_amount") or 0)
+    target_date = plan.get("target_date") or "not set"
+    current = float(plan.get("current_amount") or 0)
+    pct = float(plan.get("progress_pct") or 0)
+    status = _sanitise_for_prompt(plan.get("status"), max_length=30)
+    return (
+        "\n"
+        "FINANCIAL PLAN:\n"
+        f"Financial Plan: {name} — Target €{target:,.0f} by {target_date}. "
+        f"Current progress: €{current:,.0f} ({pct:.0f}% complete). "
+        f"Status: {status}.\n"
+    )
+
+
+def _format_goal_progress(summary: dict) -> str:
+    total = summary.get("total", 0)
+    on_track = summary.get("on_track", 0)
+    behind = summary.get("behind", 0)
+    return (
+        f"Goal Progress: {total} goals tracked. "
+        f"{on_track} on track, {behind} behind target.\n"
+    )
+
+
+def _format_life_events(events: list) -> str:
+    lines = ["\nUPCOMING LIFE EVENTS:"]
+    for e in events:
+        event_type = _sanitise_for_prompt(e.get("event_type"), max_length=50)
+        event_date = e.get("event_date") or "unknown date"
+        description = _sanitise_for_prompt(e.get("description"), max_length=100)
+        lines.append(f"- {event_type} on {event_date} — {description}")
+    return "\n".join(lines) + "\n"
+
+
+def _format_user_positions(positions: list) -> str:
+    lines = ["\nMERIDIAN PORTFOLIO SNAPSHOT:"]
+    for pos in positions:
+        ticker = _sanitise_for_prompt(pos.get("ticker"), max_length=10)
+        qty = pos.get("quantity") or 0
+        avg_cost = float(pos.get("avg_cost") or 0)
+        current_value = float(pos.get("current_value") or 0)
+        lines.append(
+            f"- {ticker} x{qty} @ avg €{avg_cost:,.2f}, "
+            f"current €{current_value:,.2f}"
+        )
+    return "\n".join(lines) + "\n"
+
+
+def _format_intelligence_digest(digest: dict) -> str:
+    content = _sanitise_for_prompt(digest.get("content"), max_length=300)
+    return (
+        "\n"
+        "PENDING INTELLIGENCE:\n"
+        f"Pending Intelligence: {content}\n"
+    )
+
+
 # ── Cache refresh (Prompt 3 Part A) ──────────────────────────────────────────
 
 def _build_plan_summary(goals: list, on_track: list, off_track: list) -> str:
@@ -204,20 +290,21 @@ def _build_plan_summary(goals: list, on_track: list, off_track: list) -> str:
 
 def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     """
-    Reads from core.user_profiles, meridian.user_goals, meridian.risk_alerts.
+    Reads from core.user_profiles, meridian.user_goals, meridian.risk_alerts,
+    meridian.financial_plans, meridian.goal_progress, meridian.intelligence_digests,
+    meridian.life_events, and meridian.user_positions.
     Computes plan status and emergency fund assessment.
     Writes structured summary to ai.iris_context_cache.
     Returns True on success, False on failure.
     """
-    client = _get_supabase_client()
+    client = supabase_client
     if not client:
         raise ValueError("Supabase client not configured")
 
     # 1. Fetch from core.user_profiles
     try:
         profile_res = (
-            client.schema("core")
-            .table("user_profiles")
+            _table(client, "core", "user_profiles")
             .select("*")
             .eq("user_id", user_id)
             .maybe_single()
@@ -235,8 +322,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     # 2. Fetch active goals from meridian.user_goals
     try:
         goals_res = (
-            client.schema("meridian")
-            .table("user_goals")
+            _table(client, "meridian", "user_goals")
             .select("*")
             .eq("user_id", user_id)
             .eq("status", "active")
@@ -251,8 +337,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     alerts: List[Dict[str, Any]] = []
     try:
         alerts_res = (
-            client.schema("meridian")
-            .table("risk_alerts")
+            _table(client, "meridian", "risk_alerts")
             .select("*")
             .eq("user_id", user_id)
             .eq("resolved", False)
@@ -263,11 +348,141 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         # Non-critical — continue without alerts
         logger.warning("Could not fetch risk_alerts for user_id=%s", user_id)
 
-    # 4. Compute plan status
+    # 4. Fetch most recent active financial plan from meridian.financial_plans
+    financial_plan: Dict[str, Any] = {}
+    try:
+        fp_res = (
+            _table(client, "meridian", "financial_plans")
+            .select("plan_name, target_amount, target_date, current_amount, status")
+            .eq("user_id", user_id)
+            .eq("status", "active")
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        fp_rows = fp_res.data or []
+        if fp_rows:
+            p = fp_rows[0]
+            target_amount = float(p.get("target_amount") or 0)
+            current_amount = float(p.get("current_amount") or 0)
+            pct = (current_amount / target_amount * 100) if target_amount > 0 else 0.0
+            target_date = p.get("target_date")
+            if hasattr(target_date, "isoformat"):
+                target_date = target_date.isoformat()
+            financial_plan = {
+                "plan_name": p.get("plan_name"),
+                "target_amount": target_amount,
+                "target_date": str(target_date) if target_date else None,
+                "current_amount": current_amount,
+                "status": p.get("status"),
+                "progress_pct": round(pct, 2),
+            }
+    except Exception:
+        logger.exception("DB query failed: meridian.financial_plans SELECT for user_id=%s", user_id)
+
+    # 5. Fetch goal progress for user's active goals from meridian.goal_progress
+    goal_progress_summary: Dict[str, Any] = {}
+    try:
+        goal_ids = [g["id"] for g in goals if g.get("id")]
+        if goal_ids:
+            gp_res = (
+                _table(client, "meridian", "goal_progress")
+                .select("goal_id, period, actual_amount, target_amount, on_track")
+                .in_("goal_id", goal_ids)
+                .execute()
+            )
+            gp_records = gp_res.data or []
+            if gp_records:
+                on_track_count = sum(1 for r in gp_records if r.get("on_track"))
+                behind_count = len(gp_records) - on_track_count
+                goal_progress_summary = {
+                    "total": len(gp_records),
+                    "on_track": on_track_count,
+                    "behind": behind_count,
+                }
+    except Exception:
+        logger.exception("DB query failed: meridian.goal_progress SELECT for user_id=%s", user_id)
+
+    # 6. Fetch most recent unread intelligence digest from meridian.intelligence_digests
+    intelligence_digest: Dict[str, Any] = {}
+    try:
+        digest_res = (
+            _table(client, "meridian", "intelligence_digests")
+            .select("digest_type, content, created_at")
+            .eq("user_id", user_id)
+            .eq("delivered", False)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        digest_rows = digest_res.data or []
+        if digest_rows:
+            d = digest_rows[0]
+            created_at = d.get("created_at")
+            if hasattr(created_at, "isoformat"):
+                created_at = created_at.isoformat()
+            intelligence_digest = {
+                "digest_type": d.get("digest_type"),
+                "content": d.get("content"),
+                "created_at": str(created_at) if created_at else None,
+            }
+    except Exception:
+        logger.exception("DB query failed: meridian.intelligence_digests SELECT for user_id=%s", user_id)
+
+    # 7. Fetch life events within the next 90 days from meridian.life_events
+    life_events: List[Dict[str, Any]] = []
+    try:
+        now = datetime.now(timezone.utc)
+        today_str = now.date().isoformat()
+        cutoff_str = (now + timedelta(days=90)).date().isoformat()
+        le_res = (
+            _table(client, "meridian", "life_events")
+            .select("event_type, event_date, description")
+            .eq("user_id", user_id)
+            .gte("event_date", today_str)
+            .lte("event_date", cutoff_str)
+            .order("event_date")
+            .execute()
+        )
+        for le in (le_res.data or []):
+            event_date = le.get("event_date")
+            if hasattr(event_date, "isoformat"):
+                event_date = event_date.isoformat()
+            life_events.append({
+                "event_type": le.get("event_type"),
+                "event_date": str(event_date) if event_date else None,
+                "description": le.get("description"),
+            })
+    except Exception:
+        logger.exception("DB query failed: meridian.life_events SELECT for user_id=%s", user_id)
+
+    # 8. Fetch current positions from meridian.user_positions
+    user_positions: List[Dict[str, Any]] = []
+    try:
+        pos_res = (
+            _table(client, "meridian", "user_positions")
+            .select("ticker, quantity, avg_cost, current_value")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        for pos in (pos_res.data or []):
+            user_positions.append({
+                "ticker": pos.get("ticker"),
+                "quantity": pos.get("quantity"),
+                "avg_cost": pos.get("avg_cost"),
+                "current_value": pos.get("current_value"),
+            })
+    except Exception:
+        logger.exception("DB query failed: meridian.user_positions SELECT for user_id=%s", user_id)
+
+    # 9. Compute plan status from goals (retained for backward compatibility)
     on_track_goals = []
     off_track_goals = []
     for goal in goals:
-        if goal.get("monthly_contribution") and float(goal.get("monthly_contribution", 0)) > 0:
+        monthly_contribution = goal.get("monthly_contribution")
+        if monthly_contribution is None:
+            on_track_goals.append(goal["goal_name"])
+        elif float(monthly_contribution) > 0:
             on_track_goals.append(goal["goal_name"])
         else:
             off_track_goals.append(goal["goal_name"])
@@ -280,7 +495,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "total_goals": len(goals),
     }
 
-    # 5. Compute emergency fund status
+    # 10. Compute emergency fund status
     emergency_months = float(profile.get("emergency_fund_months") or 0)
     if emergency_months >= 6:
         ef_status = "Adequate (6+ months)"
@@ -291,7 +506,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     else:
         ef_status = "None — building an emergency fund should come before investing"
 
-    # 6. Build profile summary
+    # 11. Build profile summary
     profile_summary: Dict[str, Any] = {
         "risk_profile": profile.get("risk_profile", "not set"),
         "investment_horizon": profile.get("investment_horizon", "not set"),
@@ -301,7 +516,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "age_range": profile.get("age_range"),
     }
 
-    # 7. Format goals for context injection
+    # 12. Format goals for context injection
     active_goals: List[Dict[str, Any]] = []
     for g in goals:
         target_amount = float(g.get("target_amount") or 0)
@@ -322,7 +537,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             "status": g.get("status", "active"),
         })
 
-    # 8. Format alerts
+    # 13. Format alerts
     active_alerts: List[Dict[str, Any]] = []
     for a in alerts:
         active_alerts.append({
@@ -331,7 +546,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             "message": a.get("message"),
         })
 
-    # 9. Upsert into ai.iris_context_cache
+    # 14. Upsert into ai.iris_context_cache
     knowledge_tier = profile.get("knowledge_tier") if profile.get("knowledge_tier") is not None else 1
 
     cache_data: Dict[str, Any] = {
@@ -342,10 +557,15 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "active_alerts": active_alerts,
         "plan_status": plan_status,
         "knowledge_tier": knowledge_tier,
+        "financial_plan": financial_plan,
+        "goal_progress_summary": goal_progress_summary,
+        "intelligence_digest": intelligence_digest,
+        "life_events": life_events,
+        "user_positions": user_positions,
     }
 
     try:
-        client.schema("ai").table("iris_context_cache").upsert(
+        _table(client, "ai", "iris_context_cache").upsert(
             cache_data,
             on_conflict="user_id",
         ).execute()
@@ -373,15 +593,14 @@ async def refresh_iris_context_cache(user_id: str) -> None:
 
 def _refresh_all_users_sync() -> Dict[str, int]:
     """Sync implementation of daily refresh for all users."""
-    client = _get_supabase_client()
+    client = supabase_client
     if not client:
         logger.error("Cannot run daily refresh — Supabase client not configured")
         return {"total": 0, "success": 0, "failed": 0}
 
     try:
         res = (
-            client.schema("core")
-            .table("user_profiles")
+            _table(client, "core", "user_profiles")
             .select("user_id")
             .execute()
         )
@@ -417,19 +636,19 @@ async def refresh_all_users_context() -> Dict[str, int]:
 
 def _update_knowledge_tier_sync(user_id: str, tier: int) -> None:
     """Persist detected knowledge tier to core.user_profiles and ai.iris_context_cache."""
-    client = _get_supabase_client()
+    client = supabase_client
     if not client:
         return
 
     try:
-        client.schema("core").table("user_profiles").update(
+        _table(client, "core", "user_profiles").update(
             {"knowledge_tier": tier}
         ).eq("user_id", user_id).execute()
     except Exception:
         logger.warning("Failed to update knowledge_tier in core.user_profiles for user_id=%s", user_id)
 
     try:
-        client.schema("ai").table("iris_context_cache").update(
+        _table(client, "ai", "iris_context_cache").update(
             {"knowledge_tier": tier}
         ).eq("user_id", user_id).execute()
     except Exception:
@@ -453,7 +672,7 @@ def _onboard_user_sync(user_id: str, body: Dict[str, Any]) -> None:
     Upserts core.user_profiles, inserts meridian.user_goals (skip if same goal_name + active exists),
     inserts meridian.meridian_events.
     """
-    client = _get_supabase_client()
+    client = supabase_client
     if not client:
         raise ValueError("Supabase client not configured")
 
@@ -470,8 +689,7 @@ def _onboard_user_sync(user_id: str, body: Dict[str, Any]) -> None:
             profile_data[k] = body[k]
 
     existing = (
-        client.schema("core")
-        .table("user_profiles")
+        _table(client, "core", "user_profiles")
         .select("id")
         .eq("user_id", user_id)
         .maybe_single()
@@ -481,21 +699,19 @@ def _onboard_user_sync(user_id: str, body: Dict[str, Any]) -> None:
         update_payload = {k: v for k, v in profile_data.items() if k != "user_id"}
         if update_payload:
             (
-                client.schema("core")
-                .table("user_profiles")
+                _table(client, "core", "user_profiles")
                 .update(update_payload)
                 .eq("id", existing.data["id"])
                 .execute()
             )
     else:
-        client.schema("core").table("user_profiles").insert(profile_data).execute()
+        _table(client, "core", "user_profiles").insert(profile_data).execute()
 
     goal_name = body.get("goal_name")
     target_amount = body.get("target_amount")
     if goal_name is not None and target_amount is not None:
         existing_goal = (
-            client.schema("meridian")
-            .table("user_goals")
+            _table(client, "meridian", "user_goals")
             .select("id")
             .eq("user_id", user_id)
             .eq("goal_name", goal_name)
@@ -512,10 +728,10 @@ def _onboard_user_sync(user_id: str, body: Dict[str, Any]) -> None:
             }
             if body.get("target_date") is not None:
                 goal_row["target_date"] = body["target_date"]
-            client.schema("meridian").table("user_goals").insert(goal_row).execute()
+            _table(client, "meridian", "user_goals").insert(goal_row).execute()
 
     try:
-        client.schema("meridian").table("meridian_events").insert({
+        _table(client, "meridian", "meridian_events").insert({
             "user_id": user_id,
             "event_type": "onboarding_completed",
             "event_data": body,

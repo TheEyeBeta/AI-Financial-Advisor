@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { OpenPositions } from "@/components/trading/OpenPositions";
@@ -12,6 +12,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { usePaperTradingLedger } from "@/hooks/use-paper-trading-ledger";
 import { cn } from "@/lib/utils";
+import { AnalyticsEvents } from "@/services/analytics";
 
 const PaperTrading = () => {
   const { userProfile } = useAuth();
@@ -23,11 +24,21 @@ const PaperTrading = () => {
     openPositions,
     closedTrades,
     portfolioHistory,
+    error,
   } = usePaperTradingLedger();
   const heading = userProfile?.first_name
     ? `${userProfile.first_name}, run your paper trading desk`
     : "Run your paper trading desk";
   const sectionAnimation = "animate-in fade-in slide-in-from-bottom-2 duration-300";
+
+  useEffect(() => {
+    AnalyticsEvents.featureViewed("paper_trading_workspace");
+  }, []);
+
+  useEffect(() => {
+    if (!isTradeTicketOpen) return;
+    AnalyticsEvents.featureViewed("paper_trading_trade_ticket");
+  }, [isTradeTicketOpen]);
 
   return (
     <AppLayout title="Paper Trading">
@@ -41,6 +52,12 @@ const PaperTrading = () => {
           </div>
           <TradeEngineStatus compact showSignals={false} />
         </div>
+
+        {error && (
+          <div className="rounded-xl border border-border/60 bg-card/70 px-4 py-3 text-sm text-muted-foreground">
+            Some paper trading data could not be refreshed. The workspace is showing the latest available ledger data.
+          </div>
+        )}
 
         <div className={sectionAnimation} style={{ animationDelay: "50ms" }}>
           <PaperTradingOverview

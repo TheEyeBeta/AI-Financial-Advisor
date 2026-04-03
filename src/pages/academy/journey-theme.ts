@@ -2,7 +2,7 @@ import { Compass, LineChart, Trophy, type LucideIcon } from "lucide-react";
 import { TIER_IDS } from "@/services/academy-api";
 
 export type JourneyMeta = {
-  chapter: string;
+  tier: string;
   hook: string;
   summary: string;
   icon: LucideIcon;
@@ -14,7 +14,7 @@ export type JourneyMeta = {
 };
 
 export const DEFAULT_JOURNEY_META: JourneyMeta = {
-  chapter: "New Chapter",
+  tier: "New Tier",
   hook: "Chart your next move.",
   summary: "Every lesson adds context, confidence, and momentum to the path ahead.",
   icon: Compass,
@@ -27,7 +27,7 @@ export const DEFAULT_JOURNEY_META: JourneyMeta = {
 
 const TIER_JOURNEY_META: Record<string, JourneyMeta> = {
   [TIER_IDS.BEGINNER]: {
-    chapter: "Chapter 01",
+    tier: "Tier 01",
     hook: "Lay the foundation.",
     summary: "Start with the language of markets, risk, and portfolio basics so every later lesson clicks faster.",
     icon: Compass,
@@ -38,7 +38,7 @@ const TIER_JOURNEY_META: Record<string, JourneyMeta> = {
     buttonClass: "!bg-emerald-600 !text-white hover:!bg-emerald-500",
   },
   [TIER_IDS.INTERMEDIATE]: {
-    chapter: "Chapter 02",
+    tier: "Tier 02",
     hook: "Read the market with intent.",
     summary: "Move from theory to interpretation with stronger pattern recognition, valuation, and decision-making discipline.",
     icon: LineChart,
@@ -49,7 +49,7 @@ const TIER_JOURNEY_META: Record<string, JourneyMeta> = {
     buttonClass: "!bg-sky-600 !text-white hover:!bg-sky-500",
   },
   [TIER_IDS.ADVANCED]: {
-    chapter: "Chapter 03",
+    tier: "Tier 03",
     hook: "Turn insight into edge.",
     summary: "Bring together structure, conviction, and execution as the path shifts into more advanced strategy work.",
     icon: Trophy,

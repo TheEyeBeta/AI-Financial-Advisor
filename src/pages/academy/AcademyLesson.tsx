@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import DOMPurify from "dompurify";
+import ReactMarkdown, { type Components } from "react-markdown";
 import { useNavigate, useParams } from "react-router-dom";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -36,6 +38,7 @@ function useIsDesktopXl() {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
+import { AnalyticsEvents } from "@/services/analytics";
 import {
   academyApi,
   TIER_IDS,
@@ -53,75 +56,93 @@ import { AcademyTutor } from "./AcademyTutor";
 
 // ─── Simple Markdown renderer (no external deps) ─────────────────────────────
 
-/** Escape HTML special characters before injecting markdown-generated HTML. */
-function escapeHtml(raw: string): string {
-  return raw
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
-}
+const LESSON_VIEWPORT_HEIGHT = "calc(100dvh - var(--app-layout-header-height, 3.5rem))";
 
-function renderInlineMarkdown(text: string): string {
-  // Escape first so that any HTML already in the DB content is inert, then
-  // re-introduce only the specific safe HTML tags we intentionally create.
-  return escapeHtml(text)
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code class="bg-muted/60 rounded px-1 py-0.5 text-sm font-mono">$1</code>')
-    .replace(
-      /\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g,
-      '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-primary underline">$1</a>',
+const markdownComponents: Components = {
+  a: ({ children, href, ...props }) => (
+    <a
+      {...props}
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-primary underline"
+    >
+      {children}
+    </a>
+  ),
+  code: ({ className, children, ...props }) => {
+    const language = /language-([\w-]+)/.exec(className || "")?.[1];
+    const code = String(children).replace(/\n$/, "");
+    const isBlock = Boolean(language) || code.includes("\n");
+
+    if (isBlock) {
+      return (
+        <div className="my-3 overflow-hidden rounded-lg border border-border/50">
+          <div className="flex items-center justify-between border-b border-border/30 bg-muted/40 px-4 py-2">
+            <span className="text-xs font-mono uppercase tracking-wide text-muted-foreground/60">
+              {language || "text"}
+            </span>
+          </div>
+          <pre className="overflow-x-auto bg-muted/20 p-4">
+            <code {...props} className="text-sm font-mono leading-relaxed text-foreground/90">
+              {code}
+            </code>
+          </pre>
+        </div>
+      );
+    }
+
+    return (
+      <code
+        {...props}
+        className="rounded bg-muted/60 px-1 py-0.5 text-sm font-mono"
+      >
+        {children}
+      </code>
     );
+  },
+  em: ({ children }) => <em className="italic">{children}</em>,
+  h1: ({ children }) => (
+    <h1 className="mb-3 mt-6 text-2xl font-semibold text-foreground">{children}</h1>
+  ),
+  h2: ({ children }) => (
+    <h2 className="mb-3 mt-6 text-xl font-semibold text-foreground">{children}</h2>
+  ),
+  h3: ({ children }) => (
+    <h3 className="mb-2 mt-5 text-lg font-semibold text-foreground">{children}</h3>
+  ),
+  li: ({ children }) => (
+    <li className="leading-relaxed text-foreground/85 marker:text-foreground/60 [&>p]:inline [&>p]:whitespace-pre-line">
+      {children}
+    </li>
+  ),
+  ol: ({ children }) => (
+    <ol className="list-inside list-decimal space-y-1 text-sm text-foreground/85">{children}</ol>
+  ),
+  p: ({ children }) => (
+    <p className="whitespace-pre-line text-sm leading-relaxed text-foreground/85">{children}</p>
+  ),
+  pre: ({ children }) => <>{children}</>,
+  strong: ({ children }) => <strong className="font-semibold text-foreground">{children}</strong>,
+  ul: ({ children }) => (
+    <ul className="list-inside list-disc space-y-1 text-sm text-foreground/85">{children}</ul>
+  ),
+};
+
+function sanitizeMarkdown(content: string): string {
+  return DOMPurify.sanitize(content, {
+    USE_PROFILES: { html: true },
+  });
 }
 
-function MarkdownParagraph({ content }: { content: string }) {
-  const paragraphs = content.split(/\n\n+/);
+function MarkdownContent({ content }: { content: string }) {
+  const sanitizedContent = useMemo(() => sanitizeMarkdown(content), [content]);
+
   return (
     <div className="space-y-3">
-      {paragraphs.map((para, i) => {
-        if (para.startsWith('- ') || para.startsWith('* ')) {
-          const items = para.split('\n').filter(Boolean);
-          return (
-            <ul key={i} className="list-disc list-inside space-y-1 text-sm text-foreground/85">
-              {items.map((item, j) => (
-                <li
-                  key={j}
-                  dangerouslySetInnerHTML={{
-                    __html: renderInlineMarkdown(item.replace(/^[-*]\s+/, '')),
-                  }}
-                />
-              ))}
-            </ul>
-          );
-        }
-        if (/^\d+\.\s/.test(para)) {
-          const items = para.split('\n').filter(Boolean);
-          return (
-            <ol key={i} className="list-decimal list-inside space-y-1 text-sm text-foreground/85">
-              {items.map((item, j) => (
-                <li
-                  key={j}
-                  dangerouslySetInnerHTML={{
-                    __html: renderInlineMarkdown(item.replace(/^\d+\.\s+/, '')),
-                  }}
-                />
-              ))}
-            </ol>
-          );
-        }
-        // Apply inline markdown first (which escapes HTML), then turn remaining
-        // newlines into <br/> tags so soft-breaks render correctly.
-        const html = renderInlineMarkdown(para).replace(/\n/g, '<br/>');
-        return (
-          <p
-            key={i}
-            className="text-sm text-foreground/85 leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-        );
-      })}
+      <ReactMarkdown components={markdownComponents} skipHtml>
+        {sanitizedContent}
+      </ReactMarkdown>
     </div>
   );
 }
@@ -136,7 +157,7 @@ function LessonBlockRenderer({ block }: { block: LessonBlock }) {
       );
 
     case 'paragraph':
-      return <MarkdownParagraph content={block.content_md} />;
+      return <MarkdownContent content={block.content_md} />;
 
     case 'code': {
       const language = (block.data?.language as string) || 'text';
@@ -189,7 +210,7 @@ function LessonBlockRenderer({ block }: { block: LessonBlock }) {
             </span>
           </div>
           <div className="p-4">
-            <MarkdownParagraph content={block.content_md} />
+            <MarkdownContent content={block.content_md} />
           </div>
         </div>
       );
@@ -225,14 +246,14 @@ function LessonBlockRenderer({ block }: { block: LessonBlock }) {
           <p className="text-xs font-medium text-primary/70 uppercase tracking-wide mb-2">
             Exercise
           </p>
-          <MarkdownParagraph content={block.content_md} />
+          <MarkdownContent content={block.content_md} />
         </div>
       );
 
     default:
       return (
         <div className="text-sm text-foreground/85 my-2">
-          <MarkdownParagraph content={block.content_md} />
+          <MarkdownContent content={block.content_md} />
         </div>
       );
   }
@@ -369,6 +390,7 @@ export default function AcademyLesson() {
   const isDesktopXl = useIsDesktopXl();
 
   const latestLoadReqRef = useRef(0);
+  const startedLessonIdRef = useRef<string | null>(null);
 
   const loadLesson = useCallback(async () => {
     if (!authUserId || !slug) return;
@@ -458,6 +480,15 @@ export default function AcademyLesson() {
       setAllTiers(tiersData);
       setAllLessons(allLessonsData);
       setEnrollments(enrollmentsData.map((e) => e.tier_id));
+
+      if (startedLessonIdRef.current !== foundLesson.id) {
+        AnalyticsEvents.learningTopicStarted(foundLesson.title, {
+          lesson_id: foundLesson.id,
+          lesson_slug: foundLesson.slug,
+          tier_id: foundLesson.tier_id,
+        });
+        startedLessonIdRef.current = foundLesson.id;
+      }
     } catch (err) {
       if (reqId !== latestLoadReqRef.current) return;
       console.error("Error loading lesson:", err);
@@ -477,6 +508,11 @@ export default function AcademyLesson() {
 
   function handleQuizPassed(score: number) {
     if (!lesson || !authUserId) return;
+    AnalyticsEvents.learningTopicCompleted(lesson.title, {
+      lesson_id: lesson.id,
+      lesson_slug: lesson.slug,
+      score,
+    });
     setProgress((prev) => {
       const existing = prev.find((p) => p.lesson_id === lesson.id);
       const bestScore = Math.max(score, existing?.best_quiz_score ?? 0);
@@ -520,7 +556,7 @@ export default function AcademyLesson() {
       <AppLayout>
         <div
           className="flex overflow-hidden -mx-4 -my-4 sm:-mx-6 sm:-my-6"
-          style={{ height: 'calc(100vh - 3.5rem)' }}
+          style={{ height: LESSON_VIEWPORT_HEIGHT }}
         >
           {/* Sidebar skeleton */}
           <div className="hidden lg:flex w-64 flex-col border-r border-border/50 p-4 space-y-2 bg-muted/10">
@@ -560,7 +596,7 @@ export default function AcademyLesson() {
     <AppLayout>
       <div
         className="flex overflow-hidden -mx-4 -my-4 sm:-mx-6 sm:-my-6"
-        style={{ height: 'calc(100vh - 3.5rem)' }}
+        style={{ height: LESSON_VIEWPORT_HEIGHT }}
       >
         {/* ─── Desktop Left Sidebar ─── */}
         <aside className="hidden lg:flex w-64 xl:w-72 flex-col border-r border-border/50 overflow-y-auto bg-muted/10 flex-shrink-0">
@@ -700,7 +736,7 @@ export default function AcademyLesson() {
       {/* Mobile Tutor Sheet — only mounted below xl breakpoint to prevent overlay on desktop */}
       {!isDesktopXl && (
         <Sheet open={tutorOpen} onOpenChange={setTutorOpen}>
-          <SheetContent side="right" className="w-full sm:w-96 p-0 flex flex-col">
+          <SheetContent side="right" className="w-full sm:w-96 p-0 flex flex-col [&>button:first-of-type]:hidden">
             <AcademyTutor
               lesson={lesson}
               tier={tier}

@@ -180,7 +180,22 @@ CREATE TABLE IF NOT EXISTS market.trending_stocks (
     symbol TEXT NOT NULL,
     name TEXT NOT NULL,
     change_percent DECIMAL(5, 2) NOT NULL,
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    ticker VARCHAR UNIQUE,
+    composite_score NUMERIC,
+    momentum_score NUMERIC,
+    technical_score NUMERIC,
+    fundamental_score NUMERIC,
+    consistency_score NUMERIC,
+    signal_score NUMERIC,
+    momentum_1m NUMERIC,
+    momentum_3m NUMERIC,
+    momentum_6m NUMERIC,
+    momentum_12m NUMERIC,
+    fundamental_trend VARCHAR,
+    rank_tier VARCHAR,
+    conviction VARCHAR,
+    ranked_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- News Articles (Financial news - synced from Trade Engine)

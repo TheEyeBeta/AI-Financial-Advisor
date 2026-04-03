@@ -97,7 +97,9 @@ export function PortfolioPerformance({
         <div className="flex items-start justify-between mb-4">
           <div>
             <p className="text-xs text-muted-foreground/70 uppercase tracking-wide mb-1">Portfolio Performance</p>
-            <span className="text-3xl font-bold tracking-tight">${currentValue.toLocaleString()}</span>
+            <span className="text-3xl font-bold tracking-tight">
+              ${currentValue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+            </span>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-xs text-muted-foreground/60">
                 {totalReturn >= 0 ? "+" : ""}${totalReturn.toLocaleString(undefined, { minimumFractionDigits: 2 })} all time
@@ -152,7 +154,7 @@ export function PortfolioPerformance({
                   fontSize: "12px",
                 }}
                 labelStyle={{ color: "hsl(var(--muted-foreground))", fontSize: "10px" }}
-                formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
+                formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, ""]}
               />
               <Area
                 type="monotone"

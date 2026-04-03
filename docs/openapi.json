@@ -670,30 +670,6 @@
               "title": "Min Score"
             },
             "description": "Minimum composite score filter"
-          },
-          {
-            "name": "horizon",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "balanced",
-              "description": "Investment horizon: 'short' (swing/days-weeks), 'long' (buy-and-hold/months-years), 'balanced' (default)",
-              "title": "Horizon"
-            },
-            "description": "Investment horizon: 'short' (swing/days-weeks), 'long' (buy-and-hold/months-years), 'balanced' (default)"
-          },
-          {
-            "name": "source",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "supabase",
-              "description": "Data source: supabase (default), dataapi, or auto",
-              "title": "Source"
-            },
-            "description": "Data source: supabase (default), dataapi, or auto"
           }
         ],
         "responses": {
@@ -1085,15 +1061,18 @@
             "type": "array",
             "title": "Stocks"
           },
-          "has_stale_data": { "type": "boolean", "title": "Has Stale Data" },
-          "has_ml_data": { "type": "boolean", "title": "Has Ml Data" },
-          "total_scored": { "type": "integer", "title": "Total Scored" },
-          "horizon": { "type": "string", "title": "Horizon" },
-          "cached": { "type": "boolean", "title": "Cached" },
-          "cache_age_seconds": { "type": "number", "title": "Cache Age Seconds" }
+          "total": { "type": "integer", "title": "Total" },
+          "last_ranked_at": {
+            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "title": "Last Ranked At"
+          },
+          "data_age_hours": {
+            "anyOf": [{ "type": "number" }, { "type": "null" }],
+            "title": "Data Age Hours"
+          }
         },
         "type": "object",
-        "required": ["stocks", "has_stale_data", "has_ml_data", "total_scored", "horizon", "cached", "cache_age_seconds"],
+        "required": ["stocks", "total"],
         "title": "RankingResponse"
       },
       "ScoreBreakdown": {
@@ -1135,31 +1114,27 @@
       "StockScore": {
         "properties": {
           "ticker": { "type": "string", "title": "Ticker" },
-          "company_name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Company Name" },
-          "last_price": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Last Price" },
-          "price_change_pct": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Change Pct" },
+          "symbol": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Symbol" },
+          "name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Name" },
+          "change_percent": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Change Percent" },
           "updated_at": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Updated At" },
           "composite_score": { "type": "number", "title": "Composite Score" },
-          "rank_tier": { "type": "string", "title": "Rank Tier" },
-          "conviction": { "type": "string", "title": "Conviction" },
-          "momentum_score": { "type": "number", "title": "Momentum Score" },
-          "technical_score": { "type": "number", "title": "Technical Score" },
-          "fundamental_score": { "type": "number", "title": "Fundamental Score" },
-          "risk_score": { "type": "number", "title": "Risk Score" },
-          "quality_score": { "type": "number", "title": "Quality Score" },
-          "ml_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Ml Score" },
-          "has_ml_data": { "type": "boolean", "title": "Has Ml Data" },
-          "breakdown": { "$ref": "#/components/schemas/ScoreBreakdown" },
-          "data_fresh": { "type": "boolean", "title": "Data Fresh" },
-          "dimensions_bullish": { "type": "integer", "title": "Dimensions Bullish" }
+          "momentum_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum Score" },
+          "technical_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Technical Score" },
+          "fundamental_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Fundamental Score" },
+          "consistency_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Consistency Score" },
+          "signal_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Signal Score" },
+          "momentum_1m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 1M" },
+          "momentum_3m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 3M" },
+          "momentum_6m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 6M" },
+          "momentum_12m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 12M" },
+          "fundamental_trend": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Fundamental Trend" },
+          "rank_tier": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Rank Tier" },
+          "conviction": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Conviction" },
+          "ranked_at": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Ranked At" }
         },
         "type": "object",
-        "required": [
-          "ticker", "composite_score", "rank_tier", "conviction",
-          "momentum_score", "technical_score", "fundamental_score",
-          "risk_score", "quality_score", "has_ml_data", "breakdown",
-          "data_fresh", "dimensions_bullish"
-        ],
+        "required": ["ticker", "composite_score"],
         "title": "StockScore"
       },
       "TickerSnapshot": {
