@@ -38,11 +38,6 @@ logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
 
-# Guard: ensures the one-time startup ranking cycle fires on the very first
-# lifespan start and is skipped on any subsequent hot-reload within the same
-# process (e.g. uvicorn --reload).  A fresh OS process always starts False.
-_startup_ranking_done: bool = False
-
 
 async def _run_scheduled_cycle() -> None:
     """Scheduler callback: run one intelligence cycle and log the summary."""
@@ -119,16 +114,57 @@ async def _lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Schedulers started (intelligence=6h interval, ranking=daily 01:00 UTC)")
 
-    # Fire-and-forget: populate market.trending_stocks immediately on the
-    # first deploy so the table is ready before the first user request.
-    # The _startup_ranking_done flag ensures this only fires once per process
-    # lifetime — hot-reloads (uvicorn --reload) won't re-trigger it.
+    # Fire-and-forget: populate market.trending_stocks immediately on startup
+    # if the data is stale (>2 h old) or missing.  Querying Supabase directly
+    # means this logic is safe across multiple uvicorn worker processes — each
+    # worker checks the shared DB state rather than a per-process boolean flag.
     import asyncio as _asyncio
-    global _startup_ranking_done
-    if not _startup_ranking_done:
-        _startup_ranking_done = True
+    from .services.supabase_client import supabase_client as _supabase_client
+
+    def _get_last_ranked_at():
+        result = (
+            _supabase_client.schema("market")
+            .table("trending_stocks")
+            .select("ranked_at")
+            .order("ranked_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        if result.data:
+            return result.data[0].get("ranked_at")
+        return None
+
+    try:
+        _last_ranked_at_raw = await _asyncio.to_thread(_get_last_ranked_at)
+    except Exception as _exc:
+        logger.warning(
+            "Startup ranking check failed (%s); triggering cycle anyway", _exc
+        )
+        _last_ranked_at_raw = None
+
+    _now = datetime.now(timezone.utc)
+    if _last_ranked_at_raw is not None:
+        if isinstance(_last_ranked_at_raw, str):
+            _ranked_at_dt = datetime.fromisoformat(
+                _last_ranked_at_raw.replace("Z", "+00:00")
+            )
+        else:
+            _ranked_at_dt = _last_ranked_at_raw
+    else:
+        _ranked_at_dt = None
+
+    if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 7200:
         _asyncio.create_task(_run_scheduled_ranking_cycle())
-        logger.info("Ranking cycle queued for immediate startup run (background)")
+        logger.info(
+            "Ranking cycle triggered on startup - last ranked: %s",
+            _ranked_at_dt.isoformat() if _ranked_at_dt else "never",
+        )
+    else:
+        _minutes_ago = int((_now - _ranked_at_dt).total_seconds() / 60)
+        logger.info(
+            "Ranking cycle skipped on startup - ranked %d minutes ago",
+            _minutes_ago,
+        )
 
     try:
         yield
