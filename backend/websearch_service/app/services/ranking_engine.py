@@ -199,7 +199,7 @@ def _score_momentum(
 
     Weight schedules:
     - Full history (12m available):
-        1m×0.15 + 3m×0.25 + 6m×0.35 + 12m×0.25  (sums to 1.00)
+        1m×0.10 + 3m×0.20 + 6m×0.40 + 12m×0.30  (sums to 1.00)
     - Insufficient 12m history (return_12m is None):
         1m×0.20 + 3m×0.35 + 6m×0.45              (sums to 1.00)
     - Insufficient 1m history (return_1m is None, < 21 trading days):
@@ -238,10 +238,10 @@ def _score_momentum(
             )
         else:
             momentum_raw = (
-                (momentum_1m          * 0.15)
-                + ((momentum_3m or 0.0) * 0.25)
-                + ((momentum_6m or 0.0) * 0.35)
-                + (momentum_12m        * 0.25)
+                (momentum_1m          * 0.10)
+                + ((momentum_3m or 0.0) * 0.20)
+                + ((momentum_6m or 0.0) * 0.40)
+                + (momentum_12m        * 0.30)
             )
 
         raw_momentum[ticker] = momentum_raw
