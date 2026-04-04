@@ -1,7 +1,7 @@
+import { useState } from "react";
 import {
   BarChart3,
-  Coins,
-  Compass,
+  BookOpen,
   Globe,
   Shield,
   Sparkles,
@@ -9,96 +9,275 @@ import {
   TrendingUp,
 } from "lucide-react";
 
-import type { ExperienceLevel } from "@/types/database";
 import { cn } from "@/lib/utils";
 
 interface SuggestedTopicsProps {
   onSelectTopic: (topic: string) => void;
-  experienceLevel?: ExperienceLevel;
+  hasMeridianData?: boolean;
+  knowledgeTier?: number;
 }
+
+type Category = "portfolio" | "market" | "learning" | "planning" | "analysis";
 
 interface Topic {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   question: string;
+  category: Category;
 }
 
-const beginnerTopics: Topic[] = [
+const ALL_TOPICS: Topic[] = [
+  // PORTFOLIO & POSITIONS
+  {
+    icon: BarChart3,
+    label: "Monthly performance",
+    question: "How is my portfolio performing this month?",
+    category: "portfolio",
+  },
+  {
+    icon: Shield,
+    label: "Position risk",
+    question: "Which of my positions has the most risk right now?",
+    category: "portfolio",
+  },
+  {
+    icon: Target,
+    label: "Sector concentration",
+    question: "Am I too concentrated in any one sector?",
+    category: "portfolio",
+  },
   {
     icon: TrendingUp,
-    label: "Getting started",
-    question: "I am new to investing. What should I focus on first?",
-  },
-  {
-    icon: Coins,
-    label: "Small budget",
-    question: "How can I start investing with a small amount of money?",
+    label: "Best & worst position",
+    question: "What's my best and worst performing position?",
+    category: "portfolio",
   },
   {
     icon: Shield,
-    label: "Risk basics",
-    question: "How do I avoid obvious mistakes and manage risk early on?",
+    label: "Holdings review",
+    question: "Should I be worried about any of my current holdings?",
+    category: "portfolio",
   },
-  {
-    icon: Compass,
-    label: "First portfolio",
-    question: "What does a simple first portfolio look like?",
-  },
-];
 
-const intermediateTopics: Topic[] = [
+  // MARKET & TOP STOCKS
   {
-    icon: BarChart3,
-    label: "Portfolio review",
-    question: "Help me review my portfolio risk, concentration, and rebalancing choices.",
+    icon: TrendingUp,
+    label: "Strongest stocks",
+    question: "What are the strongest stocks in the market right now?",
+    category: "market",
   },
   {
     icon: Globe,
-    label: "Market recap",
-    question: "Summarize the market and tell me what matters most right now.",
-  },
-  {
-    icon: Shield,
-    label: "Risk controls",
-    question: "Walk me through stronger position sizing and risk controls.",
+    label: "Leading sectors",
+    question: "Which sectors are leading the market today?",
+    category: "market",
   },
   {
     icon: Target,
-    label: "Tax efficiency",
-    question: "How can I make my portfolio more tax-efficient?",
-  },
-];
-
-const advancedTopics: Topic[] = [
-  {
-    icon: Target,
-    label: "Thesis check",
-    question: "Pressure-test the thesis behind a position I am considering.",
+    label: "High-conviction picks",
+    question: "Are there any high-conviction opportunities I should know about?",
+    category: "market",
   },
   {
     icon: Globe,
-    label: "Macro regime",
-    question: "Walk through the current macro regime and how it affects positioning.",
+    label: "Market regime",
+    question: "What does the current market regime mean for my investments?",
+    category: "market",
   },
   {
     icon: BarChart3,
-    label: "Stress test",
-    question: "Stress-test my portfolio under a rates or growth shock.",
+    label: "Top-ranked stocks",
+    question: "Which top-ranked stocks have improving fundamentals?",
+    category: "market",
+  },
+
+  // LEARNING & EDUCATION
+  {
+    icon: BookOpen,
+    label: "Dollar-cost averaging",
+    question: "Explain dollar-cost averaging in simple terms",
+    category: "learning",
+  },
+  {
+    icon: BookOpen,
+    label: "RSI explained",
+    question: "What does a high RSI actually mean for a stock?",
+    category: "learning",
+  },
+  {
+    icon: BookOpen,
+    label: "Stock valuation",
+    question: "How do I know if a stock is overvalued?",
+    category: "learning",
+  },
+  {
+    icon: BookOpen,
+    label: "Momentum vs value",
+    question: "What's the difference between momentum and value investing?",
+    category: "learning",
   },
   {
     icon: Shield,
-    label: "Risk framing",
-    question: "Help me think about portfolio fragility and hidden risk.",
+    label: "Diversification",
+    question: "How should I think about portfolio diversification?",
+    category: "learning",
+  },
+
+  // PERSONAL FINANCIAL PLANNING
+  {
+    icon: Target,
+    label: "Financial goals",
+    question: "Am I on track with my financial goals?",
+    category: "planning",
+  },
+  {
+    icon: TrendingUp,
+    label: "Monthly investing",
+    question: "How much should I be investing each month?",
+    category: "planning",
+  },
+  {
+    icon: Shield,
+    label: "Idle cash",
+    question: "What should I do with cash sitting in my account?",
+    category: "planning",
+  },
+  {
+    icon: BarChart3,
+    label: "Risk vs horizon",
+    question: "How do I balance risk with my investment horizon?",
+    category: "planning",
+  },
+  {
+    icon: Target,
+    label: "My financial plan",
+    question: "What would a financial plan look like for someone in my situation?",
+    category: "planning",
+  },
+
+  // ANALYSIS REQUESTS
+  {
+    icon: BarChart3,
+    label: "NVDA breakdown",
+    question: "Give me a full breakdown of NVDA right now",
+    category: "analysis",
+  },
+  {
+    icon: BarChart3,
+    label: "Top 3 stocks",
+    question: "Compare the top 3 ranked stocks for me",
+    category: "analysis",
+  },
+  {
+    icon: Shield,
+    label: "Risk/reward",
+    question: "What's the risk/reward on my biggest position?",
+    category: "analysis",
+  },
+  {
+    icon: Globe,
+    label: "Tech sector",
+    question: "Analyse the tech sector for me",
+    category: "analysis",
+  },
+  {
+    icon: Target,
+    label: "Your recommendation",
+    question: "What would you buy if you were in my position?",
+    category: "analysis",
   },
 ];
 
-export function SuggestedTopics({ onSelectTopic, experienceLevel }: SuggestedTopicsProps) {
-  const topics =
-    experienceLevel === "advanced"
-      ? advancedTopics
-      : experienceLevel === "intermediate"
-        ? intermediateTopics
-        : beginnerTopics;
+// Module-level: track which questions were shown last to prevent identical
+// back-to-back repeats across chat resets within the same browser session.
+let _lastShownSet: Set<string> = new Set();
+
+function getCategoryWeight(
+  category: Category,
+  hasMeridianData: boolean,
+  knowledgeTier: number,
+): number {
+  switch (category) {
+    case "portfolio":
+      // hide portfolio entirely when no Meridian data (filtered before this call)
+      return hasMeridianData ? 3 : 0;
+    case "planning":
+      return hasMeridianData ? 3 : 1;
+    case "learning":
+      return knowledgeTier === 1 ? 3 : 1;
+    case "market":
+      // promote market questions when there is no personal portfolio context
+      return !hasMeridianData ? 3 : 2;
+    case "analysis":
+      return 2;
+    default:
+      return 1;
+  }
+}
+
+type WeightedTopic = Topic & { weight: number };
+
+function buildWeightedPool(hasMeridianData: boolean, knowledgeTier: number): WeightedTopic[] {
+  return ALL_TOPICS
+    .filter((t) => {
+      // Hide portfolio questions entirely when the user has no Meridian data
+      if (!hasMeridianData && t.category === "portfolio") return false;
+      return true;
+    })
+    .map((t) => ({
+      ...t,
+      weight: getCategoryWeight(t.category, hasMeridianData, knowledgeTier),
+    }));
+}
+
+function pickWeightedRandom(
+  pool: WeightedTopic[],
+  count: number,
+  exclude: Set<string>,
+): Topic[] {
+  // Try to avoid previously shown questions; fall back to full pool if not enough remain
+  let available = pool.filter((t) => !exclude.has(t.question));
+  if (available.length < count) {
+    available = pool;
+  }
+
+  const selected: Topic[] = [];
+  const remaining = [...available];
+
+  for (let i = 0; i < Math.min(count, remaining.length); i++) {
+    const totalWeight = remaining.reduce((sum, t) => sum + t.weight, 0);
+    if (totalWeight <= 0) break;
+
+    let rand = Math.random() * totalWeight;
+    let pickedIndex = remaining.length - 1; // fallback to last item
+
+    for (let j = 0; j < remaining.length; j++) {
+      rand -= remaining[j].weight;
+      if (rand <= 0) {
+        pickedIndex = j;
+        break;
+      }
+    }
+
+    selected.push(remaining[pickedIndex]);
+    remaining.splice(pickedIndex, 1);
+  }
+
+  return selected;
+}
+
+export function SuggestedTopics({
+  onSelectTopic,
+  hasMeridianData = false,
+  knowledgeTier = 2,
+}: SuggestedTopicsProps) {
+  const [topics] = useState<Topic[]>(() => {
+    const pool = buildWeightedPool(hasMeridianData, knowledgeTier);
+    const selected = pickWeightedRandom(pool, 4, _lastShownSet);
+    // Update module-level tracker so the next mount gets different questions
+    _lastShownSet = new Set(selected.map((t) => t.question));
+    return selected;
+  });
 
   return (
     <div>
@@ -110,7 +289,7 @@ export function SuggestedTopics({ onSelectTopic, experienceLevel }: SuggestedTop
       <div className="grid gap-3 sm:grid-cols-2">
         {topics.map((topic) => (
           <button
-            key={topic.label}
+            key={topic.question}
             type="button"
             onClick={() => onSelectTopic(topic.question)}
             className={cn(
