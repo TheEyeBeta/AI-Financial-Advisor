@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
-import { useChat, useChats, useCreateChat, useSendChatMessage, useIntelligenceDigests } from "@/hooks/use-data";
+import { useChat, useChats, useCreateChat, useSendChatMessage, useIntelligenceDigests, useOpenPositions } from "@/hooks/use-data";
 import { stockSnapshotsApi } from "@/services/stock-snapshots-api";
 import type { IntelligenceDigest } from "@/types/database";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -55,6 +55,7 @@ const Advisor = () => {
   const createChatMutation = useCreateChat();
   const sendMessageMutation = useSendChatMessage();
   const { digests, markAsRead } = useIntelligenceDigests();
+  const { data: openPositions = [] } = useOpenPositions();
 
   const [currentChatId, setCurrentChatId] = useState<string | null>(chatFromUrl);
   const { data: currentChat, isLoading: chatLoading, error: chatError } = useChat(currentChatId);
@@ -280,6 +281,10 @@ const Advisor = () => {
   const isStarterState = showTopics && displayMessages.length <= 1;
   const experienceLevel = userProfile?.experience_level as ExperienceLevel;
   const quickPrompts = getQuickPrompts(experienceLevel);
+  // Derive knowledgeTier for question weighting (1=beginner, 2=intermediate, 3=advanced)
+  const knowledgeTier = experienceLevel === "advanced" ? 3 : experienceLevel === "intermediate" ? 2 : 1;
+  // User has Meridian context if they have at least one open trading position
+  const hasMeridianData = openPositions.length > 0;
   const experienceLevelLabel = getExperienceLevelLabel(experienceLevel);
   const latestChat = chats[0];
   const chatHeaderTitle = currentChat?.title || "Conversation";
@@ -389,7 +394,8 @@ const Advisor = () => {
               <div className="mt-8">
                 <SuggestedTopics
                   onSelectTopic={handleTopicSelect}
-                  experienceLevel={userProfile?.experience_level}
+                  hasMeridianData={hasMeridianData}
+                  knowledgeTier={knowledgeTier}
                 />
               </div>
             </div>

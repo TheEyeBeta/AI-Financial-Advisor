@@ -110,6 +110,10 @@ def _format_context_block(ctx: dict) -> str:
     intelligence_digest = ctx.get("intelligence_digest") or {}
     life_events = ctx.get("life_events") or []
     user_positions = ctx.get("user_positions") or []
+    trading_positions = ctx.get("trading_positions") or []
+    closed_trades = ctx.get("closed_trades") or []
+    academy_progress = ctx.get("academy_progress") or {}
+    recent_chat_summaries = ctx.get("recent_chat_summaries") or []
 
     parts: List[str] = []
 
@@ -169,6 +173,17 @@ def _format_context_block(ctx: dict) -> str:
     # ── 9. Pending intelligence digest (always last — most actionable) ────────
     if intelligence_digest:
         parts.append(_format_intelligence_digest(intelligence_digest))
+
+    # ── 10. Live trading positions + recent closed trades ─────────────────────
+    if trading_positions or closed_trades:
+        parts.append(_format_trading_positions(trading_positions, closed_trades))
+
+    # ── 11. Academy progress ───────────────────────────────────────────────────
+    parts.append(_format_academy_progress(academy_progress))
+
+    # ── 12. Recent conversation context (always last before closing banner) ───
+    if recent_chat_summaries:
+        parts.append(_format_recent_chat_summaries(recent_chat_summaries))
 
     parts.append(
         "\n"
@@ -270,6 +285,87 @@ def _format_intelligence_digest(digest: dict) -> str:
         "PENDING INTELLIGENCE:\n"
         f"Pending Intelligence: {content}\n"
     )
+
+
+def _format_trading_positions(positions: list, closed_trades: list) -> str:
+    """Format live trading positions and recent closed trades (context block 10)."""
+    parts: List[str] = []
+
+    if positions:
+        parts.append("\n=== LIVE TRADING POSITIONS ===\n")
+        for pos in positions:
+            symbol = _sanitise_for_prompt(pos.get("symbol"), max_length=10)
+            pos_type = _sanitise_for_prompt(pos.get("type"), max_length=10)
+            qty = pos.get("quantity", 0)
+            entry = float(pos.get("entry_price") or 0)
+            current = float(pos.get("current_price") or entry)
+            pnl = float(pos.get("pnl_pct") or 0)
+            pnl_str = f"+{pnl:.1f}%" if pnl >= 0 else f"{pnl:.1f}%"
+            parts.append(
+                f"{symbol} {pos_type} x{qty} @ entry ${entry:,.2f}, "
+                f"current ${current:,.2f} ({pnl_str})\n"
+            )
+
+    if closed_trades:
+        parts.append("\n=== RECENT CLOSED TRADES ===\n")
+        for trade in closed_trades:
+            symbol = _sanitise_for_prompt(trade.get("symbol"), max_length=10)
+            trade_type = _sanitise_for_prompt(trade.get("type"), max_length=10)
+            qty = trade.get("quantity", 0)
+            entry = float(trade.get("entry_price") or 0)
+            exit_p = float(trade.get("exit_price") or entry)
+            pnl = float(trade.get("pnl_pct") or 0)
+            pnl_str = f"+{pnl:.1f}%" if pnl >= 0 else f"{pnl:.1f}%"
+            exit_date = trade.get("exit_date", "unknown")
+            parts.append(
+                f"{symbol} {trade_type} x{qty} — entered ${entry:,.2f} exited ${exit_p:,.2f} "
+                f"({pnl_str}) on {exit_date}\n"
+            )
+
+    return "".join(parts)
+
+
+def _format_academy_progress(progress: dict) -> str:
+    """Format academy learning progress (context block 11)."""
+    if not progress:
+        return (
+            "\n=== LEARNING PROGRESS ===\n"
+            "No lessons completed yet. User is new to the academy.\n"
+        )
+
+    completed = progress.get("completed", 0)
+    total = progress.get("total", 0)
+    recent = progress.get("recent_lessons") or []
+
+    parts = [
+        "\n=== LEARNING PROGRESS ===\n",
+        f"Completed {completed} of {total} lessons.\n",
+    ]
+
+    if recent:
+        recent_strs = [
+            f"{_sanitise_for_prompt(r.get('title'), max_length=60)} "
+            f"({_sanitise_for_prompt(r.get('tier_name'), max_length=30)})"
+            for r in recent
+        ]
+        parts.append(f"Recently completed: {', '.join(recent_strs)}\n")
+
+    return "".join(parts)
+
+
+def _format_recent_chat_summaries(summaries: list) -> str:
+    """Format recent chat context for continuity (context block 12)."""
+    if not summaries:
+        return ""
+    parts = ["\n=== RECENT CONVERSATION CONTEXT ===\n"]
+    for s in summaries:
+        title = _sanitise_for_prompt(s.get("title") or "Untitled chat", max_length=80)
+        content = s.get("last_assistant_message") or ""
+        snippet = content[:150].rstrip()
+        if len(content) > 150:
+            snippet += "..."
+        parts.append(f"Previous chat: '{title}' — {snippet}\n")
+    return "".join(parts)
 
 
 # ── Cache refresh (Prompt 3 Part A) ──────────────────────────────────────────
@@ -475,6 +571,226 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     except Exception:
         logger.exception("DB query failed: meridian.user_positions SELECT for user_id=%s", user_id)
 
+    # ── NEW BLOCK 10: Trading history ─────────────────────────────────────────
+    # Requires core.users.id (app UUID), not the auth_id stored in user_id.
+    trading_positions: List[Dict[str, Any]] = []
+    closed_trades: List[Dict[str, Any]] = []
+    core_user_id: Optional[str] = None  # resolved once; reused by blocks 11 and beyond
+    try:
+        # Resolve core.users.id from auth_id
+        core_user_res = (
+            _table(client, "core", "users")
+            .select("id")
+            .eq("auth_id", user_id)
+            .maybe_single()
+            .execute()
+        )
+        core_user_id = (core_user_res.data or {}).get("id")
+
+        if core_user_id:
+            # Open positions (20 most recent by entry_date DESC)
+            open_pos_res = (
+                _table(client, "trading", "open_positions")
+                .select("symbol, quantity, entry_price, current_price, type, entry_date, updated_at")
+                .eq("user_id", core_user_id)
+                .order("entry_date", desc=True)
+                .limit(20)
+                .execute()
+            )
+            for pos in (open_pos_res.data or []):
+                entry_price = float(pos.get("entry_price") or 0)
+                current_price = float(pos.get("current_price") or entry_price)
+                pnl_pct = (
+                    (current_price - entry_price) / entry_price * 100
+                    if entry_price > 0 else 0.0
+                )
+                entry_date = pos.get("entry_date")
+                if hasattr(entry_date, "isoformat"):
+                    entry_date = entry_date.isoformat()
+                trading_positions.append({
+                    "symbol": pos.get("symbol"),
+                    "type": pos.get("type"),
+                    "quantity": pos.get("quantity"),
+                    "entry_price": entry_price,
+                    "current_price": current_price,
+                    "pnl_pct": round(pnl_pct, 2),
+                    "entry_date": str(entry_date) if entry_date else None,
+                })
+
+            # Closed trades (10 most recent by exit_date DESC, exit_date IS NOT NULL)
+            closed_trades_res = (
+                _table(client, "trading", "trades")
+                .select("symbol, quantity, entry_price, exit_price, type, entry_date, exit_date")
+                .eq("user_id", core_user_id)
+                .filter("exit_date", "not.is", "null")
+                .order("exit_date", desc=True)
+                .limit(10)
+                .execute()
+            )
+            for trade in (closed_trades_res.data or []):
+                entry_price = float(trade.get("entry_price") or 0)
+                exit_price = float(trade.get("exit_price") or entry_price)
+                trade_type = (trade.get("type") or "").upper()
+                # Invert P&L sign for SHORT positions
+                if trade_type == "SHORT":
+                    pnl_pct = (
+                        (entry_price - exit_price) / entry_price * 100
+                        if entry_price > 0 else 0.0
+                    )
+                else:
+                    pnl_pct = (
+                        (exit_price - entry_price) / entry_price * 100
+                        if entry_price > 0 else 0.0
+                    )
+                exit_date = trade.get("exit_date")
+                if hasattr(exit_date, "isoformat"):
+                    exit_date = exit_date.isoformat()
+                closed_trades.append({
+                    "symbol": trade.get("symbol"),
+                    "type": trade.get("type"),
+                    "quantity": trade.get("quantity"),
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "pnl_pct": round(pnl_pct, 2),
+                    "exit_date": str(exit_date) if exit_date else None,
+                })
+    except Exception:
+        logger.exception("DB query failed: trading positions/trades for user_id=%s", user_id)
+
+    # ── NEW BLOCK 11: Academy progress ────────────────────────────────────────
+    academy_progress: Dict[str, Any] = {}
+    try:
+        # core_user_id was resolved in block 10 (None if that block failed)
+        if core_user_id:
+            # Count of completed lessons for this user
+            completed_res = (
+                _table(client, "academy", "user_lesson_progress")
+                .select("lesson_id, status, completed_at")
+                .eq("user_id", core_user_id)
+                .eq("status", "completed")
+                .order("completed_at", desc=True)
+                .limit(5)
+                .execute()
+            )
+            completed_rows = completed_res.data or []
+
+            # Total completed count (separate query for accuracy)
+            total_completed_res = (
+                _table(client, "academy", "user_lesson_progress")
+                .select("id", count="exact")
+                .eq("user_id", core_user_id)
+                .eq("status", "completed")
+                .execute()
+            )
+            total_completed = (
+                total_completed_res.count
+                if hasattr(total_completed_res, "count") and total_completed_res.count is not None
+                else len(completed_rows)
+            )
+
+            # Total lessons available
+            total_lessons_res = (
+                _table(client, "academy", "lessons")
+                .select("id", count="exact")
+                .execute()
+            )
+            total_lessons = (
+                total_lessons_res.count
+                if hasattr(total_lessons_res, "count") and total_lessons_res.count is not None
+                else 0
+            )
+
+            # Fetch lesson titles and tier_ids for the 5 most recently completed
+            recent_lesson_ids = [r["lesson_id"] for r in completed_rows if r.get("lesson_id")]
+            recent_lessons_detail: List[Dict[str, Any]] = []
+            if recent_lesson_ids:
+                lessons_res = (
+                    _table(client, "academy", "lessons")
+                    .select("id, title, tier_id")
+                    .in_("id", recent_lesson_ids)
+                    .execute()
+                )
+                lessons_by_id = {
+                    r["id"]: r for r in (lessons_res.data or []) if r.get("id")
+                }
+
+                # Fetch tier names
+                tier_ids = list({l["tier_id"] for l in lessons_by_id.values() if l.get("tier_id")})
+                tiers_by_id: Dict[str, str] = {}
+                if tier_ids:
+                    tiers_res = (
+                        _table(client, "academy", "tiers")
+                        .select("id, name")
+                        .in_("id", tier_ids)
+                        .execute()
+                    )
+                    tiers_by_id = {
+                        r["id"]: r["name"] for r in (tiers_res.data or []) if r.get("id")
+                    }
+
+                # Preserve order of completion (most recent first)
+                for row in completed_rows:
+                    lesson = lessons_by_id.get(row.get("lesson_id") or "")
+                    if lesson:
+                        recent_lessons_detail.append({
+                            "title": lesson.get("title"),
+                            "tier_name": tiers_by_id.get(lesson.get("tier_id") or "", ""),
+                        })
+
+            academy_progress = {
+                "completed": total_completed,
+                "total": total_lessons,
+                "recent_lessons": recent_lessons_detail,
+            }
+    except Exception:
+        logger.exception("DB query failed: academy progress for user_id=%s", user_id)
+
+    # ── NEW BLOCK 12: Recent chat summaries ───────────────────────────────────
+    recent_chat_summaries: List[Dict[str, Any]] = []
+    try:
+        # Get 3 most recent chats (using auth_id / user_id — same as iris_context_cache)
+        chats_res = (
+            _table(client, "ai", "chats")
+            .select("id, title")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .limit(3)
+            .execute()
+        )
+        recent_chats = chats_res.data or []
+
+        if recent_chats:
+            chat_ids = [c["id"] for c in recent_chats if c.get("id")]
+
+            # Bulk-fetch all assistant messages for those 3 chats
+            msgs_res = (
+                _table(client, "ai", "chat_messages")
+                .select("chat_id, role, content, created_at")
+                .in_("chat_id", chat_ids)
+                .eq("role", "assistant")
+                .order("created_at", desc=True)
+                .execute()
+            )
+            all_msgs = msgs_res.data or []
+
+            # Index last assistant message per chat (msgs are already DESC by created_at)
+            last_msg_by_chat: Dict[str, str] = {}
+            for msg in all_msgs:
+                cid = msg.get("chat_id")
+                if cid and cid not in last_msg_by_chat:
+                    last_msg_by_chat[cid] = msg.get("content") or ""
+
+            for chat in recent_chats:
+                cid = chat.get("id")
+                last_msg = last_msg_by_chat.get(cid or "")
+                if last_msg:
+                    recent_chat_summaries.append({
+                        "title": chat.get("title"),
+                        "last_assistant_message": last_msg,
+                    })
+    except Exception:
+        logger.exception("DB query failed: recent chat summaries for user_id=%s", user_id)
+
     # 9. Compute plan status from goals (retained for backward compatibility)
     on_track_goals = []
     off_track_goals = []
@@ -562,6 +878,11 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "intelligence_digest": intelligence_digest,
         "life_events": life_events,
         "user_positions": user_positions,
+        # New context blocks (10-12)
+        "trading_positions": trading_positions,
+        "closed_trades": closed_trades,
+        "academy_progress": academy_progress,
+        "recent_chat_summaries": recent_chat_summaries,
     }
 
     try:
