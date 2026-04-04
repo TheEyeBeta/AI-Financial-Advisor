@@ -38,6 +38,11 @@ logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
 
+# Guard: ensures the one-time startup ranking cycle fires on the very first
+# lifespan start and is skipped on any subsequent hot-reload within the same
+# process (e.g. uvicorn --reload).  A fresh OS process always starts False.
+_startup_ranking_done: bool = False
+
 
 async def _run_scheduled_cycle() -> None:
     """Scheduler callback: run one intelligence cycle and log the summary."""
@@ -114,12 +119,16 @@ async def _lifespan(app: FastAPI):
     scheduler.start()
     logger.info("Schedulers started (intelligence=6h interval, ranking=daily 01:00 UTC)")
 
-    # Fire-and-forget: populate market.trending_stocks immediately on startup
-    # so the table is ready before the first user request arrives.
-    # asyncio.create_task is non-blocking — Railway health checks are not delayed.
+    # Fire-and-forget: populate market.trending_stocks immediately on the
+    # first deploy so the table is ready before the first user request.
+    # The _startup_ranking_done flag ensures this only fires once per process
+    # lifetime — hot-reloads (uvicorn --reload) won't re-trigger it.
     import asyncio as _asyncio
-    _asyncio.create_task(_run_scheduled_ranking_cycle())
-    logger.info("Ranking cycle queued for immediate startup run (background)")
+    global _startup_ranking_done
+    if not _startup_ranking_done:
+        _startup_ranking_done = True
+        _asyncio.create_task(_run_scheduled_ranking_cycle())
+        logger.info("Ranking cycle queued for immediate startup run (background)")
 
     try:
         yield

@@ -210,6 +210,7 @@ def _score_momentum(
     """
     raw_momentum: dict[str, float] = {}
     details: dict[str, dict] = {}
+    neutral_tickers: list[str] = []  # < 21 trading days — neutral score, not excluded
 
     for ticker, row in returns_by_ticker.items():
         r1m  = _f(row.get("return_1m"))
@@ -222,8 +223,9 @@ def _score_momentum(
         momentum_6m  = r6m  * 100 if r6m  is not None else None
         momentum_12m = r12m * 100 if r12m is not None else None
 
-        # < 21 trading days: exclude from momentum scoring entirely
+        # < 21 trading days: assign neutral score 50.0, exclude from normalization pool
         if momentum_1m is None:
+            neutral_tickers.append(ticker)
             continue
 
         # Weighted momentum raw score
@@ -252,7 +254,7 @@ def _score_momentum(
 
     normalized = _minmax_normalize(raw_momentum)
 
-    return {
+    result: dict[str, dict] = {
         ticker: {
             "momentum_score": normalized[ticker],
             **details[ticker],
@@ -260,6 +262,20 @@ def _score_momentum(
         for ticker in normalized
         if ticker in details
     }
+
+    # Tickers with < 21 trading days get a neutral score; they are not
+    # included in the normalization pool but ARE present in the result so
+    # that momentum_1m–12m are written as None to trending_stocks.
+    for ticker in neutral_tickers:
+        result[ticker] = {
+            "momentum_score": 50.0,
+            "momentum_1m":    None,
+            "momentum_3m":    None,
+            "momentum_6m":    None,
+            "momentum_12m":   None,
+        }
+
+    return result
 
 
 # ── Dimension 2: Technical quality (weight 20%) ───────────────────────────────
@@ -510,6 +526,30 @@ def _score_consistency(price_history: dict[str, list[dict]]) -> dict[str, float]
         v = vol_scores.get(ticker, 50.0)
         p = pos_scores.get(ticker, 50.0)
         raw_consistency[ticker] = (v * 0.60) + (p * 0.40)
+
+    # Debug: log a sample of raw values before normalization so we can
+    # distinguish genuinely flat data from a normalization collapse.
+    logger.debug(
+        "Consistency raw sample: %s",
+        dict(list(raw_consistency.items())[:5]),
+    )
+
+    # Flat-data guard: if all raw consistency values are essentially identical
+    # (stdev < 0.001), normalization would collapse them all to the default
+    # anyway — log a warning and short-circuit rather than silently returning 50.
+    if len(raw_consistency) > 1:
+        try:
+            consistency_stddev = statistics.stdev(raw_consistency.values())
+            if consistency_stddev < 0.001:
+                logger.warning(
+                    "Consistency raw values are flat (stdev=%.6f across %d tickers) "
+                    "— setting all consistency scores to 50.0; check price history data",
+                    consistency_stddev,
+                    len(raw_consistency),
+                )
+                return {t: 50.0 for t in raw_consistency}
+        except statistics.StatisticsError:
+            pass
 
     return _minmax_normalize(raw_consistency)
 
