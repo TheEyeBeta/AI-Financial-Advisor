@@ -192,7 +192,7 @@ def _verify_jwt_with_secret(
             token,
             secret,
             algorithms=[algorithm],
-            options={"require": list(required_claims)},
+            options={"require": list(required_claims), "verify_aud": False},
         )
         return payload
     except ImportError:
@@ -253,7 +253,7 @@ def _verify_jwt_with_supabase_jwks(
             token,
             signing_key.key,
             algorithms=[algorithm],
-            options={"require": list(required_claims)},
+            options={"require": list(required_claims), "verify_aud": False},
         )
     except Exception as exc:
         exc_name = type(exc).__name__
