@@ -1,9 +1,26 @@
 import logging
 import os
+import sys
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Boot banner — prints to stdout regardless of logging configuration so we can
+# confirm that Railway is actually running the latest code.
+print(
+    f"BOOT: Python {sys.version}, pid={os.getpid()}",
+    flush=True,
+)
+
+# Configure Python logging BEFORE any logger is created.  Without this call
+# the root logger defaults to WARNING and every logger.info() call in the
+# application is silently dropped — which is why startup messages were never
+# visible in Railway logs.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
 
 from dotenv import load_dotenv
 
@@ -84,6 +101,8 @@ async def _run_scheduled_ranking_cycle() -> None:
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Start schedulers on startup; shut them down on shutdown."""
+    logger.info("STARTUP: lifespan startup block reached, pid=%s", os.getpid())
+
     scheduler = AsyncIOScheduler()
 
     # Intelligence digest cycle — every 6 hours
