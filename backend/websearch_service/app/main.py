@@ -169,7 +169,7 @@ async def _lifespan(app: FastAPI):
         else:
             _ranked_at_dt = None
 
-        if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 7200:
+        if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 90000:
             logger.info("STARTUP: Triggering ranking cycle...")
             _asyncio.create_task(_run_scheduled_ranking_cycle())
             logger.info("STARTUP: Ranking cycle task created")
