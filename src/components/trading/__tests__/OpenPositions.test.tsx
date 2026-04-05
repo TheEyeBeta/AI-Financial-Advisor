@@ -104,28 +104,38 @@ describe('OpenPositions', () => {
     expect(screen.getByText('Positions')).toBeInTheDocument();
   });
 
-  it('calls deletePosition when close button is clicked', async () => {
+  it('calls deletePosition when close is confirmed via dialog', async () => {
     const user = userEvent.setup();
-    window.confirm = vi.fn(() => true);
     mockDeleteMutateAsync.mockResolvedValue(undefined);
 
     render(<OpenPositions positions={[makePosition()]} allowClose={true} />);
 
-    const closeButton = screen.getByRole('button');
-    await user.click(closeButton);
+    // Click the trigger button to open the AlertDialog
+    const triggerButton = screen.getByRole('button');
+    await user.click(triggerButton);
 
-    expect(window.confirm).toHaveBeenCalledWith('Are you sure you want to close this position?');
+    // The dialog should show confirmation text
+    expect(screen.getByText('Close position?')).toBeInTheDocument();
+
+    // Click the "Close" action button inside the dialog
+    const confirmButton = screen.getByRole('button', { name: 'Close' });
+    await user.click(confirmButton);
+
     expect(mockDeleteMutateAsync).toHaveBeenCalledWith('pos-1');
   });
 
-  it('does not delete when confirm is cancelled', async () => {
+  it('does not delete when dialog is cancelled', async () => {
     const user = userEvent.setup();
-    window.confirm = vi.fn(() => false);
 
     render(<OpenPositions positions={[makePosition()]} allowClose={true} />);
 
-    const closeButton = screen.getByRole('button');
-    await user.click(closeButton);
+    // Open the dialog
+    const triggerButton = screen.getByRole('button');
+    await user.click(triggerButton);
+
+    // Click Cancel
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' });
+    await user.click(cancelButton);
 
     expect(mockDeleteMutateAsync).not.toHaveBeenCalled();
   });

@@ -46,13 +46,13 @@ const Dashboard = () => {
     : accountValue || openPositionsValue;
 
   const tradeStatistics = useMemo<TradeStatisticsSummary>(() => {
-    const winningTrades = closedTrades.filter((trade) => (trade.pnl || 0) > 0);
-    const losingTrades = closedTrades.filter((trade) => (trade.pnl || 0) <= 0);
+    const winningTrades = closedTrades.filter((trade) => (trade.pnl ?? 0) > 0);
+    const losingTrades = closedTrades.filter((trade) => (trade.pnl ?? 0) < 0);
     const avgProfit = winningTrades.length > 0
-      ? winningTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0) / winningTrades.length
+      ? winningTrades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0) / winningTrades.length
       : 0;
     const avgLoss = losingTrades.length > 0
-      ? losingTrades.reduce((sum, trade) => sum + Math.abs(trade.pnl || 0), 0) / losingTrades.length
+      ? losingTrades.reduce((sum, trade) => sum + Math.abs(trade.pnl ?? 0), 0) / losingTrades.length
       : 0;
 
     return {

@@ -10,6 +10,7 @@ interface PaperTradingOverviewProps {
   trades: Trade[];
   portfolioHistory: PortfolioHistory[];
   isLoading?: boolean;
+  hasSnapshotPrices?: boolean;
 }
 
 function formatCurrency(value: number) {
@@ -26,6 +27,7 @@ export function PaperTradingOverview({
   trades,
   portfolioHistory,
   isLoading = false,
+  hasSnapshotPrices: hasSnapshotPricesProp,
 }: PaperTradingOverviewProps) {
   const { isConnected: _isConnected } = useTradeEngineConnection();
 
@@ -42,7 +44,7 @@ export function PaperTradingOverview({
 
     const marketValue = markedPositions.reduce((sum, position) => sum + position.marketValue, 0);
     const unrealizedPnL = markedPositions.reduce((sum, position) => sum + position.unrealizedPnL, 0);
-    const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
+    const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0);
     const totalReturn = unrealizedPnL + realizedPnL;
     const accountValue = portfolioHistory[portfolioHistory.length - 1]?.value ?? marketValue;
     const openCostBasis = positions.reduce((sum, position) => sum + position.entry_price * position.quantity, 0);
@@ -52,7 +54,7 @@ export function PaperTradingOverview({
     // Use (currentAccountValue − initialAccountValue) / initialAccountValue so
     // this matches the Dashboard's PortfolioPerformance chart percentage exactly.
     const totalReturnPct = baseValue > 0 ? ((accountValue - baseValue) / baseValue) * 100 : 0;
-    const wins = trades.filter((trade) => (trade.pnl || 0) > 0).length;
+    const wins = trades.filter((trade) => (trade.pnl ?? 0) > 0).length;
     const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0;
 
     return {
@@ -65,9 +67,9 @@ export function PaperTradingOverview({
       openPositions: positions.length,
       winRate,
       tradesCount: trades.length,
-      hasSnapshotPrices: markedPositions.some((position) => position.current_price !== null && position.current_price !== undefined),
+      hasSnapshotPrices: hasSnapshotPricesProp ?? false,
     };
-  }, [portfolioHistory, positions, trades]);
+  }, [portfolioHistory, positions, trades, hasSnapshotPricesProp]);
 
   const cards = [
     {

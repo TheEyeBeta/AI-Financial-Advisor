@@ -24,6 +24,7 @@ const PaperTrading = () => {
     openPositions,
     closedTrades,
     portfolioHistory,
+    hasSnapshotPrices,
     error,
   } = usePaperTradingLedger();
   const heading = userProfile?.first_name
@@ -65,6 +66,7 @@ const PaperTrading = () => {
             trades={closedTrades}
             portfolioHistory={portfolioHistory}
             isLoading={isLoading}
+            hasSnapshotPrices={hasSnapshotPrices}
           />
         </div>
 

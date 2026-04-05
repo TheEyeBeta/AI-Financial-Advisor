@@ -258,7 +258,11 @@ export function buildPaperTradingLedger(
   }
 
   const remainingLots = openLots.filter((lot) => lot.quantity > 0);
+  let anySnapshotPriceUsed = false;
   const openPositions: OpenPosition[] = remainingLots.map((lot) => {
+    const hasSnapshot = snapshotPriceBySymbol.has(lot.symbol);
+    if (hasSnapshot) anySnapshotPriceUsed = true;
+
     const currentPrice = buildCurrentPrice(
       lot.symbol,
       lot.entry_price,
@@ -335,7 +339,7 @@ export function buildPaperTradingLedger(
     totalPnl: Number(totalPnl.toFixed(2)),
     totalReturnPct: Number(totalReturnPct.toFixed(2)),
     winRate: closedTrades.length > 0 ? (wins / closedTrades.length) * 100 : 0,
-    hasSnapshotPrices: openPositions.some((position) => position.current_price != null),
+    hasSnapshotPrices: anySnapshotPriceUsed,
     errors,
   };
 }
