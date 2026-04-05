@@ -8,10 +8,12 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, requireVerification = false }: ProtectedRouteProps) {
-  const { user, loading, isAuthenticated, userProfile, profileLoading } = useAuth();
+  const { user, loading, isAuthenticated, userProfile, profileLoading, onboardingComplete } = useAuth();
   const location = useLocation();
 
-  // Only show loading on initial auth check, not during navigation
+  // Wait for auth resolution and profile load before making routing decisions.
+  // onboardingComplete is null while loading, so we must wait here to avoid
+  // a premature redirect before the secondary user_profiles check completes.
   if (loading || profileLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
@@ -28,35 +30,29 @@ export function ProtectedRoute({ children, requireVerification = false }: Protec
     return <Navigate to="/" replace state={{ from: location }} />;
   }
 
-  // Check if user needs to complete onboarding
-  // Skip onboarding check for admins
-  // Only check if we're not already on the onboarding page
+  // If admin tries to access onboarding, redirect to admin page.
+  if (userProfile?.userType === "Admin" && location.pathname === "/onboarding") {
+    return <Navigate to="/admin" replace />;
+  }
+
+  // Gate: authenticated but onboarding not complete → send to /onboarding.
+  // Uses strict false check so null (still loading) never triggers a redirect.
+  // Admins are exempt. Users already on /onboarding are exempt (no loop).
   if (
-    userProfile && 
-    !userProfile.onboarding_complete && 
-    userProfile.userType !== "Admin" &&
+    onboardingComplete === false &&
+    userProfile?.userType !== "Admin" &&
     location.pathname !== "/onboarding"
   ) {
     return <Navigate to="/onboarding" replace />;
   }
 
-  // If user is on onboarding page but has already completed it, redirect to main page
-  if (userProfile && userProfile.onboarding_complete && location.pathname === "/onboarding") {
+  // If user has completed onboarding but lands on /onboarding, send them home.
+  if (onboardingComplete === true && location.pathname === "/onboarding") {
     return <Navigate to="/advisor" replace />;
   }
 
-  // If admin tries to access onboarding, redirect to admin page
-  if (userProfile && userProfile.userType === "Admin" && location.pathname === "/onboarding") {
-    return <Navigate to="/admin" replace />;
-  }
-
-  // Render children immediately - don't wait for profile to load
-  // Profile will load in background and update components that need it
-
   if (requireVerification && user) {
-    // Check if user is verified
     // For now, we'll allow access and let the backend handle verification checks
-    // You can add verification check here if needed
   }
 
   return <>{children}</>;
