@@ -29,6 +29,7 @@ from ..services.auth import (
     verify_service_role,
 )
 from ..services.dataapi_client import get_dataapi_client
+from ..services.memory_agent import run_history_scan
 from ..services.ranking_engine import run_ranking_cycle
 
 logger = logging.getLogger(__name__)
@@ -249,13 +250,18 @@ async def dataapi_query(
 
 @router.post("/api/admin/trigger-ranking")
 async def trigger_ranking(admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Manually trigger a full ranking cycle and return the result."""
-    try:
-        result = await run_ranking_cycle()
-        return result
-    except Exception as exc:
-        logger.error("Ranking cycle failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Ranking cycle failed: {exc}") from exc
+    """Manually trigger a ranking cycle in the background and return immediately."""
+    asyncio.create_task(run_ranking_cycle())
+    logger.info("Admin %s triggered ranking cycle in background", admin)
+    return {"status": "started"}
+
+
+@router.post("/api/admin/trigger-memory-scan")
+async def trigger_memory_scan(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Manually trigger a full history memory scan in the background and return immediately."""
+    asyncio.create_task(run_history_scan(limit=200))
+    logger.info("Admin %s triggered memory history scan (limit=200) in background", admin)
+    return {"status": "started", "limit": 200}
 
 
 # ---------------------------------------------------------------------------
