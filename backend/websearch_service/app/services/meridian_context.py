@@ -114,6 +114,7 @@ def _format_context_block(ctx: dict) -> str:
     closed_trades = ctx.get("closed_trades") or []
     academy_progress = ctx.get("academy_progress") or {}
     recent_chat_summaries = ctx.get("recent_chat_summaries") or []
+    user_insights = ctx.get("user_insights") or []
 
     parts: List[str] = []
 
@@ -181,9 +182,13 @@ def _format_context_block(ctx: dict) -> str:
     # ── 11. Academy progress ───────────────────────────────────────────────────
     parts.append(_format_academy_progress(academy_progress))
 
-    # ── 12. Recent conversation context (always last before closing banner) ───
+    # ── 12. Recent conversation context ──────────────────────────────────────
     if recent_chat_summaries:
         parts.append(_format_recent_chat_summaries(recent_chat_summaries))
+
+    # ── 13. Learned user insights (always last before closing banner) ─────────
+    if user_insights:
+        parts.append(_format_user_insights(user_insights))
 
     parts.append(
         "\n"
@@ -366,6 +371,55 @@ def _format_recent_chat_summaries(summaries: list) -> str:
             snippet += "..."
         parts.append(f"Previous chat: '{title}' — {snippet}\n")
     return "".join(parts)
+
+
+def _format_user_insights(insights: list) -> str:
+    """Format learned user insights (context block 13)."""
+    if not insights:
+        return ""
+
+    INSIGHT_TYPE_ORDER = [
+        "financial_fact",
+        "life_event",
+        "preference",
+        "compliance_signal",
+        "knowledge_gap",
+        "emotional_marker",
+    ]
+
+    INSIGHT_TYPE_LABELS = {
+        "financial_fact": "Financial Facts",
+        "life_event": "Life Events",
+        "preference": "Preferences",
+        "compliance_signal": "Compliance",
+        "knowledge_gap": "Knowledge Gaps",
+        "emotional_marker": "Emotional Markers",
+    }
+
+    # Group by insight_type
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    for insight in insights:
+        itype = insight.get("insight_type") or "other"
+        if itype not in grouped:
+            grouped[itype] = []
+        grouped[itype].append(insight)
+
+    lines = ["\n=== LEARNED USER INSIGHTS ==="]
+
+    for itype in INSIGHT_TYPE_ORDER:
+        if itype not in grouped:
+            continue
+        label = INSIGHT_TYPE_LABELS.get(itype, itype)
+        items = []
+        for insight in grouped[itype]:
+            key = _sanitise_for_prompt(insight.get("key"), max_length=50)
+            value = _sanitise_for_prompt(insight.get("value"), max_length=100)
+            confidence = insight.get("confidence") or 0
+            confidence_pct = round(float(confidence) * 100)
+            items.append(f"{key} = {value} ({confidence_pct}%)")
+        lines.append(f"{label}: {' | '.join(items)}")
+
+    return "\n".join(lines) + "\n"
 
 
 # ── Cache refresh (Prompt 3 Part A) ──────────────────────────────────────────
@@ -791,6 +845,34 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     except Exception:
         logger.exception("DB query failed: recent chat summaries for user_id=%s", user_id)
 
+    # ── NEW BLOCK 13: User insights from memory extraction agent ─────────────
+    user_insights: List[Dict[str, Any]] = []
+    try:
+        insights_res = (
+            _table(client, "meridian", "user_insights")
+            .select("insight_type, key, value, confidence, extracted_at")
+            .eq("user_id", user_id)
+            .eq("is_active", True)
+            .gte("confidence", 0.75)
+            .order("confidence", desc=True)
+            .order("extracted_at", desc=True)
+            .limit(20)
+            .execute()
+        )
+        for insight in (insights_res.data or []):
+            extracted_at = insight.get("extracted_at")
+            if hasattr(extracted_at, "isoformat"):
+                extracted_at = extracted_at.isoformat()
+            user_insights.append({
+                "insight_type": insight.get("insight_type"),
+                "key": insight.get("key"),
+                "value": insight.get("value"),
+                "confidence": insight.get("confidence"),
+                "extracted_at": str(extracted_at) if extracted_at else None,
+            })
+    except Exception:
+        logger.warning("Could not fetch user_insights for user_id=%s", user_id)
+
     # 9. Compute plan status from goals (retained for backward compatibility)
     on_track_goals = []
     off_track_goals = []
@@ -878,11 +960,12 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "intelligence_digest": intelligence_digest,
         "life_events": life_events,
         "user_positions": user_positions,
-        # New context blocks (10-12)
+        # New context blocks (10-13)
         "trading_positions": trading_positions,
         "closed_trades": closed_trades,
         "academy_progress": academy_progress,
         "recent_chat_summaries": recent_chat_summaries,
+        "user_insights": user_insights,
     }
 
     try:
