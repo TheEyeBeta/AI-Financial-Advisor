@@ -135,36 +135,32 @@ async def _lifespan(app: FastAPI):
         return None
 
     try:
+        logger.info("STARTUP: Checking last ranking timestamp...")
         _last_ranked_at_raw = await _asyncio.to_thread(_get_last_ranked_at)
-    except Exception as _exc:
-        logger.warning(
-            "Startup ranking check failed (%s); triggering cycle anyway", _exc
-        )
-        _last_ranked_at_raw = None
+        logger.info("STARTUP: Last ranked at: %s", _last_ranked_at_raw)
 
-    _now = datetime.now(timezone.utc)
-    if _last_ranked_at_raw is not None:
-        if isinstance(_last_ranked_at_raw, str):
-            _ranked_at_dt = datetime.fromisoformat(
-                _last_ranked_at_raw.replace("Z", "+00:00")
-            )
+        _now = datetime.now(timezone.utc)
+        if _last_ranked_at_raw is not None:
+            if isinstance(_last_ranked_at_raw, str):
+                _ranked_at_dt = datetime.fromisoformat(
+                    _last_ranked_at_raw.replace("Z", "+00:00")
+                )
+            else:
+                _ranked_at_dt = _last_ranked_at_raw
         else:
-            _ranked_at_dt = _last_ranked_at_raw
-    else:
-        _ranked_at_dt = None
+            _ranked_at_dt = None
 
-    if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 7200:
+        if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 7200:
+            logger.info("STARTUP: Triggering ranking cycle...")
+            _asyncio.create_task(_run_scheduled_ranking_cycle())
+            logger.info("STARTUP: Ranking cycle task created")
+        else:
+            _minutes_ago = int((_now - _ranked_at_dt).total_seconds() / 60)
+            logger.info("STARTUP: Ranking cycle skipped - ranked %s minutes ago", _minutes_ago)
+    except Exception as e:
+        logger.error("STARTUP: Ranking check failed: %s", e, exc_info=True)
+        logger.info("STARTUP: Triggering ranking cycle as fallback")
         _asyncio.create_task(_run_scheduled_ranking_cycle())
-        logger.info(
-            "Ranking cycle triggered on startup - last ranked: %s",
-            _ranked_at_dt.isoformat() if _ranked_at_dt else "never",
-        )
-    else:
-        _minutes_ago = int((_now - _ranked_at_dt).total_seconds() / 60)
-        logger.info(
-            "Ranking cycle skipped on startup - ranked %d minutes ago",
-            _minutes_ago,
-        )
 
     try:
         yield
