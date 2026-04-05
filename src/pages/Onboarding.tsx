@@ -253,7 +253,7 @@ function getTodayStr(): string {
 // ── Component ────────────────────────────────────────────────────────────────
 
 const Onboarding = () => {
-  const { authUserId, userProfile, refreshProfile } = useAuth();
+  const { authUserId, appUserId, userProfile, refreshProfile } = useAuth();
   const navigate = useNavigate();
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -297,17 +297,17 @@ const Onboarding = () => {
 
   // Check for existing Meridian profile
   useEffect(() => {
-    if (!authUserId) return;
+    if (!appUserId) return;
     coreDb
       .from("user_profiles")
       .select("id")
-      .eq("user_id", authUserId)
+      .eq("user_id", appUserId)
       .maybeSingle()
       .then(({ data }) => {
         setHasExistingProfile(!!data);
       })
       .catch(() => setHasExistingProfile(false));
-  }, [authUserId]);
+  }, [appUserId]);
 
   if (userProfile?.userType === "Admin") {
     return null;
@@ -435,7 +435,7 @@ const Onboarding = () => {
         .from("user_profiles")
         .upsert(
           {
-            user_id: authUserId,
+            user_id: userProfile.id,
             age_range: step1.age_range,
             income_range: step1.income_range,
             monthly_expenses: parseFloat(step1.monthly_expenses),
@@ -487,7 +487,7 @@ const Onboarding = () => {
             : goals[0]?.goal_name?.toLowerCase().replace(" ", "_") || "other",
           updated_at: new Date().toISOString(),
         })
-        .eq("id", userProfile.id);
+        .eq("auth_id", authUserId);
 
       if (usersError) {
         console.error("Failed to update onboarding_complete flag:", usersError);
