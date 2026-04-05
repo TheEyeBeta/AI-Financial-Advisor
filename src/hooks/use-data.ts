@@ -6,6 +6,7 @@ import { tradeEngineApi } from '@/services/trade-engine-api';
 import { portfolioApi, positionsApi, tradesApi, journalApi } from '@/services/trading-api';
 import { achievementsApi, learningApi, marketApi } from '@/services/user-data-api';
 import { pythonApi } from '@/services/python-api';
+import { refreshIrisContextCache } from '@/services/iris-cache';
 import { meridianDb } from '@/lib/supabase';
 import { useAuth } from './use-auth';
 import { useDataSource, sourceParam } from './use-data-source';
@@ -51,6 +52,8 @@ export function useCreatePosition() {
       // Sync Dashboard: a new position changes portfolio value and statistics counts
       queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
       queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
+      // Keep IRIS AI context in sync with live positions
+      if (userId) refreshIrisContextCache(userId);
     },
   });
 }
@@ -72,6 +75,8 @@ export function useDeletePosition() {
       queryClient.invalidateQueries({ queryKey: ['portfolio-history', userId] });
       // Sync Dashboard: closing a position alters win-rate/profit-factor shown in TradeStatistics
       queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] });
+      // Keep IRIS AI context in sync with closed trades
+      if (userId) refreshIrisContextCache(userId);
     },
   });
 }
@@ -136,6 +141,8 @@ export function useCreateJournalEntry() {
         // Sync Dashboard: every BUY/SELL logged via TradeJournal changes win-rate and profit-factor
         queryClient.invalidateQueries({ queryKey: ['trade-statistics', userId] }),
       ]);
+      // Keep IRIS AI context in sync with journal entries
+      if (userId) refreshIrisContextCache(userId);
     },
   });
 }

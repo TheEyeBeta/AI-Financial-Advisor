@@ -28,6 +28,7 @@ import { toast } from "@/hooks/use-toast";
 import { useDataSource, type DataSource } from "@/hooks/use-data-source";
 import { getErrorMessage } from "@/lib/error";
 import { supabase } from "@/lib/supabase";
+import { refreshIrisContextCache } from "@/services/iris-cache";
 import { cn } from "@/lib/utils";
 
 const EXPERIENCE_OPTIONS = [
@@ -143,6 +144,8 @@ const Profile = () => {
       });
 
       await refreshProfile();
+      // Keep IRIS AI context in sync with profile changes
+      if (user?.id) refreshIrisContextCache(user.id);
     } catch (error: unknown) {
       toast({
         title: "Error",

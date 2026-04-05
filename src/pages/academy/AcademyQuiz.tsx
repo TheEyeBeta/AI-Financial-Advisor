@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
+import { refreshIrisContextCache } from "@/services/iris-cache";
 import {
   academyApi,
   injectTemplateVars,
@@ -231,6 +232,8 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
         // Update progress if passed
         if (hasPassed) {
           await academyApi.updateProgressOnPass(authUserId, lessonId, scorePercent);
+          // Keep IRIS AI context in sync with academy progress
+          refreshIrisContextCache(authUserId);
           onPassed(scorePercent);
         }
       } catch (postErr) {
