@@ -188,21 +188,16 @@ export const tradesApi = {
     const winningTrades = trades.filter((trade) => (trade.pnl ?? 0) > 0);
     const losingTrades = trades.filter((trade) => (trade.pnl ?? 0) < 0);
 
-    const avgProfit = winningTrades.length > 0
-      ? winningTrades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0) / winningTrades.length
-      : 0;
-
-    const avgLoss = losingTrades.length > 0
-      ? losingTrades.reduce((sum, trade) => sum + Math.abs(trade.pnl ?? 0), 0) / losingTrades.length
-      : 0;
-
-    const profitFactor = avgLoss > 0 ? Math.abs(avgProfit) / avgLoss : 0;
+    const grossProfit = winningTrades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0);
+    const grossLoss = losingTrades.reduce((sum, trade) => sum + Math.abs(trade.pnl ?? 0), 0);
+    const avgProfit = winningTrades.length > 0 ? grossProfit / winningTrades.length : 0;
+    const avgLoss = losingTrades.length > 0 ? grossLoss / losingTrades.length : 0;
 
     return {
       winRate: trades.length > 0 ? (winningTrades.length / trades.length) * 100 : 0,
       avgProfit,
       avgLoss,
-      profitFactor,
+      profitFactor: grossLoss > 0 ? grossProfit / grossLoss : 0,
       totalTrades: trades.length,
       winningTrades: winningTrades.length,
       losingTrades: losingTrades.length,

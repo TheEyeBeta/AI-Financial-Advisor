@@ -167,8 +167,12 @@ export function buildPaperTradingLedger(
       const positionCost = quantity * price;
 
       if (cashBalance < positionCost) {
-        investedCapital += positionCost - cashBalance;
+        const additionalFunding = positionCost - cashBalance;
+        investedCapital += additionalFunding;
         cashBalance = positionCost;
+        errors.push(
+          `Auto-funded $${additionalFunding.toFixed(2)} for ${symbol} BUY on ${entry.date} (insufficient cash balance).`,
+        );
       }
 
       cashBalance -= positionCost;

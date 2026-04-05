@@ -48,18 +48,16 @@ const Dashboard = () => {
   const tradeStatistics = useMemo<TradeStatisticsSummary>(() => {
     const winningTrades = closedTrades.filter((trade) => (trade.pnl ?? 0) > 0);
     const losingTrades = closedTrades.filter((trade) => (trade.pnl ?? 0) < 0);
-    const avgProfit = winningTrades.length > 0
-      ? winningTrades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0) / winningTrades.length
-      : 0;
-    const avgLoss = losingTrades.length > 0
-      ? losingTrades.reduce((sum, trade) => sum + Math.abs(trade.pnl ?? 0), 0) / losingTrades.length
-      : 0;
+    const grossProfit = winningTrades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0);
+    const grossLoss = losingTrades.reduce((sum, trade) => sum + Math.abs(trade.pnl ?? 0), 0);
+    const avgProfit = winningTrades.length > 0 ? grossProfit / winningTrades.length : 0;
+    const avgLoss = losingTrades.length > 0 ? grossLoss / losingTrades.length : 0;
 
     return {
       winRate: totalTrades > 0 ? (winningTrades.length / totalTrades) * 100 : 0,
       avgProfit,
       avgLoss,
-      profitFactor: avgLoss > 0 ? Math.abs(avgProfit) / avgLoss : 0,
+      profitFactor: grossLoss > 0 ? grossProfit / grossLoss : 0,
       totalTrades,
       winningTrades: winningTrades.length,
       losingTrades: losingTrades.length,

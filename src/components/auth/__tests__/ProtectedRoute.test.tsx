@@ -74,6 +74,7 @@ describe('ProtectedRoute', () => {
       isAuthenticated: true,
       userProfile: { onboarding_complete: true },
       profileLoading: false,
+      onboardingComplete: true,
     });
 
     render(
@@ -94,6 +95,7 @@ describe('ProtectedRoute', () => {
       isAuthenticated: true,
       userProfile: { onboarding_complete: false, userType: 'User' },
       profileLoading: false,
+      onboardingComplete: false,
     });
 
     render(
@@ -114,6 +116,7 @@ describe('ProtectedRoute', () => {
       isAuthenticated: true,
       userProfile: { onboarding_complete: false, userType: 'Admin' },
       profileLoading: false,
+      onboardingComplete: false,
     });
 
     render(
