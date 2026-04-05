@@ -74,6 +74,8 @@ def _fetch_iris_cache_sync(user_id: str) -> Optional[dict]:
             .maybe_single()
             .execute()
         )
+        if result is None:
+            return None
         return result.data if result.data else None
     except Exception:
         logger.exception("DB query failed: ai.iris_context_cache SELECT for user_id=%s", user_id)
@@ -460,7 +462,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .maybe_single()
             .execute()
         )
-        profile = profile_res.data or {}
+        profile = (profile_res and profile_res.data) or {}
     except Exception:
         logger.exception("DB query failed: core.user_profiles SELECT for user_id=%s", user_id)
         raise
@@ -478,7 +480,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .eq("status", "active")
             .execute()
         )
-        goals = goals_res.data or []
+        goals = (goals_res and goals_res.data) or []
     except Exception:
         logger.exception("DB query failed: meridian.user_goals SELECT for user_id=%s", user_id)
         raise
@@ -493,7 +495,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .eq("resolved", False)
             .execute()
         )
-        alerts = alerts_res.data or []
+        alerts = (alerts_res and alerts_res.data) or []
     except Exception:
         # Non-critical — continue without alerts
         logger.warning("Could not fetch risk_alerts for user_id=%s", user_id)
@@ -510,7 +512,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .limit(1)
             .execute()
         )
-        fp_rows = fp_res.data or []
+        fp_rows = (fp_res and fp_res.data) or []
         if fp_rows:
             p = fp_rows[0]
             target_amount = float(p.get("target_amount") or 0)
@@ -541,7 +543,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 .in_("goal_id", goal_ids)
                 .execute()
             )
-            gp_records = gp_res.data or []
+            gp_records = (gp_res and gp_res.data) or []
             if gp_records:
                 on_track_count = sum(1 for r in gp_records if r.get("on_track"))
                 behind_count = len(gp_records) - on_track_count
@@ -565,7 +567,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .limit(1)
             .execute()
         )
-        digest_rows = digest_res.data or []
+        digest_rows = (digest_res and digest_res.data) or []
         if digest_rows:
             d = digest_rows[0]
             created_at = d.get("created_at")
@@ -594,7 +596,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .order("event_date")
             .execute()
         )
-        for le in (le_res.data or []):
+        for le in ((le_res and le_res.data) or []):
             event_date = le.get("event_date")
             if hasattr(event_date, "isoformat"):
                 event_date = event_date.isoformat()
@@ -615,7 +617,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .eq("user_id", user_id)
             .execute()
         )
-        for pos in (pos_res.data or []):
+        for pos in ((pos_res and pos_res.data) or []):
             user_positions.append({
                 "ticker": pos.get("ticker"),
                 "quantity": pos.get("quantity"),
@@ -639,7 +641,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .maybe_single()
             .execute()
         )
-        core_user_id = (core_user_res.data or {}).get("id")
+        core_user_id = ((core_user_res and core_user_res.data) or {}).get("id")
 
         if core_user_id:
             # Open positions (20 most recent by entry_date DESC)
@@ -651,7 +653,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 .limit(20)
                 .execute()
             )
-            for pos in (open_pos_res.data or []):
+            for pos in ((open_pos_res and open_pos_res.data) or []):
                 entry_price = float(pos.get("entry_price") or 0)
                 current_price = float(pos.get("current_price") or entry_price)
                 pnl_pct = (
@@ -681,7 +683,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 .limit(10)
                 .execute()
             )
-            for trade in (closed_trades_res.data or []):
+            for trade in ((closed_trades_res and closed_trades_res.data) or []):
                 entry_price = float(trade.get("entry_price") or 0)
                 exit_price = float(trade.get("exit_price") or entry_price)
                 trade_type = (trade.get("type") or "").upper()
@@ -726,7 +728,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 .limit(5)
                 .execute()
             )
-            completed_rows = completed_res.data or []
+            completed_rows = (completed_res and completed_res.data) or []
 
             # Total completed count (separate query for accuracy)
             total_completed_res = (
@@ -765,7 +767,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                     .execute()
                 )
                 lessons_by_id = {
-                    r["id"]: r for r in (lessons_res.data or []) if r.get("id")
+                    r["id"]: r for r in ((lessons_res and lessons_res.data) or []) if r.get("id")
                 }
 
                 # Fetch tier names
@@ -779,7 +781,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                         .execute()
                     )
                     tiers_by_id = {
-                        r["id"]: r["name"] for r in (tiers_res.data or []) if r.get("id")
+                        r["id"]: r["name"] for r in ((tiers_res and tiers_res.data) or []) if r.get("id")
                     }
 
                 # Preserve order of completion (most recent first)
@@ -811,7 +813,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .limit(3)
             .execute()
         )
-        recent_chats = chats_res.data or []
+        recent_chats = (chats_res and chats_res.data) or []
 
         if recent_chats:
             chat_ids = [c["id"] for c in recent_chats if c.get("id")]
@@ -825,7 +827,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 .order("created_at", desc=True)
                 .execute()
             )
-            all_msgs = msgs_res.data or []
+            all_msgs = (msgs_res and msgs_res.data) or []
 
             # Index last assistant message per chat (msgs are already DESC by created_at)
             last_msg_by_chat: Dict[str, str] = {}
@@ -859,7 +861,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             .limit(20)
             .execute()
         )
-        for insight in (insights_res.data or []):
+        for insight in ((insights_res and insights_res.data) or []):
             extracted_at = insight.get("extracted_at")
             if hasattr(extracted_at, "isoformat"):
                 extracted_at = extracted_at.isoformat()
@@ -1008,7 +1010,7 @@ def _refresh_all_users_sync() -> Dict[str, int]:
             .select("user_id")
             .execute()
         )
-        user_ids = [row["user_id"] for row in (res.data or [])]
+        user_ids = [row["user_id"] for row in ((res and res.data) or [])]
     except Exception:
         logger.exception("Failed to fetch user_ids for daily refresh")
         return {"total": 0, "success": 0, "failed": 0}
@@ -1099,7 +1101,7 @@ def _onboard_user_sync(user_id: str, body: Dict[str, Any]) -> None:
         .maybe_single()
         .execute()
     )
-    if existing.data:
+    if existing is not None and existing.data:
         update_payload = {k: v for k, v in profile_data.items() if k != "user_id"}
         if update_payload:
             (
@@ -1123,7 +1125,7 @@ def _onboard_user_sync(user_id: str, body: Dict[str, Any]) -> None:
             .maybe_single()
             .execute()
         )
-        if not existing_goal.data:
+        if existing_goal is None or not existing_goal.data:
             goal_row: Dict[str, Any] = {
                 "user_id": user_id,
                 "goal_name": goal_name,
