@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase, coreDb } from "@/lib/supabase";
 import { getCurrentUserProfile } from "@/lib/user-helpers";
 import { getSupabaseEnvConfig } from "@/lib/env";
 import { analytics, AnalyticsEvents } from "@/services/analytics";
@@ -18,6 +18,8 @@ interface AuthContextValue {
   appUserId: string | null; // core.users.id
   /** @deprecated Use appUserId instead. */
   userId: string | null;
+  /** null = still loading, false = not complete, true = complete */
+  onboardingComplete: boolean | null;
   signIn: (email: string, password: string) => Promise<unknown>;
   signUp: (email: string, password: string) => Promise<unknown>;
   signOut: () => Promise<void>;
@@ -33,6 +35,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [userProfile, setUserProfile] = useState<AppUserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileFetched, setProfileFetched] = useState<string | null>(null);
+  const [onboardingComplete, setOnboardingComplete] = useState<boolean | null>(null);
 
   // Initial session + auth subscription (single instance for the whole app)
   useEffect(() => {
@@ -77,10 +80,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Fetch user profile once per auth user
+  // Fetch user profile once per auth user, with secondary check for existing users
   useEffect(() => {
     if (!authUser) {
       setUserProfile(null);
+      setOnboardingComplete(null);
       setProfileLoading(false);
       setProfileFetched(null);
       return;
@@ -92,21 +96,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     setProfileLoading(true);
     getCurrentUserProfile()
-      .then((profile) => {
+      .then(async (profile) => {
+        if (!profile) {
+          setUserProfile(null);
+          // Fail safe: no profile row means we cannot determine status — treat as incomplete
+          setOnboardingComplete(false);
+          setProfileLoading(false);
+          setProfileFetched(authUser.id);
+          return;
+        }
+
+        let isOnboardingComplete = profile.onboarding_complete ?? false;
+
+        // Secondary check: if flag is false, see whether a user_profiles row already
+        // exists (handles accounts that completed onboarding before the flag was added).
+        if (!isOnboardingComplete) {
+          try {
+            const { count, error: countError } = await coreDb
+              .from("user_profiles")
+              .select("*", { count: "exact", head: true })
+              .eq("user_id", authUser.id);
+
+            if (!countError && count && count > 0) {
+              // Profile exists — silently backfill the flag and treat as complete.
+              const { error: updateError } = await coreDb
+                .from("users")
+                .update({ onboarding_complete: true })
+                .eq("id", profile.id);
+
+              if (updateError) {
+                console.error("Failed to backfill onboarding_complete:", updateError);
+                // Fail safe: keep isOnboardingComplete = false so the flag can be
+                // retried on next login rather than silently leaving bad state.
+              } else {
+                isOnboardingComplete = true;
+              }
+            }
+            // If countError or count === 0: leave isOnboardingComplete = false (fail safe).
+          } catch (err) {
+            console.error("Error during user_profiles existence check:", err);
+            // Fail safe: treat as incomplete so the user can re-run onboarding.
+          }
+        }
+
         setUserProfile(profile);
+        setOnboardingComplete(isOnboardingComplete);
         setProfileLoading(false);
         setProfileFetched(authUser.id);
-        if (profile) {
-          analytics.identify(profile.id, {
-            experience_level: profile.experience_level,
-            risk_level: profile.risk_level,
-            onboarding_complete: profile.onboarding_complete,
-          });
-        }
+        analytics.identify(profile.id, {
+          experience_level: profile.experience_level,
+          risk_level: profile.risk_level,
+          onboarding_complete: isOnboardingComplete,
+        });
       })
       .catch((error) => {
         console.error("Error fetching user profile:", error);
         setUserProfile(null);
+        // Fail safe: if the core.users fetch itself fails, treat as incomplete so
+        // the app doesn't give full access on a broken state.
+        setOnboardingComplete(false);
         setProfileLoading(false);
         setProfileFetched(authUser.id);
       });
@@ -148,12 +196,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshProfile = async () => {
     if (!authUser) return;
-    
+
     setProfileLoading(true);
     setProfileFetched(null); // Reset cache to force refetch
     try {
       const profile = await getCurrentUserProfile();
       setUserProfile(profile);
+      setOnboardingComplete(profile?.onboarding_complete ?? false);
       setProfileFetched(authUser.id);
     } catch (error) {
       console.error("Error refreshing user profile:", error);
@@ -171,6 +220,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authUserId: authUser?.id ?? null,
     appUserId: userProfile?.id ?? null,
     userId: userProfile?.id ?? null,
+    onboardingComplete,
     signIn,
     signUp,
     signOut,

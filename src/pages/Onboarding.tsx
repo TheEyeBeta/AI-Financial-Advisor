@@ -473,9 +473,11 @@ const Onboarding = () => {
 
       if (goalsError) throw goalsError;
 
-      // Mark onboarding complete in core.users (keeps ProtectedRoute working)
-      const { error: usersError } = await supabase
-        .schema("core")
+      // Mark onboarding complete in core.users (keeps ProtectedRoute working).
+      // Non-blocking: a failure here is logged but does not prevent the user from
+      // proceeding — refreshProfile() will re-read the row and the secondary
+      // user_profiles check in AuthContext will backfill the flag on next login.
+      const { error: usersError } = await coreDb
         .from("users")
         .update({
           onboarding_complete: true,
@@ -487,7 +489,11 @@ const Onboarding = () => {
         })
         .eq("id", userProfile.id);
 
-      if (usersError) throw usersError;
+      if (usersError) {
+        console.error("Failed to update onboarding_complete flag:", usersError);
+        // Continue — user can still reach the app; the flag will be corrected
+        // by the user_profiles backfill check on next login.
+      }
 
       // WRITE 3 — trigger cache refresh
       try {
