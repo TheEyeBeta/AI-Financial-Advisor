@@ -49,6 +49,7 @@ from .routes.trade_engine import router as trade_engine_router
 from .routes.stock_ranking import router as stock_ranking_router
 from .services.auth import validate_auth_configuration
 from .services.intelligence_engine import run_intelligence_cycle
+from .services.memory_agent import run_history_scan, run_memory_extraction_cycle
 from .services.ranking_engine import run_ranking_cycle
 
 logger = logging.getLogger(__name__)
@@ -72,6 +73,26 @@ async def _run_scheduled_cycle() -> None:
         # ever does we must not let APScheduler swallow the exception silently.
         logger.error(
             "Scheduled intelligence cycle raised an unexpected exception: %s",
+            type(exc).__name__,
+        )
+
+
+async def _run_scheduled_memory_extraction() -> None:
+    """Scheduler callback: run one memory extraction cycle and log the summary."""
+    try:
+        summary = await run_memory_extraction_cycle()
+        if summary.get("skipped"):
+            logger.info("Scheduled memory extraction: skipped — previous cycle still running")
+        else:
+            logger.info(
+                "Scheduled memory extraction: chats_processed=%s insights=%s errors=%s",
+                summary.get("chats_processed", 0),
+                summary.get("total_insights_extracted", 0),
+                len(summary.get("errors", [])),
+            )
+    except Exception as exc:
+        logger.error(
+            "Scheduled memory extraction raised an unexpected exception: %s",
             type(exc).__name__,
         )
 
@@ -130,8 +151,21 @@ async def _lifespan(app: FastAPI):
         misfire_grace_time=1800,
     )
 
+    # Memory extraction cycle — every 15 minutes
+    scheduler.add_job(
+        _run_scheduled_memory_extraction,
+        trigger="interval",
+        minutes=15,
+        id="memory_extraction",
+        replace_existing=True,
+        misfire_grace_time=300,
+    )
+
     scheduler.start()
-    logger.info("Schedulers started (intelligence=6h interval, ranking=daily 01:00 UTC)")
+    logger.info(
+        "Schedulers started (intelligence=6h interval, ranking=daily 01:00 UTC, "
+        "memory_extraction=15m interval)"
+    )
 
     # Fire-and-forget: populate market.trending_stocks immediately on startup
     # if the data is stale (>2 h old) or missing.  Querying Supabase directly
@@ -180,6 +214,19 @@ async def _lifespan(app: FastAPI):
         logger.error("STARTUP: Ranking check failed: %s", e, exc_info=True)
         logger.info("STARTUP: Triggering ranking cycle as fallback")
         _asyncio.create_task(_run_scheduled_ranking_cycle())
+
+    # Bootstrap: if meridian.user_insights has fewer than 10 rows, run a
+    # history scan in the background so the system is useful on first deploy.
+    from .services.memory_agent import _count_user_insights_sync as _count_insights
+
+    try:
+        _insight_count = await _asyncio.to_thread(_count_insights)
+        logger.info("STARTUP: meridian.user_insights row count (capped at 11): %d", _insight_count)
+        if _insight_count < 10:
+            logger.info("STARTUP: fewer than 10 insights found — triggering history scan (limit=50)")
+            _asyncio.create_task(run_history_scan(limit=50))
+    except Exception as _e:
+        logger.warning("STARTUP: insight bootstrap check failed: %s", _e)
 
     try:
         yield
