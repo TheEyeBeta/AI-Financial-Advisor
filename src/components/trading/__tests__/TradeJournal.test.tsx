@@ -187,8 +187,6 @@ describe('TradeJournal', () => {
 
     it('closes an open buy entry from the journal list', async () => {
       const user = userEvent.setup();
-      const confirmSpy = vi.fn(() => true);
-      vi.stubGlobal('confirm', confirmSpy);
 
       mockCreateMutateAsync.mockResolvedValueOnce(
         makeJournalEntry({
@@ -207,9 +205,15 @@ describe('TradeJournal', () => {
         />,
       );
 
+      // Click the "Close" button on the journal entry to open the confirmation dialog
       await user.click(screen.getByRole('button', { name: 'Close' }));
 
-      expect(confirmSpy).toHaveBeenCalledWith('Close the remaining 10 shares of AAPL at $175.00?');
+      // The dialog should show the confirmation message
+      expect(screen.getByText(/Close the remaining 10 shares of AAPL/)).toBeInTheDocument();
+
+      // Confirm by clicking "Close Trade" in the dialog
+      await user.click(screen.getByRole('button', { name: 'Close Trade' }));
+
       expect(mockCreateMutateAsync).toHaveBeenCalledWith(expect.objectContaining({
         symbol: 'AAPL',
         type: 'SELL',

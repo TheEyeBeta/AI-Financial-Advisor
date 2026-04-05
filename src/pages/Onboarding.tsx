@@ -37,7 +37,7 @@ import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { academyApi, TIER_IDS } from "@/services/academy-api";
 import { AnalyticsEvents } from "@/services/analytics";
-import { getPythonApiUrl } from "@/lib/env";
+import { refreshIrisContextCache } from "@/services/iris-cache";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -495,25 +495,8 @@ const Onboarding = () => {
         // by the user_profiles backfill check on next login.
       }
 
-      // WRITE 3 — trigger cache refresh
-      try {
-        const pythonApiUrl = getPythonApiUrl();
-        const session = await supabase.auth.getSession();
-        const token = session.data.session?.access_token;
-        if (pythonApiUrl && token) {
-          await fetch(`${pythonApiUrl}/api/meridian/refresh-context`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify({ user_id: authUserId }),
-          });
-        }
-      } catch {
-        // Cache refresh is non-critical; IRIS will work without it
-        console.warn("Cache refresh failed — IRIS will use fresh data on next query");
-      }
+      // WRITE 3 — trigger cache refresh (fire-and-forget)
+      refreshIrisContextCache(authUserId);
 
       // Initialize Academy profile
       try {

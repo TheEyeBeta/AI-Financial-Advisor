@@ -116,7 +116,7 @@ export function PerformanceCharts({
       const currentPrice = pos.current_price ?? pos.entry_price;
       return sum + ((currentPrice - pos.entry_price) * pos.quantity);
     }, 0);
-    const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
+    const realizedPnL = trades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0);
 
     return { currentValue, totalReturn: portfolioGain, percentReturn, unrealizedPnL, realizedPnL, totalPnL: unrealizedPnL + realizedPnL };
   }, [portfolioHistory, currentPortfolioValue, positions, trades]);

@@ -89,7 +89,11 @@ describe("buildPaperTradingLedger", () => {
       asOfDate: "2026-03-20",
     });
 
-    expect(ledger.errors).toEqual([]);
+    // Both BUY entries auto-fund because the ledger starts with $0 cash
+    expect(ledger.errors).toEqual([
+      "Auto-funded $1000.00 for AAPL BUY on 2024-01-10 (insufficient cash balance).",
+      "Auto-funded $1200.00 for AAPL BUY on 2024-02-01 (insufficient cash balance).",
+    ]);
     expect(ledger.closedTrades).toHaveLength(1);
     expect(ledger.closedTrades[0].quantity).toBe(15);
     expect(ledger.closedTrades[0].entry_price).toBeCloseTo(106.6666667, 5);

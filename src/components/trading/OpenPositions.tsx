@@ -2,8 +2,20 @@ import { TrendingUp, TrendingDown, X, Briefcase, DollarSign, Activity, Wifi, Wif
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useOpenPositions, useDeletePosition } from "@/hooks/use-data";
 import { useTradeEngineConnection } from "@/hooks/use-trade-engine";
+import { toast } from "@/hooks/use-toast";
 import type { OpenPosition } from "@/types/database";
 import { cn } from "@/lib/utils";
 
@@ -43,13 +55,15 @@ export function OpenPositions({
   );
 
   const handleClosePosition = async (id: string) => {
-    if (confirm('Are you sure you want to close this position?')) {
-      try {
-        await deletePosition.mutateAsync(id);
-      } catch (error) {
-        console.error('Error closing position:', error);
-        alert('Failed to close position. Please try again.');
-      }
+    try {
+      await deletePosition.mutateAsync(id);
+    } catch (error) {
+      console.error('Error closing position:', error);
+      toast({
+        title: "Failed to close position",
+        description: "Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -188,15 +202,36 @@ export function OpenPositions({
                       </div>
                       
                       {allowClose && (
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => handleClosePosition(position.id)}
-                          disabled={deletePosition.isPending}
-                        >
-                          <X className="h-3.5 w-3.5" />
-                        </Button>
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                              disabled={deletePosition.isPending}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent className="max-w-sm">
+                            <AlertDialogHeader>
+                              <AlertDialogTitle className="text-base">Close position?</AlertDialogTitle>
+                              <AlertDialogDescription className="text-sm">
+                                Your {position.symbol} position ({position.quantity} shares) will be removed.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel className="h-9">Cancel</AlertDialogCancel>
+                              <AlertDialogAction
+                                onClick={() => handleClosePosition(position.id)}
+                                className="h-9 bg-destructive hover:bg-destructive/90"
+                                disabled={deletePosition.isPending}
+                              >
+                                Close
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
                       )}
                     </div>
                   </div>

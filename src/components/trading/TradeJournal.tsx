@@ -1,7 +1,17 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { Plus, Calendar, DollarSign, FileText, BookOpen, X } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -106,6 +116,7 @@ export function TradeJournal(props: TradeJournalProps) {
   const [showForm, setShowForm] = useState(false);
   const [showAllEntries, setShowAllEntries] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [closeConfirmEntry, setCloseConfirmEntry] = useState<TradeJournalEntry | null>(null);
   const { register, handleSubmit, reset, formState: { errors } } = useForm<JournalFormData>({
     defaultValues: {
       date: getTodayDateString(),
@@ -277,20 +288,20 @@ export function TradeJournal(props: TradeJournalProps) {
     }
   };
 
-  const handleCloseTrade = async (entry: TradeJournalEntry) => {
-    const openPosition = openPositionByEntryId.get(entry.id);
+  const handleCloseTrade = useCallback((entry: TradeJournalEntry) => {
+    setCloseConfirmEntry(entry);
+  }, []);
+
+  const executeCloseTrade = async () => {
+    if (!closeConfirmEntry) return;
+
+    const openPosition = openPositionByEntryId.get(closeConfirmEntry.id);
     if (!openPosition) {
+      setCloseConfirmEntry(null);
       return;
     }
 
     const closePrice = Number((openPosition.current_price ?? openPosition.entry_price).toFixed(2));
-    const shouldClose = window.confirm(
-      `Close the remaining ${openPosition.quantity} shares of ${openPosition.symbol} at $${closePrice.toFixed(2)}?`,
-    );
-
-    if (!shouldClose) {
-      return;
-    }
 
     await submitJournalEntry(
       {
@@ -307,6 +318,7 @@ export function TradeJournal(props: TradeJournalProps) {
         successDescription: `${openPosition.symbol} trade closed.`,
       },
     );
+    setCloseConfirmEntry(null);
   };
 
   return (
@@ -574,6 +586,33 @@ export function TradeJournal(props: TradeJournalProps) {
           )}
         </div>
       )}
+      {/* Close-trade confirmation dialog */}
+      <AlertDialog open={closeConfirmEntry !== null} onOpenChange={(open) => { if (!open) setCloseConfirmEntry(null); }}>
+        <AlertDialogContent className="max-w-sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-base">Close trade?</AlertDialogTitle>
+            <AlertDialogDescription className="text-sm">
+              {(() => {
+                if (!closeConfirmEntry) return "";
+                const pos = openPositionByEntryId.get(closeConfirmEntry.id);
+                if (!pos) return "This position is no longer open.";
+                const closePrice = Number((pos.current_price ?? pos.entry_price).toFixed(2));
+                return `Close the remaining ${pos.quantity} shares of ${pos.symbol} at $${closePrice.toFixed(2)}?`;
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="h-9">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void executeCloseTrade()}
+              className="h-9 bg-destructive hover:bg-destructive/90"
+              disabled={isSubmitting}
+            >
+              Close Trade
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

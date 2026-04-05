@@ -26,8 +26,8 @@ export function TradeHistory({ trades: tradesProp, isLoading: isLoadingProp }: T
   const isLoading = isLoadingProp ?? fallbackLoading;
   const visibleTrades = sortTradesLatestFirst(trades).slice(0, 5);
 
-  const winningTrades = visibleTrades.filter((trade) => (trade.pnl || 0) > 0).length;
-  const totalPnL = visibleTrades.reduce((sum, trade) => sum + (trade.pnl || 0), 0);
+  const winningTrades = visibleTrades.filter((trade) => (trade.pnl ?? 0) > 0).length;
+  const totalPnL = visibleTrades.reduce((sum, trade) => sum + (trade.pnl ?? 0), 0);
 
   if (isLoading) {
     return (
@@ -73,7 +73,7 @@ export function TradeHistory({ trades: tradesProp, isLoading: isLoadingProp }: T
           ) : (
             <div className="divide-y divide-border/30">
               {visibleTrades.map((trade, index) => {
-                const isProfit = (trade.pnl || 0) >= 0;
+                const isProfit = (trade.pnl ?? 0) >= 0;
                 const entryDate = parseISO(trade.entry_date);
                 const exitDate = trade.exit_date ? parseISO(trade.exit_date) : null;
                 const duration = exitDate
@@ -124,7 +124,7 @@ export function TradeHistory({ trades: tradesProp, isLoading: isLoadingProp }: T
 
                       <div className="min-w-[70px] text-right">
                         <div className={cn("text-sm font-mono font-medium", isProfit ? "text-profit" : "text-loss")}>
-                          {isProfit ? "+" : ""}${(trade.pnl || 0).toFixed(2)}
+                          {isProfit ? "+" : ""}${(trade.pnl ?? 0).toFixed(2)}
                         </div>
                       </div>
                     </div>

@@ -50,6 +50,9 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
+/** Default per-request timeout in milliseconds (30 seconds). */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 interface RequestOptions extends Omit<RequestInit, 'body'> {
   /** Override the base URL (defaults to getPythonApiUrl()) */
   baseUrl?: string;
@@ -59,6 +62,8 @@ interface RequestOptions extends Omit<RequestInit, 'body'> {
   skipRetry?: boolean;
   /** Request body — objects are JSON-stringified automatically */
   body?: RequestInit['body'] | Record<string, unknown>;
+  /** Per-request timeout in milliseconds. Defaults to 30 000. Set to 0 to disable. */
+  timeoutMs?: number;
 }
 
 async function request<T>(
@@ -69,6 +74,7 @@ async function request<T>(
     baseUrl,
     skipAuth = false,
     skipRetry = false,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
     body,
     headers: extraHeaders,
     ...fetchOptions
@@ -105,11 +111,23 @@ async function request<T>(
         console.debug(`[api-client] ${fetchOptions.method ?? 'GET'} ${url}`, attempt > 0 ? `(retry ${attempt})` : '');
       }
 
-      const response = await fetch(url, {
-        ...fetchOptions,
-        headers,
-        body: serializedBody,
-      });
+      // Per-attempt timeout via AbortController
+      const controller = timeoutMs > 0 ? new AbortController() : null;
+      const timeoutId = controller
+        ? setTimeout(() => controller.abort(), timeoutMs)
+        : undefined;
+
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          ...fetchOptions,
+          headers,
+          body: serializedBody,
+          signal: controller?.signal,
+        });
+      } finally {
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         // Retry on 5xx

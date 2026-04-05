@@ -167,8 +167,12 @@ export function buildPaperTradingLedger(
       const positionCost = quantity * price;
 
       if (cashBalance < positionCost) {
-        investedCapital += positionCost - cashBalance;
+        const additionalFunding = positionCost - cashBalance;
+        investedCapital += additionalFunding;
         cashBalance = positionCost;
+        errors.push(
+          `Auto-funded $${additionalFunding.toFixed(2)} for ${symbol} BUY on ${entry.date} (insufficient cash balance).`,
+        );
       }
 
       cashBalance -= positionCost;
@@ -258,7 +262,11 @@ export function buildPaperTradingLedger(
   }
 
   const remainingLots = openLots.filter((lot) => lot.quantity > 0);
+  let anySnapshotPriceUsed = false;
   const openPositions: OpenPosition[] = remainingLots.map((lot) => {
+    const hasSnapshot = snapshotPriceBySymbol.has(lot.symbol);
+    if (hasSnapshot) anySnapshotPriceUsed = true;
+
     const currentPrice = buildCurrentPrice(
       lot.symbol,
       lot.entry_price,
@@ -335,7 +343,7 @@ export function buildPaperTradingLedger(
     totalPnl: Number(totalPnl.toFixed(2)),
     totalReturnPct: Number(totalReturnPct.toFixed(2)),
     winRate: closedTrades.length > 0 ? (wins / closedTrades.length) * 100 : 0,
-    hasSnapshotPrices: openPositions.some((position) => position.current_price != null),
+    hasSnapshotPrices: anySnapshotPriceUsed,
     errors,
   };
 }

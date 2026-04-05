@@ -2,6 +2,15 @@ import { supabase } from "@/lib/supabase";
 import type { NewsArticle } from "@/types/database";
 
 /**
+ * Test whether `keyword` appears in `text` as a whole word (word-boundary match).
+ * Multi-word phrases are matched literally; special regex chars in the keyword are escaped.
+ */
+function matchesWord(text: string, keyword: string): boolean {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\b`, "i").test(text);
+}
+
+/**
  * Score a news article by financial importance.
  * Higher score = more market-moving / significant.
  * Works with NewsArticle or any object with title/summary/provider/published_at.
@@ -16,7 +25,7 @@ export function scoreNewsImportance(article: {
   const text = `${article.title} ${article.summary ?? ""}`.toLowerCase();
 
   const macroKeywords = [
-    "fed ",
+    "fed",
     "federal reserve",
     "fomc",
     "interest rate",
@@ -40,7 +49,7 @@ export function scoreNewsImportance(article: {
     "bankruptcy",
     "default",
     "crisis",
-    "war ",
+    "war",
     "conflict",
     "earnings beat",
     "earnings miss",
@@ -54,8 +63,7 @@ export function scoreNewsImportance(article: {
     "merger",
     "acquisition",
     "ipo",
-    "sec ",
-    " sec",
+    "sec",
     "doj",
     "investigation",
     "lawsuit",
@@ -85,16 +93,16 @@ export function scoreNewsImportance(article: {
   ];
 
   macroKeywords.forEach((keyword) => {
-    if (text.includes(keyword)) score += 4;
+    if (matchesWord(text, keyword)) score += 4;
   });
   crisisKeywords.forEach((keyword) => {
-    if (text.includes(keyword)) score += 3;
+    if (matchesWord(text, keyword)) score += 3;
   });
   eventKeywords.forEach((keyword) => {
-    if (text.includes(keyword)) score += 2;
+    if (matchesWord(text, keyword)) score += 2;
   });
   generalKeywords.forEach((keyword) => {
-    if (text.includes(keyword)) score += 1;
+    if (matchesWord(text, keyword)) score += 1;
   });
 
   const provider = (article.provider ?? "").toLowerCase();

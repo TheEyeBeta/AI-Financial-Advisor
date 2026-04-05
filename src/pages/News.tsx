@@ -583,7 +583,7 @@ const News = () => {
                 >
                   <ChevronDown className="h-4 w-4" />
                   Load more
-                  <span className="text-muted-foreground">({allArticles.length - visibleCount} remaining)</span>
+                  <span className="text-muted-foreground">({Math.max(0, allArticles.length - visibleCount)} remaining)</span>
                 </Button>
               </div>
             )}
