@@ -267,7 +267,7 @@ export async function markDigestRead(digestId: string): Promise<void> {
 
   const { error } = await meridianDb
     .from('intelligence_digests')
-    .update({ is_read: true })
+    .update({ delivered: true })
     .eq('id', digestId)
     .eq('user_id', user.id);
 
