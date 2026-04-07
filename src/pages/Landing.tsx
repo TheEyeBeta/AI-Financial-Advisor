@@ -17,19 +17,21 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
 
 export default function Landing() {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, profileLoading, onboardingComplete } = useAuth();
   const navigate = useNavigate();
   const [showSignUp, setShowSignUp] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
 
   useEffect(() => {
-    if (!loading && isAuthenticated) {
-      const timer = setTimeout(() => {
-        navigate("/advisor", { replace: true });
-      }, 100);
-      return () => clearTimeout(timer);
-    }
-  }, [isAuthenticated, loading, navigate]);
+    // Wait for both auth and profile to fully resolve before deciding where to send the user.
+    if (loading || !isAuthenticated) return;
+    if (profileLoading || onboardingComplete === null) return;
+
+    const timer = setTimeout(() => {
+      navigate(onboardingComplete ? "/advisor" : "/onboarding", { replace: true });
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [isAuthenticated, loading, profileLoading, onboardingComplete, navigate]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-gradient-to-br from-background via-background to-muted/20 p-4 sm:p-6">
