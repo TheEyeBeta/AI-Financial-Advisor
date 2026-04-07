@@ -90,18 +90,17 @@ function RouteFallback() {
 }
 
 function OnboardingRouteGuard() {
-  const { isAuthenticated, loading, profileLoading, onboardingComplete, userProfile } = useAuth();
+  const { isAuthenticated, loading, profileLoading, onboardingComplete } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!isAuthenticated) return;
     if (loading || profileLoading || onboardingComplete === null) return;
-    if (userProfile?.userType === "Admin") return;
     if (onboardingComplete !== false) return;
     if (location.pathname === "/onboarding") return;
     navigate("/onboarding", { replace: true });
-  }, [isAuthenticated, loading, profileLoading, onboardingComplete, userProfile?.userType, location.pathname, navigate]);
+  }, [isAuthenticated, loading, profileLoading, onboardingComplete, location.pathname, navigate]);
 
   return null;
 }
