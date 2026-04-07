@@ -510,7 +510,7 @@ export function useIntelligenceDigests() {
         .from('intelligence_digests')
         .select('*')
         .eq('user_id', authUserId)
-        .eq('is_read', false)
+        .eq('delivered', false)
         .order('created_at', { ascending: false })
         .limit(5);
       if (error) throw error;
