@@ -425,7 +425,7 @@ const Onboarding = () => {
         .from("user_profiles")
         .upsert(
           {
-            user_id: userProfile.id,
+            user_id: authUserId,
             age_range: step1.age_range,
             income_range: step1.income_range,
             monthly_expenses: parseFloat(step1.monthly_expenses),
