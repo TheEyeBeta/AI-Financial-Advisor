@@ -50,8 +50,8 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
-/** Default per-request timeout in milliseconds (30 seconds). */
-const DEFAULT_TIMEOUT_MS = 30_000;
+/** Default per-request timeout in milliseconds (60 seconds). */
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 interface RequestOptions extends Omit<RequestInit, 'body'> {
   /** Override the base URL (defaults to getPythonApiUrl()) */
