@@ -2,25 +2,37 @@
 """Stock Ranking Engine — scheduled batch scorer.
 
 Runs daily at 01:00 UTC (via APScheduler) to score all tickers using the
-composite formula derived entirely from market.stock_snapshots indicators.
-Writes the top 50 to market.trending_stocks.
+composite formula derived from market.stock_snapshots indicators, biased
+toward 6-month price performance.  Writes the top 50 to market.trending_stocks.
+
+Data sources (both in the market schema, zero N+1 queries):
+  market.stock_snapshots  — latest indicator snapshot per ticker
+  market.stock_returns_mv — pre-computed multi-horizon price returns
+
+Eligibility requirements (applied before scoring):
+  1. Complete data  — every scoring field must be non-null
+  2. 6-month history — ticker must have ≥ 126 trading days (has_6m_history = True)
+
+Hard filters (applied after completeness check):
+  - is_overbought == True          → excluded
+  - is_oversold  == True           → excluded
+  - adx < 20                       → excluded (ranging/sideways market)
+  - volume / avg_volume_10d < 0.8  → excluded (thin volume; stored volume_ratio
+                                     ignored due to pipeline bug, recalculated here)
 
 Scoring formula (weights):
-  trend_score     30%  — (price_vs_sma_50 * 0.5) + (price_vs_sma_200 * 0.5), normalised
-  momentum_score  30%  — normalise(rsi_14) * 0.5 + normalise(macd_histogram) * 0.5
-  volume_score    20%  — normalise(volume / avg_volume_10d)
-  range_score     10%  — normalise((close - low_52w) / (high_52w - low_52w))
-  adx_score       10%  — normalise(adx) where is_bullish=True, else 0
+  trend_score     30%  normalise((price_vs_sma_50 * 0.5) + (price_vs_sma_200 * 0.5))
+  momentum_score  30%  normalise(return_6m) * 0.50
+                       + normalise(rsi_14)  * 0.25
+                       + normalise(macd_histogram) * 0.25
+  volume_score    20%  normalise(volume / avg_volume_10d)
+  range_score     10%  normalise((close - low_52w) / (high_52w - low_52w))
+  adx_score       10%  normalise(adx) if is_bullish else 0
 
-Hard filters (applied before scoring):
-  - is_overbought == True  → excluded
-  - is_oversold  == True   → excluded
-  - adx < 20               → excluded (ranging market)
-  - volume / avg_volume_10d < 0.8 → excluded (thin volume)
+  composite = 0.30*trend + 0.30*momentum + 0.20*volume + 0.10*range + 0.10*adx
 
 Design constraints
 ──────────────────
-- Single data source: market.stock_snapshots (one row per ticker, always latest).
 - NO N+1 queries.  All data is bulk-fetched before the per-ticker scoring loop.
 - Run lock prevents overlapping cycles in a single-process deployment.
 - Single ticker failures are isolated — never abort the full cycle.
@@ -39,9 +51,6 @@ from .supabase_client import supabase_client
 logger = logging.getLogger(__name__)
 
 # ── Run lock ──────────────────────────────────────────────────────────────────
-# NOTE: Single-process guard against overlapping daily cycles.
-# For multi-replica deployments replace with a distributed lock
-# (e.g. Supabase advisory lock or Redis SETNX).
 _cycle_running: bool = False
 
 
@@ -69,8 +78,7 @@ def _minmax_normalize(
 ) -> dict[str, float]:
     """Min-max normalize {ticker: raw_value} → {ticker: 0-100, rounded to 2 dp}.
 
-    Guard: if max == min (all tickers have the same value), all scores = default.
-    This prevents a division-by-zero and keeps the output semantically neutral.
+    If all values are identical (range == 0), every ticker gets `default`.
     """
     if not values:
         return {}
@@ -87,9 +95,7 @@ def _minmax_normalize(
 def _fetch_indicators_snapshot() -> dict[str, dict]:
     """Bulk-fetch the latest snapshot for all tickers from market.stock_snapshots.
 
-    This is the single data source for the entire ranking cycle.
-    One row per ticker — always represents the latest available data.
-
+    One row per ticker — always represents the most recent available data.
     Returns: {ticker: row}
     """
     result = (
@@ -110,6 +116,64 @@ def _fetch_indicators_snapshot() -> dict[str, dict]:
     by_ticker = {row["ticker"]: row for row in rows if row.get("ticker")}
     logger.info("_fetch_indicators_snapshot: %d tickers", len(by_ticker))
     return by_ticker
+
+
+def _fetch_stock_returns() -> dict[str, dict]:
+    """Bulk-fetch pre-computed returns from market.stock_returns_mv.
+
+    Used for 6-month return bias in momentum scoring and for enforcing the
+    ≥ 6-month history completeness requirement.
+    Returns: {ticker: row}
+    """
+    result = (
+        _tbl("market", "stock_returns_mv")
+        .select(
+            "ticker, return_6m, has_6m_history, "
+            "return_1m, return_3m, return_12m, total_trading_days"
+        )
+        .execute()
+    )
+    rows = result.data or []
+    by_ticker = {row["ticker"]: row for row in rows if row.get("ticker")}
+    logger.info("_fetch_stock_returns: %d tickers", len(by_ticker))
+    return by_ticker
+
+
+# ── Completeness check ────────────────────────────────────────────────────────
+
+# All fields that must be non-null for a ticker to enter scoring.
+# Missing any one of these → excluded before normalisation.
+_REQUIRED_SNAPSHOT_FIELDS = (
+    "price_vs_sma_50",
+    "price_vs_sma_200",
+    "rsi_14",
+    "macd_histogram",
+    "volume",
+    "avg_volume_10d",
+    "last_price",
+    "high_52w",
+    "low_52w",
+    "adx",
+)
+
+
+def _has_complete_data(snap: dict, returns_row: Optional[dict]) -> bool:
+    """Return True only when every scoring field is non-null and the ticker
+    has at least 6 months (≈ 126 trading days) of price history."""
+    # Must have a returns row with 6m history confirmed
+    if returns_row is None:
+        return False
+    if not returns_row.get("has_6m_history"):
+        return False
+    r6m = _f(returns_row.get("return_6m"))
+    if r6m is None:
+        return False
+
+    # All snapshot scoring fields must be non-null / finite
+    for field in _REQUIRED_SNAPSHOT_FIELDS:
+        if _f(snap.get(field)) is None:
+            return False
+    return True
 
 
 # ── Tier and conviction ───────────────────────────────────────────────────────
@@ -145,46 +209,66 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     start_ts = _time.monotonic()
     logger.info("Ranking cycle starting")
 
-    # ── Step 1: Bulk-fetch all indicators from market.stock_snapshots ─────────
+    # ── Step 1: Bulk-fetch both data sources ──────────────────────────────────
     snapshots = _fetch_indicators_snapshot()
-    logger.info("Loaded snapshots for %d unique tickers", len(snapshots))
+    returns   = _fetch_stock_returns()
+    logger.info(
+        "Loaded snapshots for %d tickers, returns for %d tickers",
+        len(snapshots), len(returns),
+    )
 
-    # ── Step 2: Hard filters ──────────────────────────────────────────────────
-    # Recalculate volume_ratio as volume / avg_volume_10d (the stored
-    # volume_ratio column has a pipeline bug with values like 0.0014).
-    # Exclude tickers that fail any hard filter before scoring.
-    filtered: dict[str, dict] = {}
+    # ── Step 2: Completeness filter + hard filters ────────────────────────────
+    #
+    # Completeness: all scoring fields non-null AND has_6m_history = True.
+    # Hard filters: is_overbought, is_oversold, adx < 20, thin volume.
+    # Volume ratio is recalculated from raw columns (stored value has a bug).
+    filtered: dict[str, dict] = {}   # snap merged with returns row
+    skipped_incomplete = 0
+    skipped_hard_filter = 0
 
     for ticker, snap in snapshots.items():
-        # Filter 1 & 2: exclude overbought / oversold
+        ret_row = returns.get(ticker)
+
+        # Completeness guard
+        if not _has_complete_data(snap, ret_row):
+            skipped_incomplete += 1
+            continue
+
+        # Hard filter 1 & 2: overbought / oversold
         if snap.get("is_overbought") or snap.get("is_oversold"):
+            skipped_hard_filter += 1
             continue
 
-        # Filter 3: exclude ranging markets (ADX < 20)
+        # Hard filter 3: ranging market (ADX < 20)
         adx = _f(snap.get("adx"))
-        if adx is None or adx < 20:
+        if adx < 20:  # type: ignore[operator]  # non-null guaranteed by completeness check
+            skipped_hard_filter += 1
             continue
 
-        # Filter 4: exclude thin volume (recalculated volume_ratio < 0.8)
-        volume = _f(snap.get("volume"))
+        # Hard filter 4: thin volume (recalculated ratio < 0.8)
+        volume     = _f(snap.get("volume"))
         avg_vol_10d = _f(snap.get("avg_volume_10d"))
-        if volume is None or avg_vol_10d is None or avg_vol_10d <= 0:
-            continue
-        recalc_ratio = volume / avg_vol_10d
+        recalc_ratio = volume / avg_vol_10d  # type: ignore[operator]  # non-null guaranteed
         if recalc_ratio < 0.8:
+            skipped_hard_filter += 1
             continue
 
-        # Cache the recalculated ratio for use in volume scoring
-        snap["_recalc_volume_ratio"] = recalc_ratio
-        filtered[ticker] = snap
+        # Merge returns into the snap dict for convenience
+        merged = dict(snap)
+        merged["_recalc_volume_ratio"] = recalc_ratio
+        merged["_return_6m"]           = _f(ret_row["return_6m"])   # type: ignore[index]
+        merged["_return_1m"]           = _f(ret_row.get("return_1m"))
+        merged["_return_3m"]           = _f(ret_row.get("return_3m"))
+        merged["_return_12m"]          = _f(ret_row.get("return_12m"))
+        filtered[ticker] = merged
 
     logger.info(
-        "After hard filters: %d / %d tickers remain",
-        len(filtered), len(snapshots),
+        "After filters: %d eligible | %d incomplete | %d failed hard filters",
+        len(filtered), skipped_incomplete, skipped_hard_filter,
     )
 
     if not filtered:
-        logger.warning("No tickers passed hard filters — ranking cycle produced no results")
+        logger.warning("No tickers passed all filters — ranking cycle produced no results")
         elapsed = round(_time.monotonic() - start_ts, 2)
         return {
             "tickers_scored": 0,
@@ -194,78 +278,67 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             "ranked_at": cycle_start.isoformat(),
         }
 
-    # ── Step 3: Component normalization across the filtered universe ──────────
+    # ── Step 3: Component normalisation across the eligible universe ──────────
+    #
+    # All normalisations use _minmax_normalize so every component maps to 0-100
+    # relative to the filtered universe.  Tickers absent from a pool (field was
+    # null before the completeness check, which can't happen here) would get the
+    # default 50.0 — included for defensive completeness.
 
-    # ── Trend: (price_vs_sma_50 * 0.5) + (price_vs_sma_200 * 0.5) ───────────
-    raw_trend: dict[str, float] = {}
-    for ticker, snap in filtered.items():
-        pvs50 = _f(snap.get("price_vs_sma_50"))
-        pvs200 = _f(snap.get("price_vs_sma_200"))
-        if pvs50 is not None and pvs200 is not None:
-            raw_trend[ticker] = (pvs50 * 0.5) + (pvs200 * 0.5)
-        elif pvs50 is not None:
-            raw_trend[ticker] = pvs50
-        elif pvs200 is not None:
-            raw_trend[ticker] = pvs200
-        # Missing both → omitted; gets default 50.0 in final assembly
-
-    trend_norm = _minmax_normalize(raw_trend)
-
-    # ── Momentum: normalise(rsi_14) * 0.5 + normalise(macd_histogram) * 0.5 ──
-    # Normalise each component independently across the full filtered universe,
-    # then combine. RSI 50-70 is the ideal range but we let min-max handle it.
-    raw_rsi: dict[str, float] = {}
-    raw_macd_hist: dict[str, float] = {}
-    for ticker, snap in filtered.items():
-        rsi = _f(snap.get("rsi_14"))
-        mh = _f(snap.get("macd_histogram"))
-        if rsi is not None:
-            raw_rsi[ticker] = rsi
-        if mh is not None:
-            raw_macd_hist[ticker] = mh
-
-    rsi_norm = _minmax_normalize(raw_rsi)
-    macd_hist_norm = _minmax_normalize(raw_macd_hist)
-
-    momentum_scores: dict[str, float] = {}
-    for ticker in filtered:
-        rsi_s = rsi_norm.get(ticker, 50.0)
-        mh_s = macd_hist_norm.get(ticker, 50.0)
-        momentum_scores[ticker] = round(rsi_s * 0.5 + mh_s * 0.5, 2)
-
-    # ── Volume: normalise(volume / avg_volume_10d) ────────────────────────────
-    # Uses the recalculated ratio cached in Step 2 (not the stored volume_ratio).
-    raw_volume: dict[str, float] = {
-        ticker: snap["_recalc_volume_ratio"]
+    # ── Trend ─────────────────────────────────────────────────────────────────
+    raw_trend: dict[str, float] = {
+        ticker: (_f(snap["price_vs_sma_50"]) * 0.5  # type: ignore[operator]
+                 + _f(snap["price_vs_sma_200"]) * 0.5)  # type: ignore[operator]
         for ticker, snap in filtered.items()
     }
+    trend_norm = _minmax_normalize(raw_trend)
+
+    # ── Momentum (6m-biased) ──────────────────────────────────────────────────
+    # return_6m drives 50% of the momentum score so that sustained 6-month
+    # price performance is rewarded over short-term oscillator readings alone.
+    raw_return_6m  = {t: s["_return_6m"]    for t, s in filtered.items()}  # guaranteed non-null
+    raw_rsi        = {t: _f(s["rsi_14"])    for t, s in filtered.items() if _f(s.get("rsi_14"))        is not None}  # type: ignore[misc]
+    raw_macd_hist  = {t: _f(s["macd_histogram"]) for t, s in filtered.items() if _f(s.get("macd_histogram")) is not None}  # type: ignore[misc]
+
+    return_6m_norm = _minmax_normalize(raw_return_6m)   # type: ignore[arg-type]
+    rsi_norm       = _minmax_normalize(raw_rsi)          # type: ignore[arg-type]
+    macd_hist_norm = _minmax_normalize(raw_macd_hist)    # type: ignore[arg-type]
+
+    momentum_scores: dict[str, float] = {
+        ticker: round(
+            return_6m_norm.get(ticker, 50.0) * 0.50
+            + rsi_norm.get(ticker,       50.0) * 0.25
+            + macd_hist_norm.get(ticker,  50.0) * 0.25,
+            2,
+        )
+        for ticker in filtered
+    }
+
+    # ── Volume ────────────────────────────────────────────────────────────────
+    raw_volume = {t: s["_recalc_volume_ratio"] for t, s in filtered.items()}
     volume_norm = _minmax_normalize(raw_volume)
 
-    # ── 52-week position: (close - low_52w) / (high_52w - low_52w) ───────────
+    # ── 52-week position ──────────────────────────────────────────────────────
     raw_range: dict[str, float] = {}
     for ticker, snap in filtered.items():
-        close = _f(snap.get("last_price"))
-        low52 = _f(snap.get("low_52w"))
-        high52 = _f(snap.get("high_52w"))
-        if close is not None and low52 is not None and high52 is not None:
-            denom = high52 - low52
-            if denom > 0:
-                raw_range[ticker] = (close - low52) / denom
+        close  = _f(snap["last_price"])
+        low52  = _f(snap["low_52w"])
+        high52 = _f(snap["high_52w"])
+        denom  = high52 - low52  # type: ignore[operator]
+        if denom > 0:
+            raw_range[ticker] = (close - low52) / denom  # type: ignore[operator]
 
     range_norm = _minmax_normalize(raw_range)
 
-    # ── ADX trend strength: normalise(adx) for is_bullish=True; 0 otherwise ──
-    # Only is_bullish tickers enter the normalization pool so they are ranked
-    # relative to each other.  Non-bullish tickers receive adx_score = 0.
-    raw_adx_bullish: dict[str, float] = {}
-    for ticker, snap in filtered.items():
-        if snap.get("is_bullish"):
-            adx = _f(snap.get("adx"))
-            if adx is not None:
-                raw_adx_bullish[ticker] = adx
-
+    # ── ADX (bullish-only) ────────────────────────────────────────────────────
+    # Normalisation pool is restricted to is_bullish tickers so their ADX
+    # values are ranked relative to each other.  Non-bullish → score = 0.
+    raw_adx_bullish: dict[str, float] = {
+        ticker: _f(snap["adx"])  # type: ignore[misc]
+        for ticker, snap in filtered.items()
+        if snap.get("is_bullish") and _f(snap.get("adx")) is not None
+    }
     adx_bullish_norm = _minmax_normalize(raw_adx_bullish)
-
     adx_scores: dict[str, float] = {
         ticker: adx_bullish_norm.get(ticker, 0.0)
         for ticker in filtered
@@ -293,6 +366,12 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
                 2,
             )
 
+            # Express returns as percentages for the response
+            r6m  = snap["_return_6m"]
+            r1m  = snap.get("_return_1m")
+            r3m  = snap.get("_return_3m")
+            r12m = snap.get("_return_12m")
+
             scored_results.append({
                 "ticker":            ticker,
                 "symbol":            ticker,
@@ -304,15 +383,16 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
                 "volume_score":      round(v_score, 2),
                 "range_score":       round(r_score, 2),
                 "adx_score":         round(a_score, 2),
-                # Legacy dimension fields — not produced by this scoring formula
+                # Legacy dimension fields
                 "technical_score":   None,
                 "fundamental_score": None,
                 "consistency_score": None,
                 "signal_score":      None,
-                "momentum_1m":       None,
-                "momentum_3m":       None,
-                "momentum_6m":       None,
-                "momentum_12m":      None,
+                # 6m return stored in momentum_6m for API consumers
+                "momentum_6m":       round(r6m * 100, 2) if r6m is not None else None,
+                "momentum_1m":       round(r1m * 100, 2) if r1m is not None else None,
+                "momentum_3m":       round(r3m * 100, 2) if r3m is not None else None,
+                "momentum_12m":      round(r12m * 100, 2) if r12m is not None else None,
                 "fundamental_trend": None,
                 "rank_tier":         _rank_tier(composite),
                 "conviction":        _conviction(composite),
@@ -325,12 +405,12 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
 
     # ── Step 5: Select top 50 by composite score ──────────────────────────────
     scored_results.sort(key=lambda r: r["composite_score"], reverse=True)
-    top_50 = scored_results[:50]
+    top_50         = scored_results[:50]
     top_50_tickers = [r["ticker"] for r in top_50]
 
     now_iso = cycle_start.isoformat()
     for row in top_50:
-        row["ranked_at"] = now_iso
+        row["ranked_at"]  = now_iso
         row["updated_at"] = now_iso
 
     if top_50:
@@ -377,9 +457,6 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
         logger.info("Upserted %d rows to market.trending_stocks", len(upsert_rows))
 
     # ── Step 7: Delete stale entries not in the current top 50 ───────────────
-    # .filter("ticker", "not.in", "(A,B,C)") maps to PostgREST's not.in operator.
-    # This removes exactly the rows that fell out of the top 50 — it does NOT
-    # wipe the whole table.
     if top_50_tickers:
         tickers_csv = ",".join(top_50_tickers)
         supabase_client.schema("market").table("trending_stocks").delete().filter(
@@ -395,6 +472,8 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
         "tickers_scored":         tickers_scored,
         "tickers_failed":         tickers_failed,
         "top_50_written":         len(top_50),
+        "skipped_incomplete":     skipped_incomplete,
+        "skipped_hard_filter":    skipped_hard_filter,
         "cycle_duration_seconds": elapsed,
         "ranked_at":              now_iso,
     }
