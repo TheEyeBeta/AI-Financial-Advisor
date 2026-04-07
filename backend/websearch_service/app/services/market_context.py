@@ -7,6 +7,8 @@ Schema routing:
   market.macro_snapshots            → client.schema("market").table("macro_snapshots")
   market.stock_price_history        → client.schema("market").table("stock_price_history")
   market.stock_fundamentals_history → client.schema("market").table("stock_fundamentals_history")
+  market.trending_stocks            → client.schema("market").table("trending_stocks")
+  market.stock_snapshots            → client.schema("market").table("stock_snapshots")
 """
 from __future__ import annotations
 
@@ -67,10 +69,25 @@ def _fetch_fundamentals_sync(ticker: str) -> List[dict]:
         .select("*")
         .eq("ticker", ticker)
         .order("date", desc=True)
-        .limit(90)
+        .limit(1)
         .execute()
     )
     return result.data or []
+
+
+def _fetch_trending_sync(ticker: str) -> Optional[dict]:
+    client = supabase_client
+    if not client:
+        return None
+    result = (
+        _table(client, "market", "trending_stocks")
+        .select("*")
+        .eq("ticker", ticker)
+        .limit(1)
+        .execute()
+    )
+    rows = result.data or []
+    return rows[0] if rows else None
 
 
 # ── Formatters ─────────────────────────────────────────────────────────────────
@@ -123,36 +140,43 @@ def _format_price_history(ticker: str, rows: List[dict]) -> str:
     sma50 = latest.get("sma_50", "N/A")
     sma200 = latest.get("sma_200", "N/A")
     is_bullish = latest.get("is_bullish")
+
+    # Signal logic:
+    # Bullish: is_bullish flag is true AND current price > sma_50
+    # Bearish: current price < sma_200
+    # Neutral: otherwise
     try:
         close_f = float(latest_close)
         sma50_f = float(sma50)
         sma200_f = float(sma200)
-        if is_bullish is True or (close_f > sma50_f and sma50_f > sma200_f):
-            trend = "Bullish"
-        elif is_bullish is False or (close_f < sma50_f and sma50_f < sma200_f):
-            trend = "Bearish"
+        if is_bullish is True and close_f > sma50_f:
+            signal = "Bullish"
+        elif close_f < sma200_f:
+            signal = "Bearish"
         else:
-            trend = "Neutral"
+            signal = "Neutral"
     except (TypeError, ValueError):
         if is_bullish is True:
-            trend = "Bullish"
+            signal = "Bullish"
         elif is_bullish is False:
-            trend = "Bearish"
+            signal = "Bearish"
         else:
-            trend = "Neutral"
+            signal = "Neutral"
+
     return (
         f"=== PRICE HISTORY: {ticker} (last 90 days) ===\n"
-        f"Current: {latest_close} | 90d ago: {oldest_close} | Change: {pct_str}%\n"
+        f"Current close: {latest_close} | 90d ago: {oldest_close}\n"
+        f"Change: {pct_str}%\n"
         f"52W High: {high_52w} | 52W Low: {low_52w}\n"
-        f"Latest RSI: {rsi} | SMA50: {sma50} | SMA200: {sma200}\n"
-        f"Trend: {trend}"
+        f"RSI-14: {rsi} | SMA50: {sma50} | SMA200: {sma200}\n"
+        f"Signal: {signal}"
     )
 
 
 def _format_fundamentals(ticker: str, rows: List[dict]) -> str:
     if not rows:
         return (
-            f"=== FUNDAMENTALS: {ticker} (most recent) ===\n"
+            f"=== FUNDAMENTALS: {ticker} ===\n"
             "Data not yet available."
         )
     row = rows[0]
@@ -164,18 +188,41 @@ def _format_fundamentals(ticker: str, rows: List[dict]) -> str:
     eps_growth = row.get("eps_growth", "N/A")
     rev_growth = row.get("revenue_growth", "N/A")
     div_yield = row.get("dividend_yield", "N/A")
+    market_cap = row.get("market_cap", "N/A")
     return (
-        f"=== FUNDAMENTALS: {ticker} (most recent) ===\n"
+        f"=== FUNDAMENTALS: {ticker} ===\n"
         f"P/E: {pe} | Forward P/E: {fwd_pe} | PEG: {peg}\n"
         f"P/B: {pb} | P/S: {ps}\n"
         f"EPS Growth: {eps_growth}% | Revenue Growth: {rev_growth}%\n"
-        f"Dividend Yield: {div_yield}%"
+        f"Dividend Yield: {div_yield}%\n"
+        f"Market Cap: {market_cap}"
+    )
+
+
+def _format_composite_score(ticker: str, row: dict) -> str:
+    composite = row.get("composite_score", "N/A")
+    rank = row.get("rank", "N/A")
+    momentum = row.get("momentum_score", "N/A")
+    technical = row.get("technical_score", "N/A")
+    fundamental = row.get("fundamental_score", "N/A")
+    conviction = row.get("conviction", "N/A")
+    signal = row.get("signal", "N/A")
+    signal_confidence = row.get("signal_confidence", "N/A")
+    return (
+        f"=== THE EYE SCORE: {ticker} ===\n"
+        f"Composite: {composite}/100 | Rank: #{rank}\n"
+        f"Momentum: {momentum} | Technical: {technical}\n"
+        f"Fundamental: {fundamental} | Conviction: {conviction}\n"
+        f"Signal: {signal} (confidence: {signal_confidence})"
     )
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-async def build_market_context(ticker: Optional[str] = None) -> str:
+async def build_market_context(
+    ticker: Optional[str] = None,
+    user_id: Optional[str] = None,
+) -> str:
     """
     Builds market context string for IRIS system prompt injection.
 
@@ -183,12 +230,17 @@ async def build_market_context(ticker: Optional[str] = None) -> str:
     of date — uses .order("date", desc=True).limit(1) so yesterday's data is
     returned when today's engine run has not yet completed.
 
-    If ticker is provided, also fetches from market.stock_price_history and
-    market.stock_fundamentals_history for the last 90 days.
+    If ticker is provided, also fetches from:
+      - market.stock_price_history      (last 90 days)
+      - market.stock_fundamentals_history (most recent row)
+      - market.trending_stocks           (composite score, if present)
 
     GRACEFUL DEGRADATION: Wraps every query in try/except. On any failure,
     a descriptive note is included in the returned string. Always returns a
     non-empty string — never raises.
+
+    If a ticker is named but every ticker-specific query fails, returns a
+    clear "no data" message rather than an empty string.
     """
     parts: List[str] = []
 
@@ -203,30 +255,52 @@ async def build_market_context(ticker: Optional[str] = None) -> str:
         logger.warning("market_context: macro_snapshots fetch failed: %s", exc)
         parts.append("=== MACRO CONTEXT ===\nData not yet available.")
 
-    # B. If ticker provided, fetch price history and fundamentals
+    # B. If ticker provided, fetch price history, fundamentals, and composite score
     if ticker:
+        ticker_parts: List[str] = []
+
         try:
             price_rows = await asyncio.to_thread(_fetch_price_history_sync, ticker)
-            parts.append(_format_price_history(ticker, price_rows))
+            ticker_parts.append(_format_price_history(ticker, price_rows))
         except Exception as exc:
             logger.warning(
                 "market_context: stock_price_history fetch failed for %s: %s", ticker, exc
             )
-            parts.append(
+            ticker_parts.append(
                 f"=== PRICE HISTORY: {ticker} (last 90 days) ===\n"
                 "Data not yet available."
             )
 
         try:
             fund_rows = await asyncio.to_thread(_fetch_fundamentals_sync, ticker)
-            parts.append(_format_fundamentals(ticker, fund_rows))
+            ticker_parts.append(_format_fundamentals(ticker, fund_rows))
         except Exception as exc:
             logger.warning(
                 "market_context: stock_fundamentals_history fetch failed for %s: %s", ticker, exc
             )
-            parts.append(
-                f"=== FUNDAMENTALS: {ticker} (most recent) ===\n"
+            ticker_parts.append(
+                f"=== FUNDAMENTALS: {ticker} ===\n"
                 "Data not yet available."
             )
+
+        try:
+            trending_row = await asyncio.to_thread(_fetch_trending_sync, ticker)
+            if trending_row:
+                ticker_parts.append(_format_composite_score(ticker, trending_row))
+            # If not in trending_stocks, omit this block entirely (per spec)
+        except Exception as exc:
+            logger.warning(
+                "market_context: trending_stocks fetch failed for %s: %s", ticker, exc
+            )
+
+        # If every ticker-specific block signals "Data not yet available", surface a
+        # clear fallback so IRIS never receives an empty or all-unavailable context.
+        all_unavailable = all("Data not yet available" in p for p in ticker_parts)
+        if all_unavailable and ticker_parts:
+            parts.append(
+                f"No market data available for {ticker} in The Eye's database."
+            )
+        else:
+            parts.extend(ticker_parts)
 
     return "\n\n".join(parts)

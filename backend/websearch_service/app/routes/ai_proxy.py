@@ -840,7 +840,7 @@ _TICKER_STOPWORDS = frozenset({
     "A", "I",
     # Two-letter common English words
     "AM", "AN", "AS", "AT", "BE", "BY", "DO", "GO",
-    "HE", "IF", "IN", "IS", "IT", "ME", "MY", "NO",
+    "HE", "HI", "IF", "IN", "IS", "IT", "ME", "MY", "NO",
     "OF", "OK", "ON", "OR", "SO", "TO", "UP", "US", "WE",
 })
 
