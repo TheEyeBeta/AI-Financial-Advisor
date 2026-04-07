@@ -198,12 +198,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!authUser) return;
 
     setProfileLoading(true);
-    setProfileFetched(null); // Reset cache to force refetch
+    // Do NOT reset profileFetched here — that would trigger the profile useEffect
+    // to start a second concurrent fetch, racing against the one below.
     try {
       const profile = await getCurrentUserProfile();
       setUserProfile(profile);
       setOnboardingComplete(profile?.onboarding_complete ?? false);
-      setProfileFetched(authUser.id);
+      setProfileFetched(authUser.id); // Keep cache valid after refresh
     } catch (error) {
       console.error("Error refreshing user profile:", error);
     } finally {

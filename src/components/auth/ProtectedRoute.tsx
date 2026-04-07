@@ -14,7 +14,10 @@ export function ProtectedRoute({ children, requireVerification = false }: Protec
   // Wait for auth resolution and profile load before making routing decisions.
   // onboardingComplete is null while loading, so we must wait here to avoid
   // a premature redirect before the secondary user_profiles check completes.
-  if (loading || profileLoading) {
+  // Also block when the user is authenticated but onboardingComplete is still
+  // null — this covers the micro-window between auth resolving and the profile
+  // useEffect starting (profileLoading is still false in that window).
+  if (loading || profileLoading || (isAuthenticated && onboardingComplete === null)) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <div className="text-center space-y-4">
