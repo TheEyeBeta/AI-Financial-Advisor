@@ -115,7 +115,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const { count, error: countError } = await coreDb
               .from("user_profiles")
               .select("*", { count: "exact", head: true })
-              .eq("user_id", profile.id);
+              .eq("user_id", authUser.id);
 
             if (!countError && count && count > 0) {
               // Profile exists — silently backfill the flag and treat as complete.
