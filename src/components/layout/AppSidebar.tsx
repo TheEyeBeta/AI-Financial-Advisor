@@ -1,4 +1,4 @@
-import { Bot, LayoutDashboard, LineChart, TrendingUp, Shield, History, Newspaper, Trophy, BookOpen } from "lucide-react";
+import { Bot, LayoutDashboard, LineChart, TrendingUp, Shield, History, Newspaper, Trophy, BookOpen, Settings } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/use-auth";
 import {
@@ -22,6 +22,7 @@ const mainNavItems = [
   { title: "Paper Trading", url: "/paper-trading", icon: LineChart },
   { title: "Latest News", url: "/news", icon: Newspaper },
   { title: "Top Stocks", url: "/top-stocks", icon: Trophy },
+  { title: "Profile Settings", url: "/profile", icon: Settings },
 ];
 
 export function AppSidebar() {
