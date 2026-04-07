@@ -87,6 +87,9 @@ async def build_iris_context(user_id: Optional[str]) -> str:
     Fetches user's Meridian context from ai.iris_context_cache.
     Returns a formatted string prepended to FINANCIAL_ADVISOR_SYSTEM_PROMPT.
 
+    On cache miss, triggers a one-time refresh so newly-onboarded users
+    (or users whose cache was lost) still get personalised context.
+
     GRACEFUL DEGRADATION: Any failure returns "" so IRIS always works.
     """
     if not user_id:
@@ -94,6 +97,18 @@ async def build_iris_context(user_id: Optional[str]) -> str:
 
     try:
         data = await asyncio.to_thread(_fetch_iris_cache_sync, user_id)
+
+        # Cache miss — attempt a just-in-time refresh before giving up.
+        if not data:
+            logger.info("IRIS cache miss for user %s — triggering JIT refresh", user_id)
+            try:
+                await asyncio.to_thread(_refresh_iris_context_cache_sync, user_id)
+                data = await asyncio.to_thread(_fetch_iris_cache_sync, user_id)
+            except Exception as refresh_exc:
+                logger.warning(
+                    "JIT cache refresh failed for user %s: %s", user_id, refresh_exc
+                )
+
         if not data:
             return ""
         return _format_context_block(data)

@@ -96,8 +96,34 @@ CREATE TABLE IF NOT EXISTS ai.iris_context_cache (
     active_goals JSONB,
     active_alerts JSONB,
     plan_status JSONB,
-    knowledge_tier INTEGER
+    knowledge_tier INTEGER,
+    financial_plan JSONB,
+    goal_progress_summary JSONB,
+    intelligence_digest JSONB,
+    life_events JSONB,
+    user_positions JSONB,
+    trading_positions JSONB,
+    closed_trades JSONB,
+    academy_progress JSONB,
+    recent_chat_summaries JSONB,
+    user_insights JSONB
 );
+
+-- Migration: add columns introduced after initial deployment.
+-- Safe to re-run — IF NOT EXISTS prevents errors on fresh installs.
+DO $$
+BEGIN
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS financial_plan JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS goal_progress_summary JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS intelligence_digest JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS life_events JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS user_positions JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS trading_positions JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS closed_trades JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS academy_progress JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS recent_chat_summaries JSONB;
+    ALTER TABLE ai.iris_context_cache ADD COLUMN IF NOT EXISTS user_insights JSONB;
+END $$;
 
 ALTER TABLE ai.iris_context_cache ENABLE ROW LEVEL SECURITY;
 
