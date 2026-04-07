@@ -289,12 +289,6 @@ const Onboarding = () => {
 
   const totalSteps = 5;
 
-  useEffect(() => {
-    if (userProfile?.userType === "Admin") {
-      navigate("/admin", { replace: true });
-    }
-  }, [navigate, userProfile?.userType]);
-
   // Check for existing Meridian profile
   useEffect(() => {
     if (!appUserId) return;
@@ -308,10 +302,6 @@ const Onboarding = () => {
       })
       .catch(() => setHasExistingProfile(false));
   }, [appUserId]);
-
-  if (userProfile?.userType === "Admin") {
-    return null;
-  }
 
   // ── Already completed ────────────────────────────────────────────────────
 

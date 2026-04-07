@@ -90,7 +90,7 @@ function RouteFallback() {
 }
 
 function OnboardingRouteGuard() {
-  const { isAuthenticated, loading, profileLoading, onboardingComplete } = useAuth();
+  const { isAuthenticated, loading, profileLoading, onboardingComplete, userProfile } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -98,9 +98,10 @@ function OnboardingRouteGuard() {
     if (!isAuthenticated) return;
     if (loading || profileLoading || onboardingComplete === null) return;
     if (onboardingComplete !== false) return;
+    if (userProfile?.userType === "Admin") return;
     if (location.pathname === "/onboarding") return;
     navigate("/onboarding", { replace: true });
-  }, [isAuthenticated, loading, profileLoading, onboardingComplete, location.pathname, navigate]);
+  }, [isAuthenticated, loading, profileLoading, onboardingComplete, userProfile?.userType, location.pathname, navigate]);
 
   return null;
 }
