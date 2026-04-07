@@ -21,15 +21,18 @@ Hard filters (applied after completeness check):
                                      ignored due to pipeline bug, recalculated here)
 
 Scoring formula (weights):
-  trend_score     30%  normalise((price_vs_sma_50 * 0.5) + (price_vs_sma_200 * 0.5))
-  momentum_score  30%  normalise(return_6m) * 0.50
+  trend_score     35%  normalise(price_vs_sma_50)
+  momentum_score  35%  normalise(return_6m) * 0.50
                        + normalise(rsi_14)  * 0.25
                        + normalise(macd_histogram) * 0.25
   volume_score    20%  normalise(volume / avg_volume_10d)
-  range_score     10%  normalise((close - low_52w) / (high_52w - low_52w))
   adx_score       10%  normalise(adx) if is_bullish else 0
 
-  composite = 0.30*trend + 0.30*momentum + 0.20*volume + 0.10*range + 0.10*adx
+  composite = 0.35*trend + 0.35*momentum + 0.20*volume + 0.10*adx
+
+  Deliberately excluded (require > 6 months of history):
+    price_vs_sma_200  — SMA-200 needs 200 days (~10 months)
+    range_score       — high_52w / low_52w need 252 days (~12 months)
 
 Design constraints
 ──────────────────
@@ -105,8 +108,7 @@ def _fetch_indicators_snapshot() -> dict[str, dict]:
             "last_price, volume, avg_volume_10d, "
             "rsi_14, macd_histogram, "
             "adx, is_bullish, "
-            "high_52w, low_52w, "
-            "price_vs_sma_50, price_vs_sma_200, "
+            "price_vs_sma_50, "
             "is_overbought, is_oversold"
         )
         .limit(600)
@@ -144,16 +146,16 @@ def _fetch_stock_returns() -> dict[str, dict]:
 # All fields that must be non-null for a ticker to enter scoring.
 # Missing any one of these → excluded before normalisation.
 _REQUIRED_SNAPSHOT_FIELDS = (
-    "price_vs_sma_50",
-    "price_vs_sma_200",
+    "price_vs_sma_50",   # SMA-50 reliable within 6-month window
     "rsi_14",
     "macd_histogram",
     "volume",
     "avg_volume_10d",
     "last_price",
-    "high_52w",
-    "low_52w",
     "adx",
+    # Excluded — require more than 6 months of history:
+    #   price_vs_sma_200  (needs ~200 days)
+    #   high_52w / low_52w (need ~252 days)
 )
 
 
@@ -286,9 +288,9 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     # default 50.0 — included for defensive completeness.
 
     # ── Trend ─────────────────────────────────────────────────────────────────
+    # Only price_vs_sma_50 — SMA-200 excluded (requires ~200 days, > 6-month gate).
     raw_trend: dict[str, float] = {
-        ticker: (_f(snap["price_vs_sma_50"]) * 0.5  # type: ignore[operator]
-                 + _f(snap["price_vs_sma_200"]) * 0.5)  # type: ignore[operator]
+        ticker: _f(snap["price_vs_sma_50"])  # type: ignore[misc]
         for ticker, snap in filtered.items()
     }
     trend_norm = _minmax_normalize(raw_trend)
@@ -318,17 +320,7 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     raw_volume = {t: s["_recalc_volume_ratio"] for t, s in filtered.items()}
     volume_norm = _minmax_normalize(raw_volume)
 
-    # ── 52-week position ──────────────────────────────────────────────────────
-    raw_range: dict[str, float] = {}
-    for ticker, snap in filtered.items():
-        close  = _f(snap["last_price"])
-        low52  = _f(snap["low_52w"])
-        high52 = _f(snap["high_52w"])
-        denom  = high52 - low52  # type: ignore[operator]
-        if denom > 0:
-            raw_range[ticker] = (close - low52) / denom  # type: ignore[operator]
-
-    range_norm = _minmax_normalize(raw_range)
+    # range_score removed — high_52w / low_52w require ~252 days (> 6-month gate).
 
     # ── ADX (bullish-only) ────────────────────────────────────────────────────
     # Normalisation pool is restricted to is_bullish tickers so their ADX
@@ -354,14 +346,12 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             t_score = trend_norm.get(ticker, 50.0)
             m_score = momentum_scores.get(ticker, 50.0)
             v_score = volume_norm.get(ticker, 50.0)
-            r_score = range_norm.get(ticker, 50.0)
             a_score = adx_scores.get(ticker, 0.0)
 
             composite = round(
-                0.30 * t_score
-                + 0.30 * m_score
+                0.35 * t_score
+                + 0.35 * m_score
                 + 0.20 * v_score
-                + 0.10 * r_score
                 + 0.10 * a_score,
                 2,
             )
@@ -381,7 +371,7 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
                 "momentum_score":    round(m_score, 2),
                 "trend_score":       round(t_score, 2),
                 "volume_score":      round(v_score, 2),
-                "range_score":       round(r_score, 2),
+                "range_score":       None,   # removed — requires 52-week data (> 6-month gate)
                 "adx_score":         round(a_score, 2),
                 # Legacy dimension fields
                 "technical_score":   None,
