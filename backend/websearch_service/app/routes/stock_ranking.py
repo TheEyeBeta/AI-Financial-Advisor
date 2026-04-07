@@ -51,7 +51,13 @@ class TrendingStock(BaseModel):
     name: Optional[str] = None
     change_percent: Optional[float] = None
     composite_score: float
-    momentum_score: Optional[float] = None
+    # ── Indicator-based sub-scores (new composite formula) ────────────────────
+    trend_score: Optional[float] = None       # 30% weight: price vs SMA50/200
+    momentum_score: Optional[float] = None    # 30% weight: RSI + MACD histogram
+    volume_score: Optional[float] = None      # 20% weight: volume / avg_volume_10d
+    range_score: Optional[float] = None       # 10% weight: 52-week position
+    adx_score: Optional[float] = None         # 10% weight: ADX (bullish only)
+    # ── Legacy dimension scores (kept for backwards compatibility) ─────────────
     technical_score: Optional[float] = None
     fundamental_score: Optional[float] = None
     consistency_score: Optional[float] = None
