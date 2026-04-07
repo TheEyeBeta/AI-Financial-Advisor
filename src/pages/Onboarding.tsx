@@ -473,10 +473,7 @@ const Onboarding = () => {
 
       if (goalsError) throw goalsError;
 
-      // Mark onboarding complete in core.users (keeps ProtectedRoute working).
-      // Non-blocking: a failure here is logged but does not prevent the user from
-      // proceeding — refreshProfile() will re-read the row and the secondary
-      // user_profiles check in AuthContext will backfill the flag on next login.
+      // WRITE 3 — mark onboarding complete in core.users (required for gate state)
       const { error: usersError } = await coreDb
         .from("users")
         .update({
@@ -489,13 +486,9 @@ const Onboarding = () => {
         })
         .eq("auth_id", authUserId);
 
-      if (usersError) {
-        console.error("Failed to update onboarding_complete flag:", usersError);
-        // Continue — user can still reach the app; the flag will be corrected
-        // by the user_profiles backfill check on next login.
-      }
+      if (usersError) throw usersError;
 
-      // WRITE 3 — trigger cache refresh (fire-and-forget)
+      // WRITE 4 — trigger cache refresh (fire-and-forget)
       refreshIrisContextCache(authUserId);
 
       // Initialize Academy profile

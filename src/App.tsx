@@ -2,12 +2,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import { Suspense, lazy, useEffect, Component } from "react";
 import type { ErrorInfo, ReactNode } from "react";
 import { ProtectedRoute } from "./components/auth/ProtectedRoute";
 import { AdminRoute } from "./components/auth/AdminRoute";
 import { AuthProvider } from "@/context/AuthContext";
+import { useAuth } from "@/hooks/use-auth";
 import { healthCheck } from "@/services/healthCheck";
 import { analytics } from "@/services/analytics";
 import { AnalyticsPageTracker } from "@/components/AnalyticsPageTracker";
@@ -88,6 +89,22 @@ function RouteFallback() {
   );
 }
 
+function OnboardingRouteGuard() {
+  const { isAuthenticated, loading, profileLoading, onboardingComplete } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (loading || profileLoading || onboardingComplete === null) return;
+    if (onboardingComplete !== false) return;
+    if (location.pathname === "/onboarding") return;
+    navigate("/onboarding", { replace: true });
+  }, [isAuthenticated, loading, profileLoading, onboardingComplete, location.pathname, navigate]);
+
+  return null;
+}
+
 const App = () => {
   useEffect(() => {
     analytics.init();
@@ -112,6 +129,7 @@ const App = () => {
           }}
         >
           <AnalyticsPageTracker />
+          <OnboardingRouteGuard />
           <Suspense fallback={<RouteFallback />}>
             <Routes>
               {/* Landing page - shows when not authenticated */}
