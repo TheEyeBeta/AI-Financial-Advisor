@@ -1,7 +1,8 @@
 import { supabase } from '@/lib/supabase';
 import { getPythonApiUrl } from '@/lib/env';
-import { apiClient } from '@/lib/api-client';
+import { apiClient, ApiError } from '@/lib/api-client';
 import { createStockSnapshotsApi, type StockSnapshotQuery } from '@/services/stock-cache';
+import { createStreamTimeout, getTimeoutForMessage } from '@/services/chat-api';
 import type {
   NewsArticle,
   StockSnapshot,
@@ -420,7 +421,7 @@ type ExperienceLevel = 'beginner' | 'intermediate' | 'advanced' | null;
 // NOTE: System prompt assembly has moved to the backend (ai_proxy.py).
 // The backend builds the full IRIS prompt from experience_level, session_type, and raw context.
 // This stub is retained only to avoid breaking any residual callers; it is not used in new code.
-function getSystemPrompt(experienceLevel: ExperienceLevel, hasEyeData: boolean = false): string {
+function _getSystemPrompt(experienceLevel: ExperienceLevel, hasEyeData: boolean = false): string {
   // Default to intermediate if null
   const level = experienceLevel ?? 'intermediate';
 
@@ -497,6 +498,145 @@ ${allRules}`;
   }
 }
 
+interface ChatStreamEvent {
+  content?: string;
+  done?: boolean;
+  error?: string;
+}
+
+function normalizeStreamBuffer(buffer: string): string {
+  return buffer.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  const contentType = response.headers.get('content-type') ?? '';
+
+  if (contentType.includes('application/json')) {
+    try {
+      const body = await response.json() as { detail?: string; message?: string; error?: string };
+      return body.message ?? body.detail ?? body.error ?? response.statusText;
+    } catch {
+      return response.statusText;
+    }
+  }
+
+  try {
+    const body = await response.text();
+    return body || response.statusText;
+  } catch {
+    return response.statusText;
+  }
+}
+
+export async function consumeChatStream(
+  response: Response,
+  onChunk?: (chunk: string) => void,
+  onChunkReceived?: () => void,
+): Promise<string> {
+  const contentType = response.headers.get('content-type') ?? '';
+
+  if (!response.ok) {
+    const message = await readErrorMessage(response);
+    throw new ApiError(response.status, message);
+  }
+
+  if (contentType.includes('application/json')) {
+    const body = await response.json() as { response?: string };
+    const content = typeof body.response === 'string' ? body.response : '';
+    if (content) {
+      onChunk?.(content);
+    }
+    return content;
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('Streaming response body is unavailable.');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let assembled = '';
+
+  const processBuffer = (): { done: boolean } => {
+    while (true) {
+      const eventBoundary = buffer.indexOf('\n\n');
+      if (eventBoundary === -1) {
+        return { done: false };
+      }
+
+      const rawEvent = buffer.slice(0, eventBoundary).trim();
+      buffer = buffer.slice(eventBoundary + 2);
+
+      if (!rawEvent) {
+        continue;
+      }
+
+      const dataLines = rawEvent
+        .split('\n')
+        .filter((line) => line.startsWith('data:'))
+        .map((line) => line.slice(5).trimStart());
+
+      if (dataLines.length === 0) {
+        continue;
+      }
+
+      let event: ChatStreamEvent;
+      try {
+        event = JSON.parse(dataLines.join('\n')) as ChatStreamEvent;
+      } catch {
+        continue;
+      }
+
+      if (typeof event.content === 'string' && event.content.length > 0) {
+        assembled += event.content;
+        onChunk?.(event.content);
+      }
+
+      if (event.error) {
+        if (assembled.length > 0 && event.error === 'Stream interrupted') {
+          throw new Error('Connection lost while streaming the response. Please try again.');
+        }
+        throw new Error(event.error);
+      }
+
+      if (event.done) {
+        return { done: true };
+      }
+    }
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        buffer = normalizeStreamBuffer(buffer + decoder.decode());
+        break;
+      }
+
+      onChunkReceived?.();
+      buffer = normalizeStreamBuffer(buffer + decoder.decode(value, { stream: true }));
+      const result = processBuffer();
+      if (result.done) {
+        return assembled;
+      }
+    }
+
+    const finalResult = processBuffer();
+    if (finalResult.done) {
+      return assembled;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  if (assembled.length > 0) {
+    throw new Error('Connection lost while streaming the response. Please try again.');
+  }
+
+  throw new Error('Stream ended before completion.');
+}
+
 // Python Backend API endpoint helpers
 // These can be configured to call your Python backend for AI responses, live market data, etc.
 export const pythonApi = {
@@ -530,7 +670,8 @@ export const pythonApi = {
     userId: string,
     experienceLevel?: ExperienceLevel,
     chatHistory?: Array<{ role: 'user' | 'assistant'; content: string }>,
-    tradeEngineContext?: TradeEngineAIContext | null
+    tradeEngineContext?: TradeEngineAIContext | null,
+    onChunk?: (chunk: string) => void,
   ): Promise<string> {
     // Input validation
     if (!message || message.trim().length === 0) {
@@ -758,33 +899,56 @@ export const pythonApi = {
           throw new Error('Not authenticated. Please sign in to use the AI assistant.');
         }
 
-        const data = await apiClient.post<{ response?: string }>(
-          '/api/chat',
-          {
-            messages,
-            user_id: userId,
-            temperature: OPENAI_CHAT_TEMPERATURE,
-            max_tokens: OPENAI_MAX_TOKENS,
-            experience_level: experienceLevel ?? null,
-            context,
-            session_type: 'advisor',
-          },
-          { skipRetry: true },
-        );
+        const chatUrl = new URL('/api/chat', pythonBackendUrl).toString();
+        const timeout = getTimeoutForMessage(message);
+        const streamTimeout = createStreamTimeout(timeout);
 
-        const content = data.response;
-        if (!content || typeof content !== 'string') {
-          return 'I apologize, but I encountered an error processing your request.';
+        try {
+          const response = await fetch(chatUrl, {
+            method: 'POST',
+            headers: {
+              'Accept': 'text/event-stream',
+              'Authorization': `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              messages,
+              user_id: userId,
+              temperature: OPENAI_CHAT_TEMPERATURE,
+              max_tokens: OPENAI_MAX_TOKENS,
+              experience_level: experienceLevel ?? null,
+              context,
+              session_type: 'advisor',
+            }),
+            signal: streamTimeout.controller.signal,
+          });
+
+          const content = await consumeChatStream(response, onChunk, streamTimeout.resetForChunk);
+          if (!content || typeof content !== 'string') {
+            throw new Error('The AI returned an empty response.');
+          }
+
+          return content;
+        } finally {
+          streamTimeout.cancel();
         }
-        return content;
       } catch (error: unknown) {
         console.error('Error calling AI backend:', error);
-        return 'I apologize, but the AI service is currently unavailable.';
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw new Error('The AI took too long to respond. Please try again.');
+        }
+        if (error instanceof TypeError && error.message === 'Failed to fetch') {
+          throw new Error('Unable to reach the AI service. Please try again.');
+        }
+        if (error instanceof Error) {
+          throw error;
+        }
+        throw new Error('The AI service is currently unavailable.');
       }
     }
 
     // Fallback response if backend is not configured
-    return 'I apologize, but the AI service is not configured. Please set VITE_PYTHON_API_URL to your backend AI proxy.';
+    throw new Error('The AI service is not configured. Please set VITE_PYTHON_API_URL to your backend AI proxy.');
   },
 
   // Generate a short title for a chat based on the first user message
@@ -818,14 +982,48 @@ export const pythonApi = {
   // Helper method for Python backend (if using that instead)
   async getChatResponseFromPython(message: string, userId: string): Promise<string> {
     try {
-      const data = await apiClient.post<{ response?: string }>(
-        '/api/chat',
-        { message, user_id: userId },
-        { skipRetry: true },
-      );
-      return data.response || 'I apologize, but I encountered an error processing your request.';
+      const pythonBackendUrl = getPythonApiUrl();
+      if (!pythonBackendUrl) {
+        throw new Error('The AI service is not configured. Please set VITE_PYTHON_API_URL to your backend AI proxy.');
+      }
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error('Not authenticated. Please sign in to use the AI assistant.');
+      }
+
+      const chatUrl = new URL('/api/chat', pythonBackendUrl).toString();
+      const timeout = getTimeoutForMessage(message);
+      const streamTimeout = createStreamTimeout(timeout);
+
+      try {
+        const response = await fetch(chatUrl, {
+          method: 'POST',
+          headers: {
+            'Accept': 'text/event-stream',
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ message, user_id: userId }),
+          signal: streamTimeout.controller.signal,
+        });
+
+        const content = await consumeChatStream(response, undefined, streamTimeout.resetForChunk);
+        return content || 'I apologize, but I encountered an error processing your request.';
+      } finally {
+        streamTimeout.cancel();
+      }
     } catch (error) {
       console.error('Error calling Python API:', error);
+      if (error instanceof DOMException && error.name === 'AbortError') {
+        return 'The AI took too long to respond. Please try again.';
+      }
+      if (error instanceof TypeError && error.message === 'Failed to fetch') {
+        return 'Unable to reach the AI service. Please try again.';
+      }
+      if (error instanceof Error) {
+        return error.message;
+      }
       return 'I apologize, but the AI service is currently unavailable. Please try again later.';
     }
   },

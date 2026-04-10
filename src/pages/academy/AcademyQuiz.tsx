@@ -20,6 +20,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/lib/supabase";
 import { refreshIrisContextCache } from "@/services/iris-cache";
+import { consumeChatStream } from "@/services/api";
 import {
   academyApi,
   injectTemplateVars,
@@ -99,6 +100,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
           method: 'POST',
           signal: controller.signal,
           headers: {
+            'Accept': 'text/event-stream',
             'Content-Type': 'application/json',
             'Authorization': `Bearer ${accessToken}`,
           },
@@ -119,8 +121,7 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
 
       if (!response.ok) return null;
 
-      const data = await response.json();
-      const content: string = data.response || '';
+      const content = await consumeChatStream(response);
 
       // Parse JSON from response
       const jsonMatch = content.match(/\{[\s\S]*?\}/);

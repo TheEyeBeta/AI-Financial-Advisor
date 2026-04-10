@@ -12,7 +12,6 @@ interface Message {
 interface ChatInterfaceProps {
   messages: Message[];
   isThinking?: boolean;
-  onStreamingComplete?: () => void;
 }
 
 function formatMessage(content: string): React.ReactNode {
@@ -138,47 +137,19 @@ function ThinkingText() {
     return () => clearInterval(interval);
   }, []);
 
-  return <span className="text-sm text-muted-foreground">Thinking{".".repeat(dots)}</span>;
+  return <span className="text-sm text-muted-foreground">thinking{".".repeat(dots)}</span>;
 }
 
-function StreamingMessage({ content, onComplete }: { content: string; onComplete?: () => void }) {
-  const [displayed, setDisplayed] = useState("");
-  const [done, setDone] = useState(false);
-
-  useEffect(() => {
-    setDisplayed("");
-    setDone(false);
-    let index = 0;
-
-    const interval = setInterval(() => {
-      if (index < content.length) {
-        const chunkSize = Math.floor(Math.random() * 3) + 1;
-        const nextIndex = Math.min(index + chunkSize, content.length);
-        setDisplayed(content.slice(0, nextIndex));
-        index = nextIndex;
-      } else {
-        setDone(true);
-        onComplete?.();
-        clearInterval(interval);
-      }
-    }, 15);
-
-    return () => clearInterval(interval);
-  }, [content, onComplete]);
-
-  if (done) {
-    return <div>{formatMessage(content)}</div>;
-  }
-
+function StreamingMessage({ content }: { content: string }) {
   return (
     <div>
-      {formatMessage(displayed)}
+      {formatMessage(content)}
       <span className="ml-0.5 inline-block h-4 w-0.5 animate-pulse bg-primary/70 align-text-bottom" />
     </div>
   );
 }
 
-export function ChatInterface({ messages, isThinking = false, onStreamingComplete }: ChatInterfaceProps) {
+export function ChatInterface({ messages, isThinking = false }: ChatInterfaceProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -216,7 +187,7 @@ export function ChatInterface({ messages, isThinking = false, onStreamingComplet
                 {isUser ? (
                   <p className="text-sm leading-7">{message.content}</p>
                 ) : message.isStreaming ? (
-                  <StreamingMessage content={message.content} onComplete={onStreamingComplete} />
+                  <StreamingMessage content={message.content} />
                 ) : (
                   <div>{formatMessage(message.content)}</div>
                 )}

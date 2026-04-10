@@ -6,6 +6,7 @@ import { Bot, Send, Loader2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { supabase } from "@/lib/supabase";
+import { consumeChatStream } from "@/services/api";
 import {
   academyApi,
   injectTemplateVars,
@@ -151,6 +152,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
               method: 'POST',
               signal: controller.signal,
               headers: {
+                'Accept': 'text/event-stream',
                 'Content-Type': 'application/json',
                 'Authorization': `Bearer ${accessToken}`,
               },
@@ -163,8 +165,7 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
               }),
             });
             if (res.ok) {
-              const data = await res.json();
-              aiResponse = data.response || aiResponse;
+              aiResponse = await consumeChatStream(res);
             }
           } catch (fetchErr) {
             if (fetchErr instanceof DOMException && fetchErr.name === 'AbortError') {

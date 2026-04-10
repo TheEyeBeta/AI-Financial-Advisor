@@ -4,6 +4,66 @@ import type { Chat, ChatMessage, ChatWithMessages } from '@/types/database';
 const MAX_MESSAGE_LENGTH = 10000;
 const MAX_TITLE_LENGTH = 200;
 
+/** Idle timeout between stream chunks (ms). Resets on each `reader.read()` via `resetForChunk`. */
+export const CHUNK_INTERVAL_TIMEOUT_MS = 30_000;
+
+export function getTimeoutForMessage(message: string): number {
+  const msg = message.toLowerCase().trim();
+  const length = msg.length;
+
+  // INSTANT tier - very short or trivial
+  const trivial = [
+    'hello',
+    'hi',
+    'hey',
+    'thanks',
+    'ok',
+    'yes',
+    'no',
+    'bye',
+    'cheers',
+    'morning',
+  ];
+  if (trivial.some((t) => msg === t || msg.startsWith(t + ' ')) && length < 60) {
+    return 8000; // 8 seconds
+  }
+
+  // FAST tier - short analytical questions
+  if (length < 150) {
+    return 20000; // 20 seconds
+  }
+
+  // BALANCED tier - standard questions
+  if (length < 400) {
+    return 45000; // 45 seconds
+  }
+
+  // DEEP tier - long complex questions
+  return 90000; // 90 seconds
+}
+
+export function createStreamTimeout(
+  timeoutMs: number,
+): { controller: AbortController; cancel: () => void; resetForChunk: () => void } {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | null =
+    timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+
+  return {
+    controller,
+    cancel: () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    },
+    resetForChunk: () => {
+      if (timeoutId !== null) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => controller.abort(), CHUNK_INTERVAL_TIMEOUT_MS);
+    },
+  };
+}
+
 function normalizeChatTitle(title?: string): string {
   const trimmedTitle = title?.trim();
 

@@ -201,10 +201,11 @@ export function useSendChatMessage() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ chatId, message, isFirstMessage }: {
+    mutationFn: async ({ chatId, message, isFirstMessage, onChunk }: {
       chatId: string;
       message: string;
       isFirstMessage?: boolean;
+      onChunk?: (chunk: string) => void;
     }) => {
       if (!userId) throw new Error('Not authenticated');
 
@@ -239,7 +240,8 @@ export function useSendChatMessage() {
         userId,
         experienceLevel,
         chatHistory,
-        tradeEngineContext  // Live Trade Engine data; session_type 'advisor' is set inside getChatResponse
+        tradeEngineContext,  // Live Trade Engine data; session_type 'advisor' is set inside getChatResponse
+        onChunk,
       );
       
       // Save AI response
@@ -259,7 +261,8 @@ export function useSendChatMessage() {
       
       return { message, response: aiResponse };
     },
-    onSuccess: (_, variables) => {
+    onSettled: (_, __, variables) => {
+      if (!variables) return;
       queryClient.invalidateQueries({ queryKey: ['chat-messages', variables.chatId] });
       queryClient.invalidateQueries({ queryKey: ['chat', variables.chatId] });
       queryClient.invalidateQueries({ queryKey: ['chats'] });
