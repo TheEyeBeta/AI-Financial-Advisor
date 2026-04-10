@@ -63,6 +63,7 @@ const Advisor = () => {
   const [showTopics, setShowTopics] = useState(true);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [streamingResponseContent, setStreamingResponseContent] = useState<string | null>(null);
+  const [hasReceivedFirstChunk, setHasReceivedFirstChunk] = useState(false);
   const [composerValue, setComposerValue] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const isNewChatRef = useRef(false);
@@ -107,12 +108,15 @@ const Advisor = () => {
   }, [chatFromUrl, currentChatId, isExplicitNewChat, setSearchParams]);
 
   useEffect(() => {
+    if (pendingMessage || sendMessageMutation.isPending || streamingResponseContent !== null) {
+      return;
+    }
     if (currentChat && currentChat.messageCount === 0) {
       setShowTopics(true);
     } else if (currentChat && currentChat.messageCount > 0) {
       setShowTopics(false);
     }
-  }, [currentChat]);
+  }, [currentChat, pendingMessage, sendMessageMutation.isPending, streamingResponseContent]);
 
   // Pre-warm the stock cache on page load so the first chat response is faster
   useEffect(() => {
@@ -126,6 +130,8 @@ const Advisor = () => {
     const trimmedContent = content.trim();
     let chatId = currentChatId;
     let isFirstMessage = false;
+    let streamedResponse = "";
+    let receivedChunk = false;
 
     if (!trimmedContent) return false;
     if (!isAuthenticated || !userId) {
@@ -143,6 +149,8 @@ const Advisor = () => {
     setSendError(null);
     setPendingMessage(trimmedContent);
     setShowTopics(false);
+    setStreamingResponseContent("");
+    setHasReceivedFirstChunk(false);
 
     try {
       if (!chatId) {
@@ -164,6 +172,12 @@ const Advisor = () => {
         chatId,
         message: trimmedContent,
         isFirstMessage,
+        onChunk: (chunk) => {
+          receivedChunk = true;
+          streamedResponse += chunk;
+          setHasReceivedFirstChunk(true);
+          setStreamingResponseContent((previous) => (previous ?? "") + chunk);
+        },
       });
 
       if (result?.response) {
@@ -172,6 +186,7 @@ const Advisor = () => {
           response_length: result.response.length,
         });
         setStreamingResponseContent(result.response);
+        setHasReceivedFirstChunk(result.response.length > 0);
       }
 
       setPendingMessage(null);
@@ -192,6 +207,13 @@ const Advisor = () => {
         variant: "destructive",
       });
       setPendingMessage(null);
+      if (receivedChunk && streamedResponse.length > 0) {
+        setStreamingResponseContent(streamedResponse);
+        setHasReceivedFirstChunk(true);
+      } else {
+        setStreamingResponseContent(null);
+        setHasReceivedFirstChunk(false);
+      }
       return false;
     }
   };
@@ -217,6 +239,7 @@ const Advisor = () => {
     setShowTopics(true);
     setPendingMessage(null);
     setStreamingResponseContent(null);
+    setHasReceivedFirstChunk(false);
     setComposerValue("");
     setSendError(null);
   };
@@ -232,19 +255,14 @@ const Advisor = () => {
     setShowTopics(false);
     setPendingMessage(null);
     setStreamingResponseContent(null);
+    setHasReceivedFirstChunk(false);
   };
 
   const messages = currentChat?.messages || [];
-  const chatMessages = messages.map((msg, index) => {
-    const isLastAssistant = msg.role === "assistant" && index === messages.length - 1;
-    const shouldStream = isLastAssistant && streamingResponseContent !== null && msg.content === streamingResponseContent;
-
-    return {
-      role: msg.role as "user" | "assistant",
-      content: msg.content,
-      isStreaming: shouldStream,
-    };
-  });
+  const chatMessages: Array<{ role: "user" | "assistant"; content: string; isStreaming?: boolean }> = messages.map((msg) => ({
+    role: msg.role as "user" | "assistant",
+    content: msg.content,
+  }));
 
   let displayMessages = chatMessages;
   if (pendingMessage) {
@@ -261,11 +279,32 @@ const Advisor = () => {
     }
   }
 
+  const hasPersistedStreamingMessage = streamingResponseContent !== null
+    && chatMessages.some((msg) => msg.role === "assistant" && msg.content === streamingResponseContent);
+
+  if (streamingResponseContent !== null && hasReceivedFirstChunk && !hasPersistedStreamingMessage) {
+    displayMessages = [
+      ...displayMessages,
+      {
+        role: "assistant" as const,
+        content: streamingResponseContent,
+        isStreaming: sendMessageMutation.isPending,
+      },
+    ];
+  }
+
   useEffect(() => {
     if (pendingMessage && chatMessages.some((msg) => msg.role === "user" && msg.content === pendingMessage)) {
       setPendingMessage(null);
     }
   }, [pendingMessage, chatMessages]);
+
+  useEffect(() => {
+    if (streamingResponseContent !== null && hasPersistedStreamingMessage) {
+      setStreamingResponseContent(null);
+      setHasReceivedFirstChunk(false);
+    }
+  }, [hasPersistedStreamingMessage, streamingResponseContent]);
 
   if (displayMessages.length === 0) {
     displayMessages = [
@@ -277,7 +316,7 @@ const Advisor = () => {
   }
 
   const isLoading = chatsLoading || chatLoading || sendMessageMutation.isPending || createChatMutation.isPending;
-  const isThinking = sendMessageMutation.isPending;
+  const isThinking = sendMessageMutation.isPending && !hasReceivedFirstChunk;
   const isStarterState = showTopics && displayMessages.length <= 1;
   const experienceLevel = userProfile?.experience_level as ExperienceLevel;
   const quickPrompts = getQuickPrompts(experienceLevel);
@@ -444,7 +483,6 @@ const Advisor = () => {
               <ChatInterface
                 messages={displayMessages}
                 isThinking={isThinking}
-                onStreamingComplete={() => setStreamingResponseContent(null)}
               />
             </div>
 

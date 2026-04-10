@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from ..services.audit import audit_log
@@ -53,6 +54,8 @@ TEST_MODE_DISCLAIMER = "Test mode only. Not financial advice."
 REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
 MIN_REASONING_MAX_OUTPUT_TOKENS = 1200
 RETRY_REASONING_MAX_OUTPUT_TOKENS = 1800
+STREAM_TIMEOUT_SECONDS = 90.0
+STREAM_CONNECT_TIMEOUT_SECONDS = 10.0
 
 # ── Prompts ────────────────────────────────────────────────────────────────────
 
@@ -1200,6 +1203,155 @@ def _temperature_field(model: str, temperature: float) -> Dict[str, float]:
     return {"temperature": temperature}
 
 
+def _sse_event(payload: Dict[str, Any]) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _build_openai_chat_stream_payload(
+    messages: List[Dict[str, str]],
+    max_output_tokens: int,
+    reasoning_effort: str,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "model": OPENAI_CHAT_MODEL,
+        "messages": messages,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        **_max_completion_field(OPENAI_CHAT_MODEL, max_output_tokens),
+    }
+    if _is_reasoning_model(OPENAI_CHAT_MODEL):
+        payload["reasoning_effort"] = reasoning_effort
+    return payload
+
+
+def _build_perplexity_chat_stream_payload(
+    messages: List[Dict[str, str]],
+    max_output_tokens: int,
+    temperature: float,
+) -> Dict[str, Any]:
+    return {
+        "model": PERPLEXITY_MODEL,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_output_tokens,
+        "stream": True,
+    }
+
+
+async def _close_stream_resources(
+    client: Optional[httpx.AsyncClient],
+    response: Optional[httpx.Response],
+) -> None:
+    if response is not None:
+        aclose = getattr(response, "aclose", None)
+        if callable(aclose):
+            await aclose()
+    if client is not None:
+        aclose = getattr(client, "aclose", None)
+        if callable(aclose):
+            await aclose()
+
+
+async def _open_provider_stream(
+    *,
+    endpoint: str,
+    headers: Dict[str, str],
+    payload: Dict[str, Any],
+    provider_name: str,
+) -> tuple[httpx.AsyncClient, httpx.Response]:
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(STREAM_TIMEOUT_SECONDS, connect=STREAM_CONNECT_TIMEOUT_SECONDS)
+    )
+    request = client.build_request("POST", endpoint, headers=headers, json=payload)
+    try:
+        response = await client.send(request, stream=True)
+        return client, response
+    except httpx.TimeoutException as exc:
+        await _close_stream_resources(client, None)
+        raise HTTPException(status_code=504, detail=f"{provider_name} request timed out") from exc
+    except httpx.RequestError as exc:
+        await _close_stream_resources(client, None)
+        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+
+
+async def _start_chat_completion_stream(
+    *,
+    messages: List[Dict[str, str]],
+    max_output_tokens: int,
+    reasoning_effort: str,
+    temperature: float,
+) -> tuple[httpx.AsyncClient, httpx.Response]:
+    perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
+    openai_payload = _build_openai_chat_stream_payload(messages, max_output_tokens, reasoning_effort)
+    perplexity_payload = _build_perplexity_chat_stream_payload(messages, max_output_tokens, temperature)
+
+    try:
+        client, response = await _open_provider_stream(
+            endpoint=OPENAI_ENDPOINT,
+            headers=_build_headers(),
+            payload=openai_payload,
+            provider_name="OpenAI",
+        )
+    except HTTPException as exc:
+        if exc.status_code == 502 and perplexity_key:
+            await audit_log("openai_fallback_perplexity", {"reason": "network_error"})
+            return await _open_provider_stream(
+                endpoint=PERPLEXITY_ENDPOINT,
+                headers=_build_perplexity_headers(),
+                payload=perplexity_payload,
+                provider_name="Perplexity",
+            )
+        raise
+
+    if response.status_code == 429:
+        await _close_stream_resources(client, response)
+        if perplexity_key:
+            await audit_log("openai_fallback_perplexity", {"reason": "rate_limit_429"})
+            return await _open_provider_stream(
+                endpoint=PERPLEXITY_ENDPOINT,
+                headers=_build_perplexity_headers(),
+                payload=perplexity_payload,
+                provider_name="Perplexity",
+            )
+        raise HTTPException(status_code=429, detail="OpenAI rate limit exceeded. Perplexity fallback not configured.")
+
+    if response.status_code == 503:
+        await _close_stream_resources(client, response)
+        if perplexity_key:
+            await audit_log("openai_fallback_perplexity", {"reason": "service_unavailable_503"})
+            return await _open_provider_stream(
+                endpoint=PERPLEXITY_ENDPOINT,
+                headers=_build_perplexity_headers(),
+                payload=perplexity_payload,
+                provider_name="Perplexity",
+            )
+        raise HTTPException(status_code=503, detail="OpenAI service unavailable. Perplexity fallback not configured.")
+
+    if response.status_code == 402:
+        await _close_stream_resources(client, response)
+        if perplexity_key:
+            await audit_log("openai_fallback_perplexity", {"reason": "quota_exceeded_402"})
+            return await _open_provider_stream(
+                endpoint=PERPLEXITY_ENDPOINT,
+                headers=_build_perplexity_headers(),
+                payload=perplexity_payload,
+                provider_name="Perplexity",
+            )
+        raise HTTPException(status_code=402, detail="OpenAI quota exceeded. Perplexity fallback not configured.")
+
+    if response.status_code == 401:
+        await _close_stream_resources(client, response)
+        logger.warning("OpenAI Chat Completions returned HTTP 401 — API key invalid or expired")
+        raise HTTPException(status_code=401, detail="OpenAI API key invalid or expired.")
+
+    if response.status_code != 200:
+        await _close_stream_resources(client, response)
+        logger.warning("OpenAI Chat Completions streaming returned HTTP %d", response.status_code)
+        raise HTTPException(status_code=502, detail="AI provider returned an error.")
+
+    return client, response
+
+
 # ── API client functions ───────────────────────────────────────────────────────
 
 async def _call_perplexity(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -1449,7 +1601,7 @@ async def chat_completion(
     raw_request: Request,
     response: Response,
     auth_user: AuthenticatedUser = Depends(require_auth),
-) -> Dict[str, str]:
+) -> Response:
     # SECURITY: Use the auth_id from the verified JWT — never from the request body.
     # This prevents user_id spoofing for rate-limit bypass or false audit attribution.
     verified_user_id = auth_user.auth_id
@@ -1479,6 +1631,17 @@ async def chat_completion(
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
     rate_limiter.add_rate_limit_headers(response, rate_limit_info)
+    response_headers = dict(response.headers)
+    stream_client: Optional[httpx.AsyncClient] = None
+    upstream_response: Optional[httpx.Response] = None
+    request_released = False
+
+    def release_request() -> None:
+        nonlocal request_released
+        if request_released:
+            return
+        rate_limiter.release_request(raw_request, user_id=verified_user_id)
+        request_released = True
 
     try:
         client_id = raw_request.client.host if raw_request.client else "unknown"
@@ -1580,6 +1743,109 @@ async def chat_completion(
         # Strip any legacy system messages the frontend may still send (transition safety net)
         conversation_turns = [m for m in messages if m.get("role") != "system"]
         input_messages = [{"role": "system", "content": combined_system}, *conversation_turns]
+
+        # Step 3: Start streaming only after all pre-processing has completed.
+        stream_client, upstream_response = await _start_chat_completion_stream(
+            messages=input_messages,
+            max_output_tokens=effective_max_output_tokens,
+            reasoning_effort=reasoning_effort,
+            temperature=request.temperature,
+        )
+
+        tier_from_classifier = {"beginner": 1, "intermediate": 2, "advanced": 3}.get(
+            (classification.get("user_level") or "").lower()
+        )
+
+        async def generate_stream():
+            collected_chunks: List[str] = []
+            usage_entries: List[Dict[str, Any]] = []
+            try:
+                assert upstream_response is not None
+                async for line in upstream_response.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+
+                    raw_chunk = line[5:].strip()
+                    if not raw_chunk:
+                        continue
+                    if raw_chunk == "[DONE]":
+                        break
+
+                    try:
+                        chunk_data = json.loads(raw_chunk)
+                    except json.JSONDecodeError:
+                        logger.debug("Skipping non-JSON stream chunk from /api/chat: %s", raw_chunk[:120])
+                        continue
+
+                    usage = chunk_data.get("usage", {})
+                    if isinstance(usage, dict) and usage:
+                        usage_entries.append(usage)
+
+                    choices = chunk_data.get("choices")
+                    if not isinstance(choices, list) or not choices:
+                        continue
+
+                    delta = choices[0].get("delta") or {}
+                    chunk_text = _coerce_text(delta.get("content"))
+                    if not chunk_text:
+                        continue
+
+                    collected_chunks.append(chunk_text)
+                    yield _sse_event({"content": chunk_text})
+
+                final_answer = "".join(collected_chunks).strip()
+                if not final_answer:
+                    logger.warning("Empty streamed response from /api/chat for user %s", verified_user_id)
+                    yield _sse_event({"error": "Stream interrupted"})
+                    return
+
+                final_answer = _ensure_test_mode_disclaimer(final_answer)
+                streamed_text = "".join(collected_chunks)
+                if final_answer.startswith(streamed_text):
+                    suffix = final_answer[len(streamed_text):]
+                    if suffix:
+                        collected_chunks.append(suffix)
+                        yield _sse_event({"content": suffix})
+
+                actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
+                if actual_tokens > 0:
+                    rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+
+                try:
+                    await audit_log(
+                        "chat_response",
+                        {
+                            "client_id": client_id,
+                            "user_id": verified_user_id,
+                            "usage": usage_entries[-1] if usage_entries else {},
+                            "usage_attempts": usage_entries,
+                            "actual_tokens": actual_tokens,
+                            "reasoning_effort": reasoning_effort,
+                        },
+                    )
+                except Exception as audit_exc:
+                    logger.warning("Failed to write chat_response audit log: %s", audit_exc)
+
+                if tier_from_classifier and verified_user_id:
+                    asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
+
+                yield _sse_event({"done": True})
+            except Exception as stream_exc:
+                logger.exception("Chat stream interrupted for user %s: %s", verified_user_id, stream_exc)
+                yield _sse_event({"error": "Stream interrupted"})
+            finally:
+                await _close_stream_resources(stream_client, upstream_response)
+                release_request()
+
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                **response_headers,
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
         payload = {
             "model": OPENAI_CHAT_MODEL,
@@ -1683,25 +1949,33 @@ async def chat_completion(
 
         return {"response": final_answer}
     except HTTPException as exc:
-        from fastapi.responses import JSONResponse
+        release_request()
+        if stream_client is not None or upstream_response is not None:
+            await _close_stream_resources(stream_client, upstream_response)
+            stream_client = None
+            upstream_response = None
         if exc.status_code == 401:
             return JSONResponse(
                 status_code=503,
                 content={"error": "ai_unavailable", "message": "AI service is temporarily unavailable."},
+                headers=response_headers,
             )
         if exc.status_code == 429:
             return JSONResponse(
                 status_code=429,
                 content={"error": "rate_limited", "message": "Too many requests. Please wait a moment."},
+                headers=response_headers,
             )
         if exc.status_code == 504:
             return JSONResponse(
                 status_code=504,
                 content={"error": "timeout", "message": "The AI took too long to respond. Please try again."},
+                headers=response_headers,
             )
         raise
     finally:
-        rate_limiter.release_request(raw_request, user_id=verified_user_id)
+        if stream_client is None and upstream_response is None:
+            release_request()
 
 
 @router.post("/api/chat/title")
