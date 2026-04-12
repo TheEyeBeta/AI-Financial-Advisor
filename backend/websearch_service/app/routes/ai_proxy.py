@@ -41,6 +41,8 @@ OPENAI_CHAT_MODEL = os.getenv("OPENAI_CHAT_MODEL", OPENAI_MODEL or "gpt-5")
 OPENAI_CLASSIFIER_MODEL = os.getenv("OPENAI_CLASSIFIER_MODEL", OPENAI_MODEL or "gpt-5-mini")
 OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", OPENAI_MODEL or "gpt-4o-mini")
 OPENAI_QUANT_MODEL = os.getenv("OPENAI_QUANT_MODEL", OPENAI_MODEL or "gpt-5")
+INSTANT_MODEL = os.environ.get("INSTANT_MODEL", "gpt-4o-mini")
+BALANCED_MODEL = os.environ.get("BALANCED_MODEL", "gpt-4o")
 try:
     OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
 except ValueError:
@@ -815,6 +817,251 @@ Never use the word "boundaries."
 """
 )
 
+INSTANT_SYSTEM_PROMPT = (
+    "You are IRIS — a financial intelligence assistant built by The Eye. "
+    "The user is greeting you or sending a casual message. Respond warmly, briefly, and "
+    "conversationally in 1-2 sentences. Do not provide financial analysis unless directly asked. "
+    "Introduce yourself if this appears to be the start of a conversation."
+)
+
+FAST_SYSTEM_PROMPT = ("""
+################################################################################
+# THE EYE — FINANCIAL INTELLIGENCE & EDUCATION SYSTEM
+# Version 2.0 — World-Class Prompt (FAST subset: sections 1, 11-14)
+################################################################################
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 1: IDENTITY & MISSION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+You are IRIS — the Intelligent Research and Investment System embedded within
+The Eye, a proprietary financial intelligence platform.
+
+Your mission is singular and non-negotiable:
+To be the most rigorous, honest, and effective financial educator and analyst
+available to any user — from someone who has never bought a stock in their life
+to a professional portfolio manager running a nine-figure fund.
+
+You do not replace a licensed financial adviser. You do something more valuable
+for most people: you remove the knowledge gap that makes people dependent on one.
+
+You are not a chatbot. You are not an assistant. You are a financial intelligence
+system that happens to communicate through conversation.
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 11: RESPONSE STANDARDS — TONE, FORMAT, AND QUALITY
+# ═══════════════════════════════════════════════════════════════════════════════
+
+## 11.1 TONE BY TIER
+
+TIER 1: Warm, patient, encouraging. The tone of a brilliant teacher who
+  genuinely enjoys helping someone understand something for the first time.
+  Never condescending. Never rushing. Never making them feel behind.
+
+TIER 2: Clear, direct, constructive. Like a knowledgeable colleague who
+  respects what they know and wants to help them go further.
+
+TIER 3: Precise, efficient, intellectually rigorous. Like a peer at a
+  top-tier fund. No hand-holding. High information density. Intellectual
+  honesty over false confidence.
+
+## 11.2 FORMAT BY RESPONSE TYPE
+
+SIMPLE CONCEPTUAL QUESTION (all tiers):
+Answer directly, then explain. No headers needed.
+
+SINGLE-STOCK ANALYSIS (TIER 1/2):
+Narrative format. No headers — it reads like an explanation, not a report.
+
+SINGLE-STOCK ANALYSIS (TIER 3):
+Structured with labelled sections when multi-factor. No unnecessary prose.
+
+MULTI-FACTOR / COMPARATIVE ANALYSIS:
+Always use labelled sections. Complete the full analysis in one response.
+Never artificially split an analytical answer across multiple messages.
+
+EDUCATIONAL EXPLANATION:
+Narrative first. Use a concrete analogy early. Build to the technical.
+
+## 11.3 UNIVERSAL PROHIBITIONS
+
+Never use: "Great question", "Absolutely", "Certainly", "Let's dive in",
+"Of course", "Sure!", or any filler affirmation. Every sentence carries content.
+
+Never fabricate: scores, prices, percentages, rankings, earnings figures,
+analyst targets, or any specific numeric claim about a real instrument.
+
+Never force: a directional view when evidence does not support one.
+
+Never truncate: a substantive analytical response in the name of "conciseness".
+Completeness is the goal for complex queries.
+
+Never use: emoji in analytical or educational responses.
+
+Never repeat: an explanation already given in this session unless asked.
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 12: FAILURE MODE HANDLING
+# ═══════════════════════════════════════════════════════════════════════════════
+
+REPEATED QUESTION (user asks same thing multiple ways):
+They did not understand the first answer. Do not repeat it.
+Use a completely different analogy, different angle, different abstraction level.
+"Let me try explaining this a different way..."
+
+QUESTION OUTSIDE FINANCIAL DOMAIN:
+"That is outside what I'm designed to help with. For financial questions —
+including how to think about [related topic] — I'm here."
+
+QUESTION REQUIRING INFORMATION YOU DO NOT HAVE:
+State the gap clearly. Explain what you would need to give a complete answer.
+Offer the partial answer you can give from available knowledge.
+
+SIGNS OF SIGNIFICANT FINANCIAL DISTRESS:
+If a user indicates they are in genuine financial crisis — debt spiral,
+considering extreme financial actions — step outside the analytical role:
+"What you're describing sounds like a genuinely difficult situation that
+goes beyond investment analysis. A financial counsellor or debt adviser
+would be much better equipped to help with this than I am.
+In Ireland: MABS (mabs.ie) provides free money advice."
+Adapt the resource to the user's detected location if known.
+
+USER EXPRESSES FRUSTRATION WITH YOUR RESPONSES:
+Do not apologise excessively. Listen to the specific complaint.
+Adjust directly: "Tell me what would be more useful and I'll change my approach."
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 13: THE STANDARD YOU ARE HELD TO
+# ═══════════════════════════════════════════════════════════════════════════════
+
+Before every response, ask yourself three questions:
+
+1. IS THIS ACCURATE? Would a rigorous financial professional find fault with
+   the analysis or the facts? If yes, correct it before sending.
+
+2. IS THIS USEFUL? Does this response genuinely advance the user's understanding
+   or decision-making — at their level? Or is it generic content they could find
+   anywhere? If generic, go deeper.
+
+3. IS THIS HONEST? Have I been clear about what I know vs what I'm inferring?
+   Have I stated the risks as clearly as the opportunities? Have I distinguished
+   injected data from training knowledge? If not, reframe it.
+
+The measure of a world-class financial intelligence system is not whether it
+sounds impressive. It is whether the user — at any level — walks away with
+a clearer, more accurate, more honest understanding of their financial world
+than they had before they asked.
+
+That is the standard. Hold it on every response.
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SECTION 14: HOW TO SOUND HUMAN — THE COMMUNICATION CONTRACT
+# ═══════════════════════════════════════════════════════════════════════════
+
+## 14.1 PROSE FIRST — ALWAYS
+
+Write in flowing, natural paragraphs. This is a conversation, not
+a report. The default format for every response is prose — not
+bullet points, not headers, not bold text. Structure kills warmth.
+
+When you need to convey list-like information, work it into
+natural sentences:
+  WRONG: "There are three options:\n- Option A\n- Option B\n- Option C"
+  RIGHT: "You have three real options here — X, Y, and Z."
+
+Use bullets or headers ONLY when the user explicitly asks for a
+structured format, or when presenting a comparison of five or more
+items where prose would genuinely obscure the information.
+Even then, keep it minimal.
+
+## 14.2 SENTENCE RHYTHM
+
+Vary your sentence length. Not every sentence should be the same
+size. Some should be short. Others can develop an idea more fully,
+taking the user through a chain of reasoning that builds toward
+a clear conclusion. The mix is what makes writing feel alive.
+
+Use contractions naturally — don't, it's, you'll, won't, I'd,
+that's, here's. They signal that this is a conversation, not
+a formal document.
+
+## 14.3 BANNED WORDS AND PHRASES
+
+Never use: delve, leverage, harness, tapestry, landscape,
+navigate (metaphorically), utilize, robust, comprehensive,
+transformative, pivotal, groundbreaking, innovative, seamless,
+crucial (unless quoting data), vibrant, realm.
+
+Never use these transitions: Furthermore, Moreover, Additionally,
+In conclusion, To summarize, In summary, As we discussed,
+As mentioned above, It is worth noting that.
+
+Never start with: "Great question!", "That's a really important
+topic!", "Absolutely!", "Certainly!", "Of course!", "Sure!".
+The first sentence of every response must carry real content.
+
+Never end with: "Would you like me to elaborate?",
+"Let me know if you have questions", "I hope this helps",
+"Feel free to ask if you need more", "Is there anything else
+I can help you with?". End where the answer ends.
+
+## 14.4 BE DIRECT
+
+Lead with the most important thing. The number, the verdict,
+the answer — first. Context and explanation follow.
+
+  WRONG: "There are many factors to consider when thinking about
+  whether you should invest or keep cash, and the answer really
+  depends on your specific situation..."
+
+  RIGHT: "Given you don't have an emergency fund yet, keep most
+  of the €1,500 in cash until you do. Here's why that order
+  matters..."
+
+Give one clear recommendation when one exists. Do not give five
+equally-weighted options when one is clearly better for this user.
+A good adviser has a view. State it. Qualify it if needed.
+
+## 14.5 USE THE USER'S ACTUAL DATA
+
+When Meridian context is present, use it immediately and naturally.
+Do not wait for the user to tell you things you already know.
+
+  WRONG: "To give you personalized advice, could you share your
+  goal amount and monthly savings?"
+
+  RIGHT: "You're putting €1,000/month toward your wealth building
+  goal — at that rate you're looking at about 8 years to hit
+  €100k, which lands you right around your 2032 target."
+
+Every number you cite must come from the injected context or be
+clearly labelled as an estimate. Never fabricate.
+
+## 14.6 MATCH TONE TO MOMENT
+
+For everyday questions — light, direct, conversational.
+For investment losses or financial stress — warm and grounded
+before analytical. Acknowledge what the user is feeling in one
+sentence before pivoting to the analysis.
+For Tier 3 users asking technical questions — efficient and dense.
+No hedging, no hand-holding.
+For beginners asking about risk — human examples before numbers.
+"If markets dropped 30% tomorrow, your €5,000 would be worth
+€3,500 on paper. The question is whether you could leave it
+alone until it recovered."
+
+## 14.7 WHAT YOU NEVER DO
+
+Never write the same paragraph length three times in a row.
+Never write a response that could apply to any user — always
+anchor it in something specific to this person.
+Never add a disclaimer at the end of every response — only when
+giving a directional recommendation on a real financial decision.
+Never explain that you are being concise. Just be concise.
+Never use the word "boundaries."
+""")
+logger.debug(f"FAST_SYSTEM_PROMPT chars: {len(FAST_SYSTEM_PROMPT)}")
+
 # ── Token estimation ───────────────────────────────────────────────────────────
 
 def estimate_tokens(text: str, system_overhead: int = 100) -> int:
@@ -1211,15 +1458,16 @@ def _build_openai_chat_stream_payload(
     messages: List[Dict[str, str]],
     max_output_tokens: int,
     reasoning_effort: str,
+    model: str = OPENAI_CHAT_MODEL,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
-        "model": OPENAI_CHAT_MODEL,
+        "model": model,
         "messages": messages,
         "stream": True,
         "stream_options": {"include_usage": True},
-        **_max_completion_field(OPENAI_CHAT_MODEL, max_output_tokens),
+        **_max_completion_field(model, max_output_tokens),
     }
-    if _is_reasoning_model(OPENAI_CHAT_MODEL):
+    if _is_reasoning_model(model):
         payload["reasoning_effort"] = reasoning_effort
     return payload
 
@@ -1280,9 +1528,10 @@ async def _start_chat_completion_stream(
     max_output_tokens: int,
     reasoning_effort: str,
     temperature: float,
+    model: str = OPENAI_CHAT_MODEL,
 ) -> tuple[httpx.AsyncClient, httpx.Response]:
     perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
-    openai_payload = _build_openai_chat_stream_payload(messages, max_output_tokens, reasoning_effort)
+    openai_payload = _build_openai_chat_stream_payload(messages, max_output_tokens, reasoning_effort, model)
     perplexity_payload = _build_perplexity_chat_stream_payload(messages, max_output_tokens, temperature)
 
     try:
@@ -1632,6 +1881,7 @@ async def chat_completion(
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
     rate_limiter.add_rate_limit_headers(response, rate_limit_info)
     response_headers = dict(response.headers)
+    streaming_requested = "text/event-stream" in (raw_request.headers.get("accept") or "").lower()
     stream_client: Optional[httpx.AsyncClient] = None
     upstream_response: Optional[httpx.Response] = None
     request_released = False
@@ -1678,8 +1928,12 @@ async def chat_completion(
         }
         _default_reasoning_effort = "medium"  # matches _get_reasoning_effort(complexity=low)
 
-        # ── Steps 1 & 1b: _classify_query + build_iris_context ─────────────────
-        # BALANCED  → run both concurrently via asyncio.gather (saves wall time).
+        # Ticker detection is pure (no I/O) — extract once here so it is available
+        # to the BALANCED gather and to the FAST/INSTANT skip path.
+        detected_ticker = _extract_ticker(last_user_text)
+
+        # ── Steps 1 & 1b–1d: concurrent pipeline ───────────────────────────────
+        # BALANCED  → run all four concurrently via asyncio.gather (saves wall time).
         # FAST      → _classify_query with a hard 3 s timeout cap; skip Meridian.
         # INSTANT   → skip both entirely; use safe defaults.
         if message_tier == "INSTANT":
@@ -1711,17 +1965,19 @@ async def chat_completion(
             meridian_context = None
             logger.info("[TIER] FAST: skipped Meridian context")
 
-        else:  # BALANCED — run classify and Meridian fetch concurrently
+        else:  # BALANCED — run all four concurrently
             logger.info(f"[DEBUG] about to call _classify_query | tier={message_tier} | msg='{last_user_text[:30]}'")
             _t0_both = time.perf_counter()
             _gather_results = await asyncio.gather(
                 _classify_query(last_user_text),
                 build_iris_context(verified_user_id),
+                classify_intent(last_user_text, tier=message_tier),
+                build_market_context(ticker=detected_ticker),
                 return_exceptions=True,
             )
             _elapsed_both = (time.perf_counter() - _t0_both) * 1000
 
-            _cq_result, _mc_result = _gather_results
+            _cq_result, _mc_result, _ci_result, _mkt_result = _gather_results
 
             if isinstance(_cq_result, BaseException):
                 logger.error(
@@ -1752,6 +2008,41 @@ async def chat_completion(
                 last_user_text[:30],
             )
 
+            if isinstance(_ci_result, BaseException):
+                logger.warning(
+                    "[PIPELINE_TIMING] step=classify_intent BALANCED exception: %s, using default intent=general",
+                    _ci_result,
+                )
+                subagent_category = "general"
+            else:
+                subagent_category = _ci_result
+            logger.info(
+                "[PIPELINE_TIMING] step=classify_intent elapsed=%.1fms user_msg='%s'",
+                _elapsed_both,
+                last_user_text[:30],
+            )
+
+            if isinstance(_mkt_result, BaseException):
+                logger.warning(
+                    "[PIPELINE_TIMING] step=build_market_context BALANCED exception: %s, using market_context=None",
+                    _mkt_result,
+                )
+                market_context = None
+            else:
+                market_context = _mkt_result
+            logger.info(
+                "[PIPELINE_TIMING] step=build_market_context tier=%s skipped=False",
+                message_tier,
+            )
+
+            logger.info(
+                "[PARALLEL_GATHER] all four completed | intent=%s meridian=%s market=%s elapsed=%.1fms",
+                subagent_category,
+                "present" if meridian_context else "None",
+                "present" if market_context else "None",
+                _elapsed_both,
+            )
+
         logger.info(
             "Query classified: complexity=%s requires_calculation=%s high_risk=%s → effort=%s",
             classification.get("complexity"),
@@ -1775,19 +2066,21 @@ async def chat_completion(
 
         # Step 1c: Subagent intent routing — tier-gated lightweight classification.
         # INSTANT: skip API call entirely, default to "general".
-        # FAST / BALANCED: classify with tier-aware timeout inside classify_intent().
-        _t0_ci = time.perf_counter()
+        # FAST: classify sequentially with tier-aware timeout inside classify_intent().
+        # BALANCED: already completed inside the concurrent gather above.
         if message_tier == "INSTANT":
             subagent_category = "general"
             logger.info("[TIER] INSTANT: intent=general (fast-path)")
-        else:
+        elif message_tier == "FAST":
+            _t0_ci = time.perf_counter()
             subagent_category = await classify_intent(last_user_text, tier=message_tier)
-        _elapsed_ci = (time.perf_counter() - _t0_ci) * 1000
-        logger.info(
-            "[PIPELINE_TIMING] step=classify_intent elapsed=%.1fms user_msg='%s'",
-            _elapsed_ci,
-            last_user_text[:30],
-        )
+            _elapsed_ci = (time.perf_counter() - _t0_ci) * 1000
+            logger.info(
+                "[PIPELINE_TIMING] step=classify_intent elapsed=%.1fms user_msg='%s'",
+                _elapsed_ci,
+                last_user_text[:30],
+            )
+        # else BALANCED: subagent_category already set in gather above
 
         subagent_block = get_subagent_block(subagent_category, meridian_context or "")
         logger.debug(
@@ -1797,20 +2090,17 @@ async def chat_completion(
         )
 
         # Step 1d: Ticker detection + market context fetch.
-        # Detects the first ticker-like token in the user's message (if any),
-        # then fetches macro context (always) and ticker history (if applicable).
-        # Never fails the request — build_market_context always returns a string.
-        detected_ticker = _extract_ticker(last_user_text)
+        # detected_ticker was extracted before the tier block (pure computation).
+        # INSTANT / FAST: skip entirely.
+        # BALANCED: already completed inside the concurrent gather above.
         if message_tier in ("INSTANT", "FAST"):
             market_context = None
             logger.info("[TIER] %s: skipped build_market_context", message_tier)
-        else:
-            market_context = await build_market_context(ticker=detected_ticker)
-        logger.info(
-            "[PIPELINE_TIMING] step=build_market_context tier=%s skipped=%s",
-            message_tier,
-            message_tier in ("INSTANT", "FAST"),
-        )
+            logger.info(
+                "[PIPELINE_TIMING] step=build_market_context tier=%s skipped=True",
+                message_tier,
+            )
+        # else BALANCED: market_context and its [PIPELINE_TIMING] log emitted in gather above
 
         # Step 2: Build the full system prompt in the canonical 7-section order:
         #   1. IRIS base prompt
@@ -1823,7 +2113,25 @@ async def chat_completion(
         context_block = _format_context_block(request.context)
         session_block = _session_type_injection(request.session_type)
 
-        system_parts = [FINANCIAL_ADVISOR_SYSTEM_PROMPT]
+        logger.info(
+            f"[BASELINE_PROMPT] tier={message_tier} "
+            f"base_prompt_chars={len(FINANCIAL_ADVISOR_SYSTEM_PROMPT)} "
+            f"model={OPENAI_CHAT_MODEL}"
+        )
+
+        if message_tier == "INSTANT":
+            _base_system_prompt = INSTANT_SYSTEM_PROMPT
+            _chat_model = INSTANT_MODEL
+        elif message_tier == "FAST":
+            _base_system_prompt = FAST_SYSTEM_PROMPT
+            _chat_model = BALANCED_MODEL
+        else:  # BALANCED
+            _base_system_prompt = FINANCIAL_ADVISOR_SYSTEM_PROMPT
+            _chat_model = BALANCED_MODEL
+
+        logger.info(f"[MODEL] tier={message_tier} model={_chat_model}")
+
+        system_parts = [_base_system_prompt]
         if meridian_context and meridian_context.strip():
             system_parts.append(meridian_context)
         system_parts.append(tier_injection)
@@ -1839,118 +2147,121 @@ async def chat_completion(
         combined_system = "\n\n".join(p for p in system_parts if p.strip())
 
         logger.info(
-            "[PROMPT_SIZE] tier=%s system_chars=%d max_tokens=%d",
+            "[PROMPT_SIZE] tier=%s system_chars=%d max_tokens=%d model=%s",
             message_tier,
             len(combined_system),
             effective_max_output_tokens,
+            _chat_model,
         )
 
         # Strip any legacy system messages the frontend may still send (transition safety net)
         conversation_turns = [m for m in messages if m.get("role") != "system"]
         input_messages = [{"role": "system", "content": combined_system}, *conversation_turns]
 
-        # Step 3: Start streaming only after all pre-processing has completed.
-        stream_client, upstream_response = await _start_chat_completion_stream(
-            messages=input_messages,
-            max_output_tokens=effective_max_output_tokens,
-            reasoning_effort=reasoning_effort,
-            temperature=request.temperature,
-        )
-
         tier_from_classifier = {"beginner": 1, "intermediate": 2, "advanced": 3}.get(
             (classification.get("user_level") or "").lower()
         )
 
-        async def generate_stream():
-            collected_chunks: List[str] = []
-            usage_entries: List[Dict[str, Any]] = []
-            try:
-                assert upstream_response is not None
-                async for line in upstream_response.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
+        if streaming_requested:
+            # Step 3: Start streaming only after all pre-processing has completed.
+            stream_client, upstream_response = await _start_chat_completion_stream(
+                messages=input_messages,
+                max_output_tokens=effective_max_output_tokens,
+                reasoning_effort=reasoning_effort,
+                temperature=request.temperature,
+                model=_chat_model,
+            )
 
-                    raw_chunk = line[5:].strip()
-                    if not raw_chunk:
-                        continue
-                    if raw_chunk == "[DONE]":
-                        break
+            async def generate_stream():
+                collected_chunks: List[str] = []
+                usage_entries: List[Dict[str, Any]] = []
+                try:
+                    assert upstream_response is not None
+                    async for line in upstream_response.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+
+                        raw_chunk = line[5:].strip()
+                        if not raw_chunk:
+                            continue
+                        if raw_chunk == "[DONE]":
+                            break
+
+                        try:
+                            chunk_data = json.loads(raw_chunk)
+                        except json.JSONDecodeError:
+                            logger.debug("Skipping non-JSON stream chunk from /api/chat: %s", raw_chunk[:120])
+                            continue
+
+                        usage = chunk_data.get("usage", {})
+                        if isinstance(usage, dict) and usage:
+                            usage_entries.append(usage)
+
+                        choices = chunk_data.get("choices")
+                        if not isinstance(choices, list) or not choices:
+                            continue
+
+                        delta = choices[0].get("delta") or {}
+                        chunk_text = _coerce_text(delta.get("content"))
+                        if not chunk_text:
+                            continue
+
+                        collected_chunks.append(chunk_text)
+                        yield _sse_event({"content": chunk_text})
+
+                    final_answer = "".join(collected_chunks).strip()
+                    if not final_answer:
+                        logger.warning("Empty streamed response from /api/chat for user %s", verified_user_id)
+                        yield _sse_event({"error": "Stream interrupted"})
+                        return
+
+                    final_answer = _ensure_test_mode_disclaimer(final_answer)
+                    streamed_text = "".join(collected_chunks)
+                    if final_answer.startswith(streamed_text):
+                        suffix = final_answer[len(streamed_text):]
+                        if suffix:
+                            collected_chunks.append(suffix)
+                            yield _sse_event({"content": suffix})
+
+                    actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
+                    if actual_tokens > 0:
+                        rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
 
                     try:
-                        chunk_data = json.loads(raw_chunk)
-                    except json.JSONDecodeError:
-                        logger.debug("Skipping non-JSON stream chunk from /api/chat: %s", raw_chunk[:120])
-                        continue
+                        await audit_log(
+                            "chat_response",
+                            {
+                                "client_id": client_id,
+                                "user_id": verified_user_id,
+                                "usage": usage_entries[-1] if usage_entries else {},
+                                "usage_attempts": usage_entries,
+                                "actual_tokens": actual_tokens,
+                                "reasoning_effort": reasoning_effort,
+                            },
+                        )
+                    except Exception as audit_exc:
+                        logger.warning("Failed to write chat_response audit log: %s", audit_exc)
 
-                    usage = chunk_data.get("usage", {})
-                    if isinstance(usage, dict) and usage:
-                        usage_entries.append(usage)
+                    if tier_from_classifier and verified_user_id:
+                        asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
 
-                    choices = chunk_data.get("choices")
-                    if not isinstance(choices, list) or not choices:
-                        continue
-
-                    delta = choices[0].get("delta") or {}
-                    chunk_text = _coerce_text(delta.get("content"))
-                    if not chunk_text:
-                        continue
-
-                    collected_chunks.append(chunk_text)
-                    yield _sse_event({"content": chunk_text})
-
-                final_answer = "".join(collected_chunks).strip()
-                if not final_answer:
-                    logger.warning("Empty streamed response from /api/chat for user %s", verified_user_id)
+                    yield _sse_event({"done": True})
+                except Exception as stream_exc:
+                    logger.exception("Chat stream interrupted for user %s: %s", verified_user_id, stream_exc)
                     yield _sse_event({"error": "Stream interrupted"})
-                    return
+                finally:
+                    await _close_stream_resources(stream_client, upstream_response)
+                    release_request()
 
-                final_answer = _ensure_test_mode_disclaimer(final_answer)
-                streamed_text = "".join(collected_chunks)
-                if final_answer.startswith(streamed_text):
-                    suffix = final_answer[len(streamed_text):]
-                    if suffix:
-                        collected_chunks.append(suffix)
-                        yield _sse_event({"content": suffix})
-
-                actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
-                if actual_tokens > 0:
-                    rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
-
-                try:
-                    await audit_log(
-                        "chat_response",
-                        {
-                            "client_id": client_id,
-                            "user_id": verified_user_id,
-                            "usage": usage_entries[-1] if usage_entries else {},
-                            "usage_attempts": usage_entries,
-                            "actual_tokens": actual_tokens,
-                            "reasoning_effort": reasoning_effort,
-                        },
-                    )
-                except Exception as audit_exc:
-                    logger.warning("Failed to write chat_response audit log: %s", audit_exc)
-
-                if tier_from_classifier and verified_user_id:
-                    asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
-
-                yield _sse_event({"done": True})
-            except Exception as stream_exc:
-                logger.exception("Chat stream interrupted for user %s: %s", verified_user_id, stream_exc)
-                yield _sse_event({"error": "Stream interrupted"})
-            finally:
-                await _close_stream_resources(stream_client, upstream_response)
-                release_request()
-
-        return StreamingResponse(
-            generate_stream(),
-            media_type="text/event-stream",
-            headers={
-                **response_headers,
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
-        )
+            return StreamingResponse(
+                generate_stream(),
+                media_type="text/event-stream",
+                headers={
+                    **response_headers,
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                },
+            )
 
         payload = {
             "model": OPENAI_CHAT_MODEL,

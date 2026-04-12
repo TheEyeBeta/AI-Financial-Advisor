@@ -12,6 +12,7 @@ import pytest
 from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
+from app.services.auth import DEV_BYPASS_USER_ID
 from app.services.rate_limit import rate_limiter
 
 
@@ -147,8 +148,7 @@ async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
 
     # 2) Query "iris_context_cache" (our mock store) for correct structure
     stored = getattr(mock_supabase, "_stored_iris_cache", {})
-    # With AUTH_REQUIRED=false, user_id is "dev-mode-bypass"
-    user_id = "dev-mode-bypass"
+    user_id = DEV_BYPASS_USER_ID
     assert user_id in stored, "iris_context_cache should contain a row for the onboarded user"
     row = stored[user_id]
     assert "profile_summary" in row
