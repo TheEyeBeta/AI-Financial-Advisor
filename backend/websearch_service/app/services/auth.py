@@ -36,6 +36,8 @@ SUPABASE_ANON_KEY_ENV = "SUPABASE_ANON_KEY"
 AUTH_REQUIRED_ENV = "AUTH_REQUIRED"
 ENVIRONMENT_ENV = "ENVIRONMENT"
 PRODUCTION_ENV = "production"
+# Real UUID for dev-bypass so Meridian cache reads work locally (never used in production).
+DEV_BYPASS_USER_ID = "43245b18-2feb-49a4-9958-44fa5c17881e"
 HMAC_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 ASYMMETRIC_JWT_ALGORITHMS = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "EDDSA"})
 
@@ -406,12 +408,12 @@ async def require_auth(request: Request) -> AuthenticatedUser:
     Do NOT trust `user_id` fields in request bodies — use `user.auth_id` instead.
     """
     if not _auth_required():
-        # Dev-mode bypass — return a placeholder user so the app still works locally.
+        # Dev-mode bypass — return a real UUID so Meridian cache reads work locally.
         logger.warning(
             "AUTH_REQUIRED=false — authentication is DISABLED. "
             "This must never be set in production."
         )
-        return AuthenticatedUser(auth_id="dev-mode-bypass")
+        return AuthenticatedUser(auth_id=DEV_BYPASS_USER_ID)
 
     token = _extract_bearer_token(request)
     if not token:
@@ -459,7 +461,7 @@ async def require_websocket_auth(websocket: WebSocket) -> AuthenticatedUser:
             "AUTH_REQUIRED=false — websocket authentication is DISABLED. "
             "This must never be set in production."
         )
-        return AuthenticatedUser(auth_id="dev-mode-bypass")
+        return AuthenticatedUser(auth_id=DEV_BYPASS_USER_ID)
 
     token = _extract_websocket_token(websocket)
     if not token:

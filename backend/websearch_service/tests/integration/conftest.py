@@ -45,8 +45,17 @@ skip_if_no_test_db = pytest.mark.skipif(
     reason="Supabase test credentials not configured (placeholder values in .env.test)",
 )
 
-# Apply the marker to every test in this package automatically
-pytestmark = skip_if_no_test_db
+def pytest_collection_modifyitems(config, items):
+    """Skip integration tests at collection time when test Supabase creds are placeholders."""
+    del config
+    if _HAS_REAL_DB:
+        return
+
+    integration_root = Path(__file__).resolve().parent
+    for item in items:
+        item_path = Path(str(item.fspath)).resolve()
+        if integration_root in item_path.parents:
+            item.add_marker(skip_if_no_test_db)
 
 
 # ---------------------------------------------------------------------------

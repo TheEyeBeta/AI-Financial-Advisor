@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -1079,6 +1080,8 @@ def _update_knowledge_tier_sync(user_id: str, tier: int) -> None:
 async def update_knowledge_tier(user_id: str, tier: int) -> None:
     """Async wrapper for tier persistence. Never raises."""
     if not user_id or tier not in (1, 2, 3):
+        return
+    if os.getenv("ENVIRONMENT", "").lower() == "test":
         return
     try:
         await asyncio.to_thread(_update_knowledge_tier_sync, user_id, tier)

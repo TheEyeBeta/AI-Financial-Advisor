@@ -250,20 +250,22 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
 
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(
-        side_effect=[classifier_response, subagent_classifier_response, exhausted_response, retry_response]
+        side_effect=[classifier_response, exhausted_response, retry_response]
     )
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
 
-    with patch("httpx.AsyncClient", return_value=mock_client):
+    with patch("app.routes.ai_proxy.classify_tier", return_value="FAST"), \
+         patch("app.routes.ai_proxy.classify_intent", new=AsyncMock(return_value="general")), \
+         patch("httpx.AsyncClient", return_value=mock_client):
         response = client.post("/api/chat", json={"message": "Hello", "max_tokens": 700})
         assert response.status_code == 200
         assert response.json()["response"] == "Recovered answer after retry."
 
         call_args = mock_client.post.await_args_list
-        # [0] complexity classifier, [1] subagent intent classifier, [2] first chat, [3] retry
-        first_chat_payload = call_args[2].kwargs["json"]
-        retry_chat_payload = call_args[3].kwargs["json"]
+        # [0] complexity classifier, [1] first chat, [2] retry
+        first_chat_payload = call_args[1].kwargs["json"]
+        retry_chat_payload = call_args[2].kwargs["json"]
         assert first_chat_payload["max_output_tokens"] == 8000
         assert retry_chat_payload["reasoning"]["effort"] == "low"
         assert retry_chat_payload["max_output_tokens"] == 8000
