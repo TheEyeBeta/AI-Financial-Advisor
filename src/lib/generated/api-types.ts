@@ -116,6 +116,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/meridian/refresh-context": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Meridian Refresh Context
+         * @description Refresh the IRIS context cache for the authenticated user.
+         */
+        post: operations["meridian_refresh_context_api_meridian_refresh_context_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/meridian/refresh-all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Meridian Refresh All
+         * @description Daily cron endpoint: refreshes ai.iris_context_cache for ALL users.
+         *     In production this requires a Supabase service-role JWT.
+         *     Non-production keeps the legacy shared-secret fallback so local schedulers
+         *     and smoke tests can still exercise the path without minting a JWT.
+         *
+         *     Schedule: 0 2 * * * (daily at 02:00 UTC)
+         */
+        post: operations["meridian_refresh_all_api_meridian_refresh_all_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/chat": {
         parameters: {
             query?: never;
@@ -290,9 +335,40 @@ export interface paths {
         };
         /**
          * Get Stock Ranking
-         * @description Return stocks ranked by composite score (0-100).
+         * @description Return the pre-computed top stocks from market.trending_stocks.
+         *
+         *     Scores are refreshed once daily at 01:00 UTC by the background ranking
+         *     engine.  `data_age_hours` tells you how fresh the data is.
+         *
+         *     Filters:
+         *     - `min_score`: only return stocks with composite_score >= this value
+         *     - `rank_tier`: only return stocks matching this tier label
          */
         get: operations["get_stock_ranking_api_stocks_ranking_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/stocks/detail/{ticker}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Stock Detail
+         * @description Return live snapshot data for a single ticker from market.stock_snapshots,
+         *     combined with the most recent balanced-horizon ranking row.
+         *
+         *     Returns 404 if the ticker is not found in stock_snapshots.
+         *     Returns ranking: null if no ranking history exists for the ticker.
+         */
+        get: operations["get_stock_detail_api_stocks_detail__ticker__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -335,6 +411,46 @@ export interface paths {
         get: operations["dataapi_query_api_admin_dataapi_query_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trigger-ranking": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Ranking
+         * @description Manually trigger a ranking cycle in the background and return immediately.
+         */
+        post: operations["trigger_ranking_api_admin_trigger_ranking_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trigger-memory-scan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Memory Scan
+         * @description Manually trigger a full history memory scan in the background and return immediately.
+         */
+        post: operations["trigger_memory_scan_api_admin_trigger_memory_scan_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -412,11 +528,39 @@ export interface components {
             max_tokens: number;
             /** Experience Level */
             experience_level?: string | null;
+            context?: components["schemas"]["ContextBlock"] | null;
+            /**
+             * Session Type
+             * @default advisor
+             */
+            session_type: string | null;
         };
         /** ChatTitleRequest */
         ChatTitleRequest: {
             /** First Message */
             first_message: string;
+        };
+        /**
+         * ContextBlock
+         * @description Raw context data sent by the frontend; the backend formats it into the system prompt.
+         */
+        ContextBlock: {
+            /** Market Data */
+            market_data?: {
+                [key: string]: unknown;
+            } | null;
+            /** News */
+            news?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Search Results */
+            search_results?: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Stock Snapshot */
+            stock_snapshot?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * EngineStatus
@@ -521,6 +665,29 @@ export interface components {
              */
             news_count: number;
         };
+        /** FundamentalsData */
+        FundamentalsData: {
+            /** Pe Ratio */
+            pe_ratio?: number | null;
+            /** Forward Pe */
+            forward_pe?: number | null;
+            /** Peg Ratio */
+            peg_ratio?: number | null;
+            /** Price To Book */
+            price_to_book?: number | null;
+            /** Price To Sales */
+            price_to_sales?: number | null;
+            /** Eps */
+            eps?: number | null;
+            /** Eps Growth */
+            eps_growth?: number | null;
+            /** Revenue Growth */
+            revenue_growth?: number | null;
+            /** Dividend Yield */
+            dividend_yield?: number | null;
+            /** Market Cap */
+            market_cap?: number | null;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -528,7 +695,7 @@ export interface components {
         };
         /**
          * MeridianOnboardRequest
-         * @description POST /api/meridian/onboard -- all optional except goal_name and target_amount.
+         * @description POST /api/meridian/onboard — all optional except goal_name and target_amount.
          */
         MeridianOnboardRequest: {
             /** Knowledge Tier */
@@ -547,6 +714,11 @@ export interface components {
             target_amount: number;
             /** Target Date */
             target_date?: string | null;
+        };
+        /** MeridianRefreshRequest */
+        MeridianRefreshRequest: {
+            /** User Id */
+            user_id: string;
         };
         /** Message */
         Message: {
@@ -581,10 +753,28 @@ export interface components {
                 [key: string]: number;
             };
         };
+        /** RankingData */
+        RankingData: {
+            /** Composite Score */
+            composite_score?: number | null;
+            /** Smoothed Score */
+            smoothed_score?: number | null;
+            /** Rank Tier */
+            rank_tier?: string | null;
+            /** Conviction */
+            conviction?: string | null;
+            /**
+             * Dimension Scores
+             * @default {}
+             */
+            dimension_scores: {
+                [key: string]: unknown;
+            };
+        };
         /** RankingResponse */
         RankingResponse: {
             /** Stocks */
-            stocks: components["schemas"]["StockScore"][];
+            stocks: components["schemas"]["TrendingStock"][];
             /** Total */
             total: number;
             /** Last Ranked At */
@@ -592,21 +782,66 @@ export interface components {
             /** Data Age Hours */
             data_age_hours?: number | null;
         };
-        /**
-         * ScoreBreakdown
-         * @description Detailed metric-level breakdown surfaced in the UI.
-         */
-        ScoreBreakdown: {
+        /** SignalsData */
+        SignalsData: {
+            /** Is Bullish */
+            is_bullish?: boolean | null;
+            /** Is Oversold */
+            is_oversold?: boolean | null;
+            /** Is Overbought */
+            is_overbought?: boolean | null;
+            /** Latest Signal */
+            latest_signal?: string | null;
+            /** Signal Strategy */
+            signal_strategy?: string | null;
+            /** Signal Confidence */
+            signal_confidence?: number | null;
+        };
+        /** StockDetailResponse */
+        StockDetailResponse: {
+            /** Ticker */
+            ticker: string;
+            /** Company Name */
+            company_name?: string | null;
+            /** Last Price */
+            last_price?: number | null;
+            /** Price Change Pct */
+            price_change_pct?: number | null;
+            /** High 52W */
+            high_52w?: number | null;
+            /** Low 52W */
+            low_52w?: number | null;
+            /** Volume */
+            volume?: number | null;
+            /** Avg Volume 10D */
+            avg_volume_10d?: number | null;
+            /** Volume Ratio */
+            volume_ratio?: number | null;
+            /** Price Vs Sma 50 */
+            price_vs_sma_50?: number | null;
+            /** Price Vs Sma 200 */
+            price_vs_sma_200?: number | null;
+            /** High 52W Position */
+            high_52w_position?: number | null;
+            technicals: components["schemas"]["TechnicalIndicators"];
+            fundamentals: components["schemas"]["FundamentalsData"];
+            signals: components["schemas"]["SignalsData"];
+            ranking?: components["schemas"]["RankingData"] | null;
+        };
+        /** TechnicalIndicators */
+        TechnicalIndicators: {
             /** Rsi 14 */
             rsi_14?: number | null;
             /** Rsi 9 */
             rsi_9?: number | null;
-            /** Macd Above Signal */
-            macd_above_signal?: boolean | null;
+            /** Macd */
+            macd?: number | null;
+            /** Macd Signal */
+            macd_signal?: number | null;
             /** Macd Histogram */
             macd_histogram?: number | null;
-            /** Golden Cross */
-            golden_cross?: boolean | null;
+            /** Macd Above Signal */
+            macd_above_signal?: boolean | null;
             /** Adx */
             adx?: number | null;
             /** Stochastic K */
@@ -617,85 +852,14 @@ export interface components {
             williams_r?: number | null;
             /** Cci */
             cci?: number | null;
+            /** Bollinger Upper */
+            bollinger_upper?: number | null;
+            /** Bollinger Lower */
+            bollinger_lower?: number | null;
             /** Bollinger Position */
             bollinger_position?: number | null;
-            /** Volume Ratio */
-            volume_ratio?: number | null;
-            /** Price Vs Sma 50 */
-            price_vs_sma_50?: number | null;
-            /** Price Vs Sma 200 */
-            price_vs_sma_200?: number | null;
-            /** Price Vs Ema 50 */
-            price_vs_ema_50?: number | null;
-            /** Fifty Two Week Position */
-            fifty_two_week_position?: number | null;
-            /** Pe Ratio */
-            pe_ratio?: number | null;
-            /** Forward Pe */
-            forward_pe?: number | null;
-            /** Peg Ratio */
-            peg_ratio?: number | null;
-            /** Price To Book */
-            price_to_book?: number | null;
-            /** Price To Sales */
-            price_to_sales?: number | null;
-            /** Eps */
-            eps?: number | null;
-            /** Eps Growth */
-            eps_growth?: number | null;
-            /** Revenue Growth */
-            revenue_growth?: number | null;
-            /** Dividend Yield */
-            dividend_yield?: number | null;
-            /** Market Cap */
-            market_cap?: number | null;
-            /** Signal Confidence */
-            signal_confidence?: number | null;
-            /** Is Bullish */
-            is_bullish?: boolean | null;
-            /** Signal Strategy */
-            signal_strategy?: string | null;
-        };
-        /** StockScore */
-        StockScore: {
-            /** Ticker */
-            ticker: string;
-            /** Symbol */
-            symbol?: string | null;
-            /** Name */
-            name?: string | null;
-            /** Change Percent */
-            change_percent?: number | null;
-            /** Updated At */
-            updated_at?: string | null;
-            /** Composite Score */
-            composite_score: number;
-            /** Momentum Score */
-            momentum_score?: number | null;
-            /** Technical Score */
-            technical_score?: number | null;
-            /** Fundamental Score */
-            fundamental_score?: number | null;
-            /** Consistency Score */
-            consistency_score?: number | null;
-            /** Signal Score */
-            signal_score?: number | null;
-            /** Momentum 1M */
-            momentum_1m?: number | null;
-            /** Momentum 3M */
-            momentum_3m?: number | null;
-            /** Momentum 6M */
-            momentum_6m?: number | null;
-            /** Momentum 12M */
-            momentum_12m?: number | null;
-            /** Fundamental Trend */
-            fundamental_trend?: string | null;
-            /** Rank Tier */
-            rank_tier?: string | null;
-            /** Conviction */
-            conviction?: string | null;
-            /** Ranked At */
-            ranked_at?: string | null;
+            /** Golden Cross */
+            golden_cross?: boolean | null;
         };
         /**
          * TickerSnapshot
@@ -759,6 +923,55 @@ export interface components {
             /** Price At Signal */
             price_at_signal?: number | null;
         };
+        /** TrendingStock */
+        TrendingStock: {
+            /** Ticker */
+            ticker: string;
+            /** Symbol */
+            symbol?: string | null;
+            /** Name */
+            name?: string | null;
+            /** Change Percent */
+            change_percent?: number | null;
+            /** Composite Score */
+            composite_score: number;
+            /** Trend Score */
+            trend_score?: number | null;
+            /** Momentum Score */
+            momentum_score?: number | null;
+            /** Volume Score */
+            volume_score?: number | null;
+            /** Range Score */
+            range_score?: number | null;
+            /** Adx Score */
+            adx_score?: number | null;
+            /** Technical Score */
+            technical_score?: number | null;
+            /** Fundamental Score */
+            fundamental_score?: number | null;
+            /** Consistency Score */
+            consistency_score?: number | null;
+            /** Signal Score */
+            signal_score?: number | null;
+            /** Momentum 1M */
+            momentum_1m?: number | null;
+            /** Momentum 3M */
+            momentum_3m?: number | null;
+            /** Momentum 6M */
+            momentum_6m?: number | null;
+            /** Momentum 12M */
+            momentum_12m?: number | null;
+            /** Fundamental Trend */
+            fundamental_trend?: string | null;
+            /** Rank Tier */
+            rank_tier?: string | null;
+            /** Conviction */
+            conviction?: string | null;
+            /** Ranked At */
+            ranked_at?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -767,6 +980,10 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+            /** Input */
+            input?: unknown;
+            /** Context */
+            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -815,7 +1032,7 @@ export interface operations {
                 };
                 content: {
                     "application/json": {
-                        [key: string]: string | number;
+                        [key: string]: unknown;
                     };
                 };
             };
@@ -936,6 +1153,63 @@ export interface operations {
             };
         };
     };
+    meridian_refresh_context_api_meridian_refresh_context_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MeridianRefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    meridian_refresh_all_api_meridian_refresh_all_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     chat_completion_api_chat_post: {
         parameters: {
             query?: never;
@@ -955,9 +1229,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -1228,10 +1500,12 @@ export interface operations {
     get_stock_ranking_api_stocks_ranking_get: {
         parameters: {
             query?: {
-                /** @description Top N stocks to return */
+                /** @description Number of top stocks to return (max 50) */
                 limit?: number;
-                /** @description Minimum composite score filter */
+                /** @description Minimum composite_score filter */
                 min_score?: number;
+                /** @description Filter by rank tier: 'Strong Buy', 'Buy', 'Hold', 'Underperform', 'Sell' */
+                rank_tier?: string | null;
             };
             header?: never;
             path?: never;
@@ -1246,6 +1520,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RankingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_stock_detail_api_stocks_detail__ticker__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticker: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StockDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -1311,6 +1616,50 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_ranking_api_admin_trigger_ranking_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    trigger_memory_scan_api_admin_trigger_memory_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

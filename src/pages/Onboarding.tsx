@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useAuth } from "@/hooks/use-auth";
-import { supabase, coreDb, meridianDb } from "@/lib/supabase";
+import { coreDb, meridianDb } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { academyApi, TIER_IDS } from "@/services/academy-api";

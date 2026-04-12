@@ -24,7 +24,7 @@ from ..services.meridian_context import (
     update_knowledge_tier,
 )
 from ..services.market_context import build_market_context
-from ..services.subagents import classify_intent, get_subagent_block
+from ..services.subagents import classify_intent, classify_tier, get_subagent_block
 
 logger = logging.getLogger(__name__)
 
@@ -1660,9 +1660,97 @@ async def chat_completion(
         user_messages = [m for m in messages if m.get("role") == "user"]
         last_user_text = user_messages[-1]["content"] if user_messages else ""
 
-        # Step 1: Classify query complexity (low reasoning effort)
-        classification = await _classify_query(last_user_text)
-        reasoning_effort = _get_reasoning_effort(classification)
+        # Tier detection — zero I/O, drives all subsequent gating decisions.
+        message_tier = classify_tier(last_user_text)
+        logger.info(
+            "[TIER] tier=%s msg_len=%d msg='%s'",
+            message_tier,
+            len(last_user_text),
+            last_user_text[:40],
+        )
+
+        # Fallback values used when expensive steps are skipped.
+        _default_classification: Dict[str, Any] = {
+            "complexity": "low",
+            "requires_calculation": False,
+            "high_risk_decision": False,
+            "user_level": "beginner",
+        }
+        _default_reasoning_effort = "medium"  # matches _get_reasoning_effort(complexity=low)
+
+        # ── Steps 1 & 1b: _classify_query + build_iris_context ─────────────────
+        # BALANCED  → run both concurrently via asyncio.gather (saves wall time).
+        # FAST      → _classify_query with a hard 3 s timeout cap; skip Meridian.
+        # INSTANT   → skip both entirely; use safe defaults.
+        if message_tier == "INSTANT":
+            logger.info("[TIER] INSTANT: skipped _classify_query")
+            classification: Dict[str, Any] = _default_classification
+            reasoning_effort = _default_reasoning_effort
+            meridian_context: Optional[str] = None
+            logger.info("[TIER] INSTANT: skipped Meridian context")
+
+        elif message_tier == "FAST":
+            logger.info(f"[DEBUG] about to call _classify_query | tier={message_tier} | msg='{last_user_text[:30]}'")
+            _t0_cq = time.perf_counter()
+            try:
+                classification = await asyncio.wait_for(
+                    _classify_query(last_user_text), timeout=3.0
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "[PIPELINE_TIMING] step=_classify_query FAST-tier timed out after 3.0s, using default"
+                )
+                classification = _default_classification
+            elapsed_cq = (time.perf_counter() - _t0_cq) * 1000
+            logger.info(
+                "[PIPELINE_TIMING] step=_classify_query elapsed=%.1fms user_msg='%s'",
+                elapsed_cq,
+                last_user_text[:30],
+            )
+            reasoning_effort = _get_reasoning_effort(classification)
+            meridian_context = None
+            logger.info("[TIER] FAST: skipped Meridian context")
+
+        else:  # BALANCED — run classify and Meridian fetch concurrently
+            logger.info(f"[DEBUG] about to call _classify_query | tier={message_tier} | msg='{last_user_text[:30]}'")
+            _t0_both = time.perf_counter()
+            _gather_results = await asyncio.gather(
+                _classify_query(last_user_text),
+                build_iris_context(verified_user_id),
+                return_exceptions=True,
+            )
+            _elapsed_both = (time.perf_counter() - _t0_both) * 1000
+
+            _cq_result, _mc_result = _gather_results
+
+            if isinstance(_cq_result, BaseException):
+                logger.error(
+                    "[PIPELINE_TIMING] step=_classify_query BALANCED exception: %s, using default",
+                    _cq_result,
+                )
+                classification = _default_classification
+            else:
+                classification = _cq_result
+            logger.info(
+                "[PIPELINE_TIMING] step=_classify_query elapsed=%.1fms user_msg='%s'",
+                _elapsed_both,
+                last_user_text[:30],
+            )
+            reasoning_effort = _get_reasoning_effort(classification)
+
+            if isinstance(_mc_result, BaseException):
+                logger.error(
+                    "[PIPELINE_TIMING] step=build_iris_context BALANCED exception: %s, continuing without context",
+                    _mc_result,
+                )
+                meridian_context = None
+            else:
+                meridian_context = _mc_result
+            logger.info(
+                "[PIPELINE_TIMING] step=build_iris_context elapsed=%.1fms user_msg='%s'",
+                _elapsed_both,
+                last_user_text[:30],
+            )
 
         logger.info(
             "Query classified: complexity=%s requires_calculation=%s high_risk=%s → effort=%s",
@@ -1676,17 +1764,6 @@ async def chat_completion(
             {"classification": classification, "reasoning_effort": reasoning_effort, "user_id": verified_user_id},
         )
 
-        # Step 1b: Fetch Meridian personalisation context — never fails the request
-        try:
-            meridian_context = await build_iris_context(verified_user_id)
-        except Exception as _meridian_exc:
-            logger.error(
-                "Meridian context fetch failed for user %s, continuing without context: %s",
-                verified_user_id,
-                _meridian_exc,
-            )
-            meridian_context = ""
-
         # Map frontend experience level to IRIS tier bands
         tier_map = {
             "beginner": "TIER 1 — FOUNDATION",
@@ -1696,11 +1773,23 @@ async def chat_completion(
         tier_label = tier_map.get((request.experience_level or "beginner").lower(), "TIER 1 — FOUNDATION")
         tier_injection = f"USER TIER: {tier_label}. Calibrate your entire response to this tier.\n\n"
 
-        # Step 1c: Subagent intent routing — separate lightweight classification call.
-        # Falls back to "general" (empty block) within 3 s on any error or timeout,
-        # so the main response is never blocked by the classifier.
-        subagent_category = await classify_intent(last_user_text)
-        subagent_block = get_subagent_block(subagent_category, meridian_context)
+        # Step 1c: Subagent intent routing — tier-gated lightweight classification.
+        # INSTANT: skip API call entirely, default to "general".
+        # FAST / BALANCED: classify with tier-aware timeout inside classify_intent().
+        _t0_ci = time.perf_counter()
+        if message_tier == "INSTANT":
+            subagent_category = "general"
+            logger.info("[TIER] INSTANT: intent=general (fast-path)")
+        else:
+            subagent_category = await classify_intent(last_user_text, tier=message_tier)
+        _elapsed_ci = (time.perf_counter() - _t0_ci) * 1000
+        logger.info(
+            "[PIPELINE_TIMING] step=classify_intent elapsed=%.1fms user_msg='%s'",
+            _elapsed_ci,
+            last_user_text[:30],
+        )
+
+        subagent_block = get_subagent_block(subagent_category, meridian_context or "")
         logger.debug(
             "IRIS subagent: %s for user %s",
             subagent_category,
@@ -1712,7 +1801,16 @@ async def chat_completion(
         # then fetches macro context (always) and ticker history (if applicable).
         # Never fails the request — build_market_context always returns a string.
         detected_ticker = _extract_ticker(last_user_text)
-        market_context = await build_market_context(ticker=detected_ticker)
+        if message_tier in ("INSTANT", "FAST"):
+            market_context = None
+            logger.info("[TIER] %s: skipped build_market_context", message_tier)
+        else:
+            market_context = await build_market_context(ticker=detected_ticker)
+        logger.info(
+            "[PIPELINE_TIMING] step=build_market_context tier=%s skipped=%s",
+            message_tier,
+            message_tier in ("INSTANT", "FAST"),
+        )
 
         # Step 2: Build the full system prompt in the canonical 7-section order:
         #   1. IRIS base prompt
@@ -1739,6 +1837,13 @@ async def chat_completion(
             system_parts.append(session_block)
 
         combined_system = "\n\n".join(p for p in system_parts if p.strip())
+
+        logger.info(
+            "[PROMPT_SIZE] tier=%s system_chars=%d max_tokens=%d",
+            message_tier,
+            len(combined_system),
+            effective_max_output_tokens,
+        )
 
         # Strip any legacy system messages the frontend may still send (transition safety net)
         conversation_turns = [m for m in messages if m.get("role") != "system"]

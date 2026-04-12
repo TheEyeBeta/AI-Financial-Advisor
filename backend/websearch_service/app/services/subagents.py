@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import re
+import time
 from typing import Dict
 
 import httpx
@@ -15,6 +18,7 @@ _OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 # Keep this model lightweight — the call must complete within _CLASSIFIER_TIMEOUT seconds.
 _CLASSIFIER_MODEL: str = os.getenv("OPENAI_CLASSIFIER_MODEL", "gpt-4o-mini")
 _CLASSIFIER_TIMEOUT = 3.0  # seconds — must return before this or fall back to "general"
+_FAST_TIER_TIMEOUT = 2.0   # seconds — tighter cap for non-financial short messages
 
 VALID_CATEGORIES = frozenset({
     "portfolio_analysis",
@@ -31,6 +35,41 @@ _INTENT_CLASSIFIER_PROMPT = (
     "Categories: portfolio_analysis, stock_research, risk_assessment, "
     "market_overview, education, general\n"
     "Message: {message}"
+)
+
+# ── Tier detection constants ───────────────────────────────────────────────────
+
+# Matches any financial domain term using whole-word boundaries (case-insensitive).
+# A BALANCED tier is forced whenever any of these appear, regardless of message length.
+FINANCIAL_KEYWORDS = re.compile(
+    r"\b(?:stock|share|price|portfolio|invest|trade|market|etf|fund|crypto|bitcoin|"
+    r"dividend|return|profit|loss|risk|valuation|pe\s+ratio|earnings|revenue|forecast|"
+    r"sector|ipo|bond|yield|inflation|interest\s+rate|recession|gdp|equity|hedge|"
+    r"bullish|bearish|technical|fundamental|momentum|rsi|macd|moving\s+average|"
+    r"reconcil|vat|payroll|invoic|bookkeep|account)\b",
+    re.IGNORECASE,
+)
+
+# Trivial "atoms" — each is a standalone phrase a user might send with no financial intent.
+# Phrases with embedded punctuation (what?, huh?, really?) use escaped metacharacters.
+_TRIVIAL_ATOMS: list[str] = [
+    "hey", "hi", "hello", "hiya", "howdy", "yo", "sup",
+    "ok", "okay", "okok", "sure", r"got\s+it",
+    "thanks", r"thank\s+you", "thx", "ty",
+    "yes", "no", "yep", "nope", "nah", "yeah",
+    "good", "great", "nice", "cool", "awesome", "perfect",
+    "bye", "goodbye", r"see\s+ya", "later",
+    r"what\?", r"huh\?", r"really\?",
+    "continue", r"go\s+on", r"tell\s+me\s+more", "more",
+]
+_ATOM_PAT = r"(?:" + "|".join(_TRIVIAL_ATOMS) + r")"
+
+# Anchored so that a message like "hey what is my stock portfolio?" does NOT match.
+# Allows one or more consecutive trivial atoms (e.g. "ok thanks") with optional
+# punctuation separators and a trailing punctuation/space suffix.
+TRIVIAL_PATTERNS = re.compile(
+    r"^\s*" + _ATOM_PAT + r"(?:[!?.,\s]+" + _ATOM_PAT + r")*[!?.,\s]*$",
+    re.IGNORECASE,
 )
 
 # ── Subagent specialist prompt blocks ──────────────────────────────────────────
@@ -104,21 +143,17 @@ def _has_positions_data(meridian_context: str) -> bool:
     return any(k in lower for k in ("position", "holding", "portfolio", "allocation"))
 
 
-# ── Public API ─────────────────────────────────────────────────────────────────
+async def _classify_via_api(message: str, timeout: float) -> str:
+    """Make the OpenAI classifier API call and return a member of VALID_CATEGORIES.
 
-async def classify_intent(last_user_message: str) -> str:
-    """Classify the user's last message into one of the six routing categories.
-
-    Uses a lightweight gpt-4o-mini call with a hard 3-second timeout.
-    Always returns a member of VALID_CATEGORIES; falls back to "general" on
-    any error, unexpected value, or timeout.
+    All error and timeout paths return "general" so callers never see an exception.
     """
     openai_api_key = os.getenv("OPENAI_API_KEY")
     if not openai_api_key:
         logger.debug("IRIS subagent: OPENAI_API_KEY absent, defaulting to general")
         return "general"
 
-    prompt = _INTENT_CLASSIFIER_PROMPT.format(message=last_user_message[:2000])
+    prompt = _INTENT_CLASSIFIER_PROMPT.format(message=message[:2000])
     payload = {
         "model": _CLASSIFIER_MODEL,
         "messages": [{"role": "user", "content": prompt}],
@@ -131,7 +166,7 @@ async def classify_intent(last_user_message: str) -> str:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=_CLASSIFIER_TIMEOUT) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(_OPENAI_ENDPOINT, headers=headers, json=payload)
 
         if response.status_code != 200:
@@ -168,6 +203,87 @@ async def classify_intent(last_user_message: str) -> str:
     except Exception as exc:
         logger.debug("IRIS subagent: classifier error %s, defaulting to general", exc)
         return "general"
+
+
+# ── Public API ─────────────────────────────────────────────────────────────────
+
+def classify_tier(message: str) -> str:
+    """Classify a raw message into one of three routing tiers with zero I/O.
+
+    Returns one of: "INSTANT", "FAST", or "BALANCED".
+
+    Decision logic (first match wins):
+    - INSTANT: short trivial social phrase → skip the API call entirely.
+    - FAST:    short, non-financial message → use a 2-second API timeout cap.
+    - BALANCED: everything else → full 3-second timeout, normal routing.
+    """
+    stripped = message.strip()
+
+    if len(stripped) < 60 and TRIVIAL_PATTERNS.fullmatch(stripped):
+        tier = "INSTANT"
+    elif len(stripped) < 200 and not FINANCIAL_KEYWORDS.search(stripped):
+        tier = "FAST"
+    else:
+        tier = "BALANCED"
+
+    logger.debug(
+        "classify_tier: tier=%s len=%d msg='%s'",
+        tier,
+        len(stripped),
+        stripped[:40],
+    )
+    return tier
+
+
+async def classify_intent(last_user_message: str, tier: str = "BALANCED") -> str:
+    """Classify the user's last message into one of the six routing categories.
+
+    Accepts an optional ``tier`` produced by :func:`classify_tier` to short-circuit
+    or time-cap the OpenAI call:
+
+    - ``INSTANT``: returns ``"general"`` immediately without any API call.
+    - ``FAST``:    calls the API with a hard 2-second asyncio-level timeout cap.
+    - ``BALANCED``: uses the normal 3-second timeout (``_CLASSIFIER_TIMEOUT``).
+
+    Always returns a member of VALID_CATEGORIES; falls back to ``"general"`` on
+    any error, unexpected value, or timeout.
+    """
+    t0 = time.perf_counter()
+    intent = "general"
+
+    try:
+        if tier == "INSTANT":
+            logger.info(
+                "classify_intent: INSTANT fast-path, skipping API call | msg='%s'",
+                last_user_message[:40],
+            )
+            return intent
+
+        if tier == "FAST":
+            try:
+                intent = await asyncio.wait_for(
+                    _classify_via_api(last_user_message, timeout=_FAST_TIER_TIMEOUT),
+                    timeout=_FAST_TIER_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "classify_intent: FAST-tier API call exceeded %.1fs, defaulting to general",
+                    _FAST_TIER_TIMEOUT,
+                )
+                intent = "general"
+        else:  # BALANCED
+            intent = await _classify_via_api(last_user_message, timeout=_CLASSIFIER_TIMEOUT)
+
+        return intent
+
+    finally:
+        elapsed = (time.perf_counter() - t0) * 1000
+        logger.info(
+            "classify_intent: tier=%s result=%s elapsed=%.1fms",
+            tier,
+            intent,
+            elapsed,
+        )
 
 
 def get_subagent_block(category: str, meridian_context: str = "") -> str:

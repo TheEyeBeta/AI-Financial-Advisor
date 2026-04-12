@@ -20,7 +20,6 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const PaperTrading = lazy(() => import("./pages/PaperTrading"));
 const News = lazy(() => import("./pages/News"));
 const TopStocks = lazy(() => import("./pages/TopStocks"));
-const Profile = lazy(() => import("./pages/Profile"));
 const ProfileSettings = lazy(() => import("./pages/ProfileSettings"));
 const Onboarding = lazy(() => import("./pages/Onboarding"));
 const Admin = lazy(() => import("./pages/Admin"));

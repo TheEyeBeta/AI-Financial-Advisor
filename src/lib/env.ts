@@ -18,7 +18,7 @@ const PYTHON_API_URL_PLACEHOLDERS = new Set([
   'https://your-websearch-service.example.com',
 ]);
 
-const LOCAL_BACKEND_URL = 'http://localhost:8000';
+const LOCAL_BACKEND_URL = 'http://localhost:7000';
 
 export interface FrontendRuntimeEnv {
   VITE_SUPABASE_URL?: string;

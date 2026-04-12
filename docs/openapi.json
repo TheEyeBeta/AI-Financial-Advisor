@@ -16,7 +16,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
                   "type": "object",
                   "title": "Response Root  Get"
                 }
@@ -36,12 +38,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      { "type": "string" },
-                      { "type": "number" }
-                    ]
-                  },
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Health Check Health Get"
                 }
@@ -61,7 +58,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
                   "type": "object",
                   "title": "Response Liveness Check Health Live Get"
                 }
@@ -81,7 +80,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Readiness Check Health Ready Get"
                 }
@@ -93,7 +92,9 @@
     },
     "/api/search": {
       "get": {
-        "tags": ["search"],
+        "tags": [
+          "search"
+        ],
         "summary": "Search Web",
         "description": "Perform a general web search via an external provider and return\na compact, LLM-friendly JSON structure.\n\nRequires: authenticated Supabase JWT in the Authorization header.\nRate-limited per authenticated user.",
         "operationId": "search_web_api_search_get",
@@ -117,10 +118,10 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 1,
               "maximum": 10,
-              "default": 5,
+              "minimum": 1,
               "description": "Maximum number of search results to return (1-10).",
+              "default": 5,
               "title": "Max Results"
             },
             "description": "Maximum number of search results to return (1-10)."
@@ -132,8 +133,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Search Web Api Search Get"
                 }
               }
@@ -143,7 +144,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -152,17 +155,21 @@
     },
     "/api/meridian/onboard": {
       "post": {
-        "tags": ["ai-proxy"],
+        "tags": [
+          "ai-proxy"
+        ],
         "summary": "Meridian Onboard",
         "description": "Create or update Meridian profile and first goal; refresh IRIS context cache.",
         "operationId": "meridian_onboard_api_meridian_onboard_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/MeridianOnboardRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/MeridianOnboardRequest"
+              }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -170,7 +177,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
                   "type": "object",
                   "title": "Response Meridian Onboard Api Meridian Onboard Post"
                 }
@@ -181,25 +190,32 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
         }
       }
     },
-    "/api/chat": {
+    "/api/meridian/refresh-context": {
       "post": {
-        "tags": ["ai-proxy"],
-        "summary": "Chat Completion",
-        "operationId": "chat_completion_api_chat_post",
+        "tags": [
+          "ai-proxy"
+        ],
+        "summary": "Meridian Refresh Context",
+        "description": "Refresh the IRIS context cache for the authenticated user.",
+        "operationId": "meridian_refresh_context_api_meridian_refresh_context_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/ChatRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/MeridianRefreshRequest"
+              }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -207,9 +223,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": { "type": "string" },
+                  "additionalProperties": true,
                   "type": "object",
-                  "title": "Response Chat Completion Api Chat Post"
+                  "title": "Response Meridian Refresh Context Api Meridian Refresh Context Post"
                 }
               }
             }
@@ -218,7 +234,72 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/meridian/refresh-all": {
+      "post": {
+        "tags": [
+          "ai-proxy"
+        ],
+        "summary": "Meridian Refresh All",
+        "description": "Daily cron endpoint: refreshes ai.iris_context_cache for ALL users.\nIn production this requires a Supabase service-role JWT.\nNon-production keeps the legacy shared-secret fallback so local schedulers\nand smoke tests can still exercise the path without minting a JWT.\n\nSchedule: 0 2 * * * (daily at 02:00 UTC)",
+        "operationId": "meridian_refresh_all_api_meridian_refresh_all_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Meridian Refresh All Api Meridian Refresh All Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/chat": {
+      "post": {
+        "tags": [
+          "ai-proxy"
+        ],
+        "summary": "Chat Completion",
+        "operationId": "chat_completion_api_chat_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -227,16 +308,20 @@
     },
     "/api/chat/title": {
       "post": {
-        "tags": ["ai-proxy"],
+        "tags": [
+          "ai-proxy"
+        ],
         "summary": "Chat Title",
         "operationId": "chat_title_api_chat_title_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/ChatTitleRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/ChatTitleRequest"
+              }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -244,7 +329,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
                   "type": "object",
                   "title": "Response Chat Title Api Chat Title Post"
                 }
@@ -255,7 +342,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -264,16 +353,20 @@
     },
     "/api/ai/analyze-quantitative": {
       "post": {
-        "tags": ["ai-proxy"],
+        "tags": [
+          "ai-proxy"
+        ],
         "summary": "Analyze Quantitative Data",
         "operationId": "analyze_quantitative_data_api_ai_analyze_quantitative_post",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
-              "schema": { "$ref": "#/components/schemas/QuantitativeAnalysisRequest" }
+              "schema": {
+                "$ref": "#/components/schemas/QuantitativeAnalysisRequest"
+              }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
@@ -281,7 +374,9 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": { "type": "string" },
+                  "additionalProperties": {
+                    "type": "string"
+                  },
                   "type": "object",
                   "title": "Response Analyze Quantitative Data Api Ai Analyze Quantitative Post"
                 }
@@ -292,7 +387,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -301,7 +398,9 @@
     },
     "/api/news": {
       "get": {
-        "tags": ["news"],
+        "tags": [
+          "news"
+        ],
         "summary": "Get News",
         "description": "Stub endpoint for news.\n\nNote: News articles are stored in Supabase (news_articles table).\nThis endpoint returns empty results to prevent 404 errors.\nThe frontend should use Supabase directly for news.",
         "operationId": "get_news_api_news_get",
@@ -312,10 +411,10 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 1,
               "maximum": 100,
-              "default": 30,
+              "minimum": 1,
               "description": "Maximum number of news items to return",
+              "default": 30,
               "title": "Limit"
             },
             "description": "Maximum number of news items to return"
@@ -326,8 +425,12 @@
             "required": false,
             "schema": {
               "anyOf": [
-                { "type": "string" },
-                { "type": "null" }
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
               "description": "Pagination cursor",
               "title": "Cursor"
@@ -341,8 +444,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get News Api News Get"
                 }
               }
@@ -352,7 +455,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -361,7 +466,9 @@
     },
     "/api/v1/ai/context": {
       "get": {
-        "tags": ["trade-engine"],
+        "tags": [
+          "trade-engine"
+        ],
         "summary": "Get Ai Context",
         "description": "Get comprehensive AI context for the chatbot.\n\nUse `source=dataapi` to fetch from TheEyeBetaDataAPI (live engine data),\n`source=auto` to try DataAPI first with stub fallback, or `source=supabase`\n(default) for the original stub behavior.",
         "operationId": "get_ai_context_api_v1_ai_context_get",
@@ -372,8 +479,8 @@
             "required": false,
             "schema": {
               "type": "boolean",
-              "default": true,
               "description": "Include recent news articles",
+              "default": true,
               "title": "Include News"
             },
             "description": "Include recent news articles"
@@ -384,10 +491,10 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 1,
               "maximum": 100,
-              "default": 15,
+              "minimum": 1,
               "description": "Maximum news articles to return",
+              "default": 15,
               "title": "News Limit"
             },
             "description": "Maximum news articles to return"
@@ -398,10 +505,10 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 1,
               "maximum": 168,
-              "default": 48,
+              "minimum": 1,
               "description": "Hours of signal history to include",
+              "default": 48,
               "title": "Signals Hours"
             },
             "description": "Hours of signal history to include"
@@ -412,8 +519,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "default": "supabase",
               "description": "Data source: supabase, dataapi, or auto",
+              "default": "supabase",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -424,7 +531,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AIContextResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/AIContextResponse"
+                }
               }
             }
           },
@@ -432,7 +541,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -441,7 +552,9 @@
     },
     "/api/v1/ai/signals": {
       "get": {
-        "tags": ["trade-engine"],
+        "tags": [
+          "trade-engine"
+        ],
         "summary": "Get Signals",
         "description": "Get recent trading signals.\n\nUse `source=dataapi` or `source=auto` to fetch from TheEyeBetaDataAPI.\nDefault (supabase) returns empty list (Trade Engine not deployed).",
         "operationId": "get_signals_api_v1_ai_signals_get",
@@ -452,8 +565,12 @@
             "required": false,
             "schema": {
               "anyOf": [
-                { "type": "string" },
-                { "type": "null" }
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
               "description": "Filter by ticker symbol",
               "title": "Ticker"
@@ -466,8 +583,12 @@
             "required": false,
             "schema": {
               "anyOf": [
-                { "type": "string" },
-                { "type": "null" }
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
               ],
               "description": "Filter by signal type (BUY, SELL, HOLD)",
               "title": "Signal Type"
@@ -480,10 +601,10 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 1,
               "maximum": 168,
-              "default": 24,
+              "minimum": 1,
               "description": "Hours of history to include",
+              "default": 24,
               "title": "Hours"
             },
             "description": "Hours of history to include"
@@ -494,10 +615,10 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 1,
               "maximum": 500,
-              "default": 50,
+              "minimum": 1,
               "description": "Maximum signals to return",
+              "default": 50,
               "title": "Limit"
             },
             "description": "Maximum signals to return"
@@ -508,8 +629,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "default": "supabase",
               "description": "Data source: supabase, dataapi, or auto",
+              "default": "supabase",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -521,8 +642,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "items": { "$ref": "#/components/schemas/TradingSignal" },
                   "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TradingSignal"
+                  },
                   "title": "Response Get Signals Api V1 Ai Signals Get"
                 }
               }
@@ -532,7 +655,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -541,7 +666,9 @@
     },
     "/api/v1/engine/status": {
       "get": {
-        "tags": ["trade-engine"],
+        "tags": [
+          "trade-engine"
+        ],
         "summary": "Get Engine Status",
         "description": "Get Trade Engine / DataAPI connection status.",
         "operationId": "get_engine_status_api_v1_engine_status_get",
@@ -552,8 +679,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "default": "supabase",
               "description": "Data source: supabase, dataapi, or auto",
+              "default": "supabase",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -565,8 +692,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Engine Status Api V1 Engine Status Get"
                 }
               }
@@ -576,7 +703,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -585,7 +714,9 @@
     },
     "/api/stock-price/{ticker}": {
       "get": {
-        "tags": ["trade-engine"],
+        "tags": [
+          "trade-engine"
+        ],
         "summary": "Get Stock Price",
         "description": "Return the last known price for a ticker.\n\nUses Supabase by default. Set `source=dataapi` or `source=auto` to\nfetch from TheEyeBetaDataAPI.",
         "operationId": "get_stock_price_api_stock_price__ticker__get",
@@ -605,8 +736,8 @@
             "required": false,
             "schema": {
               "type": "string",
-              "default": "supabase",
               "description": "Data source: supabase, dataapi, or auto",
+              "default": "supabase",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -618,8 +749,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Get Stock Price Api Stock Price  Ticker  Get"
                 }
               }
@@ -629,7 +760,9 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -638,9 +771,11 @@
     },
     "/api/stocks/ranking": {
       "get": {
-        "tags": ["stock-ranking"],
+        "tags": [
+          "stock-ranking"
+        ],
         "summary": "Get Stock Ranking",
-        "description": "Return stocks ranked by composite score (0-100).",
+        "description": "Return the pre-computed top stocks from market.trending_stocks.\n\nScores are refreshed once daily at 01:00 UTC by the background ranking\nengine.  `data_age_hours` tells you how fresh the data is.\n\nFilters:\n- `min_score`: only return stocks with composite_score >= this value\n- `rank_tier`: only return stocks matching this tier label",
         "operationId": "get_stock_ranking_api_stocks_ranking_get",
         "parameters": [
           {
@@ -649,13 +784,13 @@
             "required": false,
             "schema": {
               "type": "integer",
+              "maximum": 50,
               "minimum": 1,
-              "maximum": 100,
-              "default": 20,
-              "description": "Top N stocks to return",
+              "description": "Number of top stocks to return (max 50)",
+              "default": 50,
               "title": "Limit"
             },
-            "description": "Top N stocks to return"
+            "description": "Number of top stocks to return (max 50)"
           },
           {
             "name": "min_score",
@@ -663,13 +798,31 @@
             "required": false,
             "schema": {
               "type": "number",
-              "minimum": 0,
-              "maximum": 100,
+              "maximum": 100.0,
+              "minimum": 0.0,
+              "description": "Minimum composite_score filter",
               "default": 0.0,
-              "description": "Minimum composite score filter",
               "title": "Min Score"
             },
-            "description": "Minimum composite score filter"
+            "description": "Minimum composite_score filter"
+          },
+          {
+            "name": "rank_tier",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by rank tier: 'Strong Buy', 'Buy', 'Hold', 'Underperform', 'Sell'",
+              "title": "Rank Tier"
+            },
+            "description": "Filter by rank tier: 'Strong Buy', 'Buy', 'Hold', 'Underperform', 'Sell'"
           }
         ],
         "responses": {
@@ -677,7 +830,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/RankingResponse" }
+                "schema": {
+                  "$ref": "#/components/schemas/RankingResponse"
+                }
               }
             }
           },
@@ -685,7 +840,52 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/stocks/detail/{ticker}": {
+      "get": {
+        "tags": [
+          "stock-ranking"
+        ],
+        "summary": "Get Stock Detail",
+        "description": "Return live snapshot data for a single ticker from market.stock_snapshots,\ncombined with the most recent balanced-horizon ranking row.\n\nReturns 404 if the ticker is not found in stock_snapshots.\nReturns ranking: null if no ranking history exists for the ticker.",
+        "operationId": "get_stock_detail_api_stocks_detail__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -694,7 +894,9 @@
     },
     "/api/admin/system-health": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "System Health",
         "description": "Return comprehensive system health across all services.",
         "operationId": "system_health_api_admin_system_health_get",
@@ -704,7 +906,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response System Health Api Admin System Health Get"
                 }
@@ -716,7 +918,9 @@
     },
     "/api/admin/dataapi-query": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "Dataapi Query",
         "description": "Proxy a read-only SQL query to the DataAPI admin endpoint.",
         "operationId": "dataapi_query_api_admin_dataapi_query_get",
@@ -738,8 +942,8 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "minimum": 1,
               "maximum": 1000,
+              "minimum": 1,
               "default": 100,
               "title": "Limit"
             }
@@ -751,8 +955,8 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Dataapi Query Api Admin Dataapi Query Get"
                 }
               }
@@ -762,7 +966,57 @@
             "description": "Validation Error",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/HTTPValidationError" }
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/trigger-ranking": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Trigger Ranking",
+        "description": "Manually trigger a ranking cycle in the background and return immediately.",
+        "operationId": "trigger_ranking_api_admin_trigger_ranking_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Ranking Api Admin Trigger Ranking Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/trigger-memory-scan": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Trigger Memory Scan",
+        "description": "Manually trigger a full history memory scan in the background and return immediately.",
+        "operationId": "trigger_memory_scan_api_admin_trigger_memory_scan_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Memory Scan Api Admin Trigger Memory Scan Post"
+                }
               }
             }
           }
@@ -771,7 +1025,9 @@
     },
     "/api/admin/chat-dashboard": {
       "get": {
-        "tags": ["admin"],
+        "tags": [
+          "admin"
+        ],
         "summary": "Chat Dashboard",
         "operationId": "chat_dashboard_api_admin_chat_dashboard_get",
         "responses": {
@@ -780,7 +1036,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": {},
+                  "additionalProperties": true,
                   "type": "object",
                   "title": "Response Chat Dashboard Api Admin Chat Dashboard Get"
                 }
@@ -795,36 +1051,55 @@
     "schemas": {
       "AIContextResponse": {
         "properties": {
-          "generated_at": { "type": "string", "title": "Generated At" },
-          "engine_status": { "$ref": "#/components/schemas/EngineStatus" },
+          "generated_at": {
+            "type": "string",
+            "title": "Generated At"
+          },
+          "engine_status": {
+            "$ref": "#/components/schemas/EngineStatus"
+          },
           "tracked_tickers": {
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "type": "array",
             "title": "Tracked Tickers",
             "default": []
           },
           "ticker_snapshots": {
-            "items": { "$ref": "#/components/schemas/TickerSnapshot" },
+            "items": {
+              "$ref": "#/components/schemas/TickerSnapshot"
+            },
             "type": "array",
             "title": "Ticker Snapshots",
             "default": []
           },
           "recent_signals": {
-            "items": { "$ref": "#/components/schemas/TradingSignal" },
+            "items": {
+              "$ref": "#/components/schemas/TradingSignal"
+            },
             "type": "array",
             "title": "Recent Signals",
             "default": []
           },
           "recent_news": {
-            "items": { "$ref": "#/components/schemas/NewsItemFull" },
+            "items": {
+              "$ref": "#/components/schemas/NewsItemFull"
+            },
             "type": "array",
             "title": "Recent News",
             "default": []
           },
-          "summary": { "$ref": "#/components/schemas/EngineSummaryFull" }
+          "summary": {
+            "$ref": "#/components/schemas/EngineSummaryFull"
+          }
         },
         "type": "object",
-        "required": ["generated_at", "engine_status", "summary"],
+        "required": [
+          "generated_at",
+          "engine_status",
+          "summary"
+        ],
         "title": "AIContextResponse",
         "description": "Full AI context response matching frontend TradeEngineAIContext interface."
       },
@@ -833,47 +1108,87 @@
           "messages": {
             "anyOf": [
               {
-                "items": { "$ref": "#/components/schemas/Message" },
+                "items": {
+                  "$ref": "#/components/schemas/Message"
+                },
                 "type": "array"
               },
-              { "type": "null" }
+              {
+                "type": "null"
+              }
             ],
             "title": "Messages"
           },
           "message": {
             "anyOf": [
-              { "type": "string", "maxLength": 10000, "minLength": 1 },
-              { "type": "null" }
+              {
+                "type": "string",
+                "maxLength": 10000,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Message"
           },
           "user_id": {
             "anyOf": [
-              { "type": "string" },
-              { "type": "null" }
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "User Id"
           },
           "temperature": {
             "type": "number",
-            "maximum": 2,
-            "minimum": 0,
+            "maximum": 2.0,
+            "minimum": 0.0,
             "title": "Temperature",
             "default": 0.7
           },
           "max_tokens": {
             "type": "integer",
-            "maximum": 16000,
-            "minimum": 1,
+            "maximum": 16000.0,
+            "minimum": 1.0,
             "title": "Max Tokens",
             "default": 2000
           },
           "experience_level": {
             "anyOf": [
-              { "type": "string" },
-              { "type": "null" }
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Experience Level"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextBlock"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "session_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Type",
+            "default": "advisor"
           }
         },
         "type": "object",
@@ -889,30 +1204,109 @@
           }
         },
         "type": "object",
-        "required": ["first_message"],
+        "required": [
+          "first_message"
+        ],
         "title": "ChatTitleRequest"
+      },
+      "ContextBlock": {
+        "properties": {
+          "market_data": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Data"
+          },
+          "news": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "News"
+          },
+          "search_results": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Search Results"
+          },
+          "stock_snapshot": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Snapshot"
+          }
+        },
+        "type": "object",
+        "title": "ContextBlock",
+        "description": "Raw context data sent by the frontend; the backend formats it into the system prompt."
       },
       "EngineStatus": {
         "properties": {
-          "is_running": { "type": "boolean", "title": "Is Running", "default": false },
+          "is_running": {
+            "type": "boolean",
+            "title": "Is Running",
+            "default": false
+          },
           "engine_started_at": {
             "anyOf": [
-              { "type": "string" },
-              { "type": "null" }
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Engine Started At"
           },
           "last_price_tick": {
             "anyOf": [
-              { "type": "string" },
-              { "type": "null" }
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Last Price Tick"
           },
           "last_news_poll": {
             "anyOf": [
-              { "type": "string" },
-              { "type": "null" }
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Last News Poll"
           },
@@ -927,7 +1321,9 @@
             "default": 0
           },
           "active_workers": {
-            "additionalProperties": { "type": "boolean" },
+            "additionalProperties": {
+              "type": "boolean"
+            },
             "type": "object",
             "title": "Active Workers",
             "default": {}
@@ -939,55 +1335,286 @@
       },
       "EngineSummaryFull": {
         "properties": {
-          "total_tracked_tickers": { "type": "integer", "title": "Total Tracked Tickers", "default": 0 },
-          "tickers_with_data": { "type": "integer", "title": "Tickers With Data", "default": 0 },
+          "total_tracked_tickers": {
+            "type": "integer",
+            "title": "Total Tracked Tickers",
+            "default": 0
+          },
+          "tickers_with_data": {
+            "type": "integer",
+            "title": "Tickers With Data",
+            "default": 0
+          },
           "tickers_with_indicators": {
-            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Tickers With Indicators"
           },
           "tickers_with_fundamentals": {
-            "anyOf": [{ "type": "integer" }, { "type": "null" }],
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Tickers With Fundamentals"
           },
-          "buy_signals_count": { "type": "integer", "title": "Buy Signals Count", "default": 0 },
-          "sell_signals_count": { "type": "integer", "title": "Sell Signals Count", "default": 0 },
-          "hold_signals_count": { "type": "integer", "title": "Hold Signals Count", "default": 0 },
+          "buy_signals_count": {
+            "type": "integer",
+            "title": "Buy Signals Count",
+            "default": 0
+          },
+          "sell_signals_count": {
+            "type": "integer",
+            "title": "Sell Signals Count",
+            "default": 0
+          },
+          "hold_signals_count": {
+            "type": "integer",
+            "title": "Hold Signals Count",
+            "default": 0
+          },
           "tickers_with_buy": {
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "type": "array",
             "title": "Tickers With Buy",
             "default": []
           },
           "tickers_with_sell": {
-            "items": { "type": "string" },
+            "items": {
+              "type": "string"
+            },
             "type": "array",
             "title": "Tickers With Sell",
             "default": []
           },
-          "average_rsi": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Average Rsi" },
-          "average_pe_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Average Pe Ratio" },
-          "bullish_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Bullish Tickers" },
-          "bearish_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Bearish Tickers" },
-          "oversold_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Oversold Tickers" },
-          "overbought_tickers": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Overbought Tickers" },
+          "average_rsi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Rsi"
+          },
+          "average_pe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Pe Ratio"
+          },
+          "bullish_tickers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bullish Tickers"
+          },
+          "bearish_tickers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bearish Tickers"
+          },
+          "oversold_tickers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oversold Tickers"
+          },
+          "overbought_tickers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overbought Tickers"
+          },
           "high_volume_tickers": {
             "anyOf": [
-              { "items": { "type": "string" }, "type": "array" },
-              { "type": "null" }
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "High Volume Tickers"
           },
-          "signals_last_24h": { "type": "integer", "title": "Signals Last 24H", "default": 0 },
-          "news_count": { "type": "integer", "title": "News Count", "default": 0 }
+          "signals_last_24h": {
+            "type": "integer",
+            "title": "Signals Last 24H",
+            "default": 0
+          },
+          "news_count": {
+            "type": "integer",
+            "title": "News Count",
+            "default": 0
+          }
         },
         "type": "object",
         "title": "EngineSummaryFull",
         "description": "Full summary matching frontend TradeEngineAIContext.summary interface."
       },
+      "FundamentalsData": {
+        "properties": {
+          "pe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pe Ratio"
+          },
+          "forward_pe": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forward Pe"
+          },
+          "peg_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Peg Ratio"
+          },
+          "price_to_book": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price To Book"
+          },
+          "price_to_sales": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price To Sales"
+          },
+          "eps": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps"
+          },
+          "eps_growth": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eps Growth"
+          },
+          "revenue_growth": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revenue Growth"
+          },
+          "dividend_yield": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dividend Yield"
+          },
+          "market_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap"
+          }
+        },
+        "type": "object",
+        "title": "FundamentalsData"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
-            "items": { "$ref": "#/components/schemas/ValidationError" },
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
             "type": "array",
             "title": "Detail"
           }
@@ -997,25 +1624,113 @@
       },
       "MeridianOnboardRequest": {
         "properties": {
-          "knowledge_tier": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Knowledge Tier" },
-          "risk_profile": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Risk Profile" },
-          "investment_horizon": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Investment Horizon" },
-          "monthly_investable": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Monthly Investable" },
-          "emergency_fund_months": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Emergency Fund Months" },
-          "goal_name": { "type": "string", "minLength": 1, "title": "Goal Name" },
-          "target_amount": { "type": "number", "exclusiveMinimum": 0, "title": "Target Amount" },
-          "target_date": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Target Date" }
+          "knowledge_tier": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Knowledge Tier"
+          },
+          "risk_profile": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Profile"
+          },
+          "investment_horizon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Investment Horizon"
+          },
+          "monthly_investable": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Investable"
+          },
+          "emergency_fund_months": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Fund Months"
+          },
+          "goal_name": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Goal Name"
+          },
+          "target_amount": {
+            "type": "number",
+            "exclusiveMinimum": 0.0,
+            "title": "Target Amount"
+          },
+          "target_date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Date"
+          }
         },
         "type": "object",
-        "required": ["goal_name", "target_amount"],
+        "required": [
+          "goal_name",
+          "target_amount"
+        ],
         "title": "MeridianOnboardRequest",
-        "description": "POST /api/meridian/onboard -- all optional except goal_name and target_amount."
+        "description": "POST /api/meridian/onboard \u2014 all optional except goal_name and target_amount."
+      },
+      "MeridianRefreshRequest": {
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "user_id"
+        ],
+        "title": "MeridianRefreshRequest"
       },
       "Message": {
         "properties": {
           "role": {
             "type": "string",
-            "enum": ["system", "user", "assistant"],
+            "enum": [
+              "system",
+              "user",
+              "assistant"
+            ],
             "title": "Role"
           },
           "content": {
@@ -1026,175 +1741,1128 @@
           }
         },
         "type": "object",
-        "required": ["role", "content"],
+        "required": [
+          "role",
+          "content"
+        ],
         "title": "Message"
       },
       "NewsItemFull": {
         "properties": {
-          "headline": { "type": "string", "title": "Headline" },
-          "source": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Source" },
-          "category": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Category" },
-          "published_at": { "type": "string", "title": "Published At" },
-          "related_tickers": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Related Tickers" }
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "published_at": {
+            "type": "string",
+            "title": "Published At"
+          },
+          "related_tickers": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Tickers"
+          }
         },
         "type": "object",
-        "required": ["headline", "published_at"],
+        "required": [
+          "headline",
+          "published_at"
+        ],
         "title": "NewsItemFull",
         "description": "News item matching frontend interface."
       },
       "QuantitativeAnalysisRequest": {
         "properties": {
           "quantitative_data": {
-            "additionalProperties": { "type": "number" },
+            "additionalProperties": {
+              "type": "number"
+            },
             "type": "object",
             "title": "Quantitative Data"
           }
         },
         "type": "object",
-        "required": ["quantitative_data"],
+        "required": [
+          "quantitative_data"
+        ],
         "title": "QuantitativeAnalysisRequest"
+      },
+      "RankingData": {
+        "properties": {
+          "composite_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Composite Score"
+          },
+          "smoothed_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Smoothed Score"
+          },
+          "rank_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank Tier"
+          },
+          "conviction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conviction"
+          },
+          "dimension_scores": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Dimension Scores",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "title": "RankingData"
       },
       "RankingResponse": {
         "properties": {
           "stocks": {
-            "items": { "$ref": "#/components/schemas/StockScore" },
+            "items": {
+              "$ref": "#/components/schemas/TrendingStock"
+            },
             "type": "array",
             "title": "Stocks"
           },
-          "total": { "type": "integer", "title": "Total" },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
           "last_ranked_at": {
-            "anyOf": [{ "type": "string" }, { "type": "null" }],
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Last Ranked At"
           },
           "data_age_hours": {
-            "anyOf": [{ "type": "number" }, { "type": "null" }],
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Data Age Hours"
           }
         },
         "type": "object",
-        "required": ["stocks", "total"],
+        "required": [
+          "stocks",
+          "total"
+        ],
         "title": "RankingResponse"
       },
-      "ScoreBreakdown": {
+      "SignalsData": {
         "properties": {
-          "rsi_14": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rsi 14" },
-          "rsi_9": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rsi 9" },
-          "macd_above_signal": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Macd Above Signal" },
-          "macd_histogram": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd Histogram" },
-          "golden_cross": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Golden Cross" },
-          "adx": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Adx" },
-          "stochastic_k": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Stochastic K" },
-          "stochastic_d": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Stochastic D" },
-          "williams_r": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Williams R" },
-          "cci": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Cci" },
-          "bollinger_position": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Bollinger Position" },
-          "volume_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Volume Ratio" },
-          "price_vs_sma_50": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Vs Sma 50" },
-          "price_vs_sma_200": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Vs Sma 200" },
-          "price_vs_ema_50": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Vs Ema 50" },
-          "fifty_two_week_position": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Fifty Two Week Position" },
-          "pe_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Pe Ratio" },
-          "forward_pe": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Forward Pe" },
-          "peg_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Peg Ratio" },
-          "price_to_book": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price To Book" },
-          "price_to_sales": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price To Sales" },
-          "eps": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Eps" },
-          "eps_growth": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Eps Growth" },
-          "revenue_growth": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Revenue Growth" },
-          "dividend_yield": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Dividend Yield" },
-          "market_cap": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Market Cap" },
-          "signal_confidence": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Signal Confidence" },
-          "is_bullish": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Is Bullish" },
-          "signal_strategy": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Signal Strategy" }
+          "is_bullish": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Bullish"
+          },
+          "is_oversold": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Oversold"
+          },
+          "is_overbought": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Overbought"
+          },
+          "latest_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Signal"
+          },
+          "signal_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Strategy"
+          },
+          "signal_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Confidence"
+          }
         },
         "type": "object",
-        "title": "ScoreBreakdown",
-        "description": "Detailed metric-level breakdown surfaced in the UI."
+        "title": "SignalsData"
       },
-      "StockScore": {
+      "StockDetailResponse": {
         "properties": {
-          "ticker": { "type": "string", "title": "Ticker" },
-          "symbol": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Symbol" },
-          "name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Name" },
-          "change_percent": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Change Percent" },
-          "updated_at": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Updated At" },
-          "composite_score": { "type": "number", "title": "Composite Score" },
-          "momentum_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum Score" },
-          "technical_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Technical Score" },
-          "fundamental_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Fundamental Score" },
-          "consistency_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Consistency Score" },
-          "signal_score": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Signal Score" },
-          "momentum_1m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 1M" },
-          "momentum_3m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 3M" },
-          "momentum_6m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 6M" },
-          "momentum_12m": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Momentum 12M" },
-          "fundamental_trend": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Fundamental Trend" },
-          "rank_tier": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Rank Tier" },
-          "conviction": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Conviction" },
-          "ranked_at": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Ranked At" }
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "last_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Price"
+          },
+          "price_change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Change Pct"
+          },
+          "high_52w": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High 52W"
+          },
+          "low_52w": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low 52W"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          },
+          "avg_volume_10d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Volume 10D"
+          },
+          "volume_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Ratio"
+          },
+          "price_vs_sma_50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Vs Sma 50"
+          },
+          "price_vs_sma_200": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Vs Sma 200"
+          },
+          "high_52w_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High 52W Position"
+          },
+          "technicals": {
+            "$ref": "#/components/schemas/TechnicalIndicators"
+          },
+          "fundamentals": {
+            "$ref": "#/components/schemas/FundamentalsData"
+          },
+          "signals": {
+            "$ref": "#/components/schemas/SignalsData"
+          },
+          "ranking": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RankingData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         },
         "type": "object",
-        "required": ["ticker", "composite_score"],
-        "title": "StockScore"
+        "required": [
+          "ticker",
+          "technicals",
+          "fundamentals",
+          "signals"
+        ],
+        "title": "StockDetailResponse"
+      },
+      "TechnicalIndicators": {
+        "properties": {
+          "rsi_14": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi 14"
+          },
+          "rsi_9": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi 9"
+          },
+          "macd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd"
+          },
+          "macd_signal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd Signal"
+          },
+          "macd_histogram": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd Histogram"
+          },
+          "macd_above_signal": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd Above Signal"
+          },
+          "adx": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adx"
+          },
+          "stochastic_k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stochastic K"
+          },
+          "stochastic_d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stochastic D"
+          },
+          "williams_r": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Williams R"
+          },
+          "cci": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cci"
+          },
+          "bollinger_upper": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bollinger Upper"
+          },
+          "bollinger_lower": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bollinger Lower"
+          },
+          "bollinger_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bollinger Position"
+          },
+          "golden_cross": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Golden Cross"
+          }
+        },
+        "type": "object",
+        "title": "TechnicalIndicators"
       },
       "TickerSnapshot": {
         "properties": {
-          "ticker": { "type": "string", "title": "Ticker" },
-          "company_name": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Company Name" },
-          "last_price": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Last Price" },
-          "price_change_pct": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price Change Pct" },
-          "volume": { "anyOf": [{ "type": "integer" }, { "type": "null" }], "title": "Volume" },
-          "volume_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Volume Ratio" },
-          "rsi_14": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Rsi 14" },
-          "sma_50": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Sma 50" },
-          "sma_200": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Sma 200" },
-          "macd": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd" },
-          "macd_signal": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd Signal" },
-          "macd_histogram": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Macd Histogram" },
-          "pe_ratio": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Pe Ratio" },
-          "market_cap": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Market Cap" },
-          "latest_signal": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Latest Signal" },
-          "signal_confidence": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Signal Confidence" },
-          "signal_timestamp": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Signal Timestamp" },
-          "signal_strategy": { "anyOf": [{ "type": "string" }, { "type": "null" }], "title": "Signal Strategy" },
-          "is_bullish": { "anyOf": [{ "type": "boolean" }, { "type": "null" }], "title": "Is Bullish" }
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "company_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Company Name"
+          },
+          "last_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Price"
+          },
+          "price_change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Change Pct"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume"
+          },
+          "volume_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Ratio"
+          },
+          "rsi_14": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rsi 14"
+          },
+          "sma_50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sma 50"
+          },
+          "sma_200": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sma 200"
+          },
+          "macd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd"
+          },
+          "macd_signal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd Signal"
+          },
+          "macd_histogram": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Macd Histogram"
+          },
+          "pe_ratio": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pe Ratio"
+          },
+          "market_cap": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Cap"
+          },
+          "latest_signal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Signal"
+          },
+          "signal_confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Confidence"
+          },
+          "signal_timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Timestamp"
+          },
+          "signal_strategy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Strategy"
+          },
+          "is_bullish": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Bullish"
+          }
         },
         "type": "object",
-        "required": ["ticker"],
+        "required": [
+          "ticker"
+        ],
         "title": "TickerSnapshot",
         "description": "Snapshot of a single ticker's data."
       },
       "TradingSignal": {
         "properties": {
-          "ticker": { "type": "string", "title": "Ticker" },
-          "signal": { "type": "string", "title": "Signal" },
-          "strategy": { "type": "string", "title": "Strategy" },
-          "confidence": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Confidence" },
-          "timestamp": { "type": "string", "title": "Timestamp" },
-          "price_at_signal": { "anyOf": [{ "type": "number" }, { "type": "null" }], "title": "Price At Signal" }
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "signal": {
+            "type": "string",
+            "title": "Signal"
+          },
+          "strategy": {
+            "type": "string",
+            "title": "Strategy"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "price_at_signal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price At Signal"
+          }
         },
         "type": "object",
-        "required": ["ticker", "signal", "strategy", "timestamp"],
+        "required": [
+          "ticker",
+          "signal",
+          "strategy",
+          "timestamp"
+        ],
         "title": "TradingSignal",
         "description": "A trading signal from the engine."
+      },
+      "TrendingStock": {
+        "properties": {
+          "ticker": {
+            "type": "string",
+            "title": "Ticker"
+          },
+          "symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Symbol"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "change_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Percent"
+          },
+          "composite_score": {
+            "type": "number",
+            "title": "Composite Score"
+          },
+          "trend_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trend Score"
+          },
+          "momentum_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum Score"
+          },
+          "volume_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume Score"
+          },
+          "range_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Range Score"
+          },
+          "adx_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Adx Score"
+          },
+          "technical_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Technical Score"
+          },
+          "fundamental_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fundamental Score"
+          },
+          "consistency_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consistency Score"
+          },
+          "signal_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signal Score"
+          },
+          "momentum_1m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum 1M"
+          },
+          "momentum_3m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum 3M"
+          },
+          "momentum_6m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum 6M"
+          },
+          "momentum_12m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum 12M"
+          },
+          "fundamental_trend": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fundamental Trend"
+          },
+          "rank_tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank Tier"
+          },
+          "conviction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conviction"
+          },
+          "ranked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ranked At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticker",
+          "composite_score"
+        ],
+        "title": "TrendingStock"
       },
       "ValidationError": {
         "properties": {
           "loc": {
             "items": {
               "anyOf": [
-                { "type": "string" },
-                { "type": "integer" }
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
               ]
             },
             "type": "array",
             "title": "Location"
           },
-          "msg": { "type": "string", "title": "Message" },
-          "type": { "type": "string", "title": "Error Type" }
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
         },
         "type": "object",
-        "required": ["loc", "msg", "type"],
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
         "title": "ValidationError"
       }
     }

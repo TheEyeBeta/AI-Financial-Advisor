@@ -2,18 +2,24 @@
 # Start Backend Service
 # Usage: ./scripts/start-backend.sh
 
-cd "$(dirname "$0")/../backend/websearch_service"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$SCRIPT_DIR/../backend/websearch_service"
 
-# Prefer .venv but support the older venv name as a fallback.
+# Prefer service .venv, then repo-root .venv (common monorepo layout).
 if [ -d ".venv" ]; then
     VENV_DIR=".venv"
 elif [ -d "venv" ]; then
     VENV_DIR="venv"
+elif [ -d "$REPO_ROOT/.venv" ]; then
+    VENV_DIR="$REPO_ROOT/.venv"
+elif [ -d "$REPO_ROOT/venv" ]; then
+    VENV_DIR="$REPO_ROOT/venv"
 else
     echo "Virtual environment not found. Run setup first:"
-    echo "  python3 -m venv .venv"
-    echo "  source .venv/bin/activate"
-    echo "  pip install -r requirements.txt"
+    echo "  cd backend/websearch_service && python3 -m venv .venv"
+    echo "  source .venv/bin/activate && pip install -r requirements.txt"
+    echo "Or create .venv at repo root and re-run this script."
     exit 1
 fi
 
@@ -44,8 +50,11 @@ if [ -z "$PERPLEXITY_API_KEY" ]; then
     echo "  Or add it to backend/websearch_service/.env"
 fi
 
-# Start server
-echo "Starting backend server on http://localhost:8000"
-echo "API docs: http://localhost:8000/docs"
+# Start server (default 7000 to avoid clashing with other stacks on 8000; override with PORT=)
+PORT="${PORT:-7000}"
+echo "Starting backend server on http://localhost:${PORT}"
+echo "API docs: http://localhost:${PORT}/docs"
+echo "Frontend against this API: npm run dev:local  (separate terminal)"
+echo "Override: PORT=8000 npm run start:backend"
 echo ""
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port "${PORT}"

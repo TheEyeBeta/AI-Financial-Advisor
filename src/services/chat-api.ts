@@ -25,12 +25,12 @@ export function getTimeoutForMessage(message: string): number {
     'morning',
   ];
   if (trivial.some((t) => msg === t || msg.startsWith(t + ' ')) && length < 60) {
-    return 8000; // 8 seconds
+    return 15000; // 15 seconds — 3-4× headroom over expected ~2-4s INSTANT response
   }
 
   // FAST tier - short analytical questions
   if (length < 150) {
-    return 20000; // 20 seconds
+    return 25000; // 25 seconds — safe headroom for classifier + FAST path
   }
 
   // BALANCED tier - standard questions
@@ -44,10 +44,20 @@ export function getTimeoutForMessage(message: string): number {
 
 export function createStreamTimeout(
   timeoutMs: number,
+  message = '',
 ): { controller: AbortController; cancel: () => void; resetForChunk: () => void } {
   const controller = new AbortController();
+  const label = message.slice(0, 40);
+
+  console.log(`[TIMEOUT] message="${label}" timeout=${timeoutMs}ms ts=${Date.now()}`);
+
   let timeoutId: ReturnType<typeof setTimeout> | null =
-    timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    timeoutMs > 0
+      ? setTimeout(() => {
+          console.log(`[TIMEOUT_FIRED] aborted after ${timeoutMs}ms message="${label}"`);
+          controller.abort();
+        }, timeoutMs)
+      : null;
 
   return {
     controller,
