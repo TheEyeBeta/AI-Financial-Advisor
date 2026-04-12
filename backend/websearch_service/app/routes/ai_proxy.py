@@ -24,7 +24,7 @@ from ..services.meridian_context import (
     update_knowledge_tier,
 )
 from ..services.market_context import build_market_context
-from ..services.subagents import classify_intent, classify_tier, get_subagent_block
+from ..services.subagents import classify_intent, classify_tier, get_subagent_block, regex_classify_intent, FINANCIAL_KEYWORDS
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,21 @@ OPENAI_TITLE_MODEL = os.getenv("OPENAI_TITLE_MODEL", OPENAI_MODEL or "gpt-4o-min
 OPENAI_QUANT_MODEL = os.getenv("OPENAI_QUANT_MODEL", OPENAI_MODEL or "gpt-5")
 INSTANT_MODEL = os.environ.get("INSTANT_MODEL", "gpt-4o-mini")
 BALANCED_MODEL = os.environ.get("BALANCED_MODEL", "gpt-4o")
+DEEP_MODEL = os.environ.get("DEEP_MODEL", OPENAI_CHAT_MODEL)
+# Used for high-stakes categories requiring maximum accuracy.
+# Defaults to OPENAI_CHAT_MODEL (gpt-5).
+# Override with DEEP_MODEL=gpt-4o to reduce cost during testing.
+INTENT_ROUTING_MODE = os.environ.get("INTENT_ROUTING_MODE", "regex")
+# Options: "regex" (default) or "llm"
+# Set INTENT_ROUTING_MODE=llm to revert to API-based classification for debugging
+
+# Categories that warrant the highest-accuracy model (DEEP_MODEL).
+# Defined once at module level — immutable, zero per-request allocation.
+_DEEP_CATEGORIES: frozenset[str] = frozenset({
+    "portfolio_analysis",
+    "risk_assessment",
+    "stock_research",
+})
 try:
     OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
 except ValueError:
@@ -1202,6 +1217,45 @@ _TICKER_STOPWORDS = frozenset({
 
 _TICKER_RE = re.compile(r'\b[A-Z]{1,5}\b')
 
+# ── Non-finance rejection gate ─────────────────────────────────────────────────
+
+_NONFIN_REJECT_PATTERNS = re.compile(
+    r"^(?:"
+    r"(?:tell\s+me\s+(?:a\s+)?(?:joke|story|riddle|poem))"
+    r"|(?:what(?:'s| is)\s+the\s+(?:weather|time|date))"
+    r"|(?:(?:write|compose|generate)\s+(?:\w+\s+){0,2}(?:poem|song|essay|story))"
+    r"|(?:(?:who|what)\s+(?:is|are|was|were)\s+(?:the\s+)?"
+    r"(?:president|prime\s+minister|capital\s+of|tallest|largest|oldest))"
+    r"|(?:translate\s+\w)"
+    r"|(?:(?:play|sing|draw|paint)\s+)"
+    r"|(?:recipe\s+for|how\s+to\s+cook)"
+    r").*$",
+    re.IGNORECASE,
+)
+
+_FINANCE_ALLOWLIST = re.compile(
+    r"(?:apple|tesla|amazon|google|microsoft|meta|nvidia|netflix|berkshire)"
+    r"|(?:buy|sell|invest|stock|share|portfolio|market|trade|crypto|bitcoin|etf|fund)"
+    r"|(?:inflation|interest|recession|gdp|economy|tax|retire|pension|savings|dividend)"
+    r"|(?:iris|the\s+eye|my\s+account|my\s+goal|my\s+portfolio|onboard)",
+    re.IGNORECASE,
+)
+
+
+def _is_nonfin_message(message: str) -> bool:
+    """Return True only when a message matches a clear non-finance rejection pattern
+    and contains no finance-domain keywords that would override the rejection.
+
+    Pure: no I/O, no async, no side effects.
+    """
+    if not _NONFIN_REJECT_PATTERNS.search(message):
+        return False
+    if _FINANCE_ALLOWLIST.search(message):
+        return False
+    if FINANCIAL_KEYWORDS.search(message):
+        return False
+    return True
+
 
 def _extract_ticker(message: str) -> Optional[str]:
     """Return the first plausible ticker symbol found in message, or None.
@@ -1932,6 +1986,34 @@ async def chat_completion(
         # to the BALANCED gather and to the FAST/INSTANT skip path.
         detected_ticker = _extract_ticker(last_user_text)
 
+        # ── Non-finance rejection gate ──────────────────────────────────────────
+        # Fires before any I/O for FAST/BALANCED messages that clearly match a
+        # non-finance pattern and contain no finance allowlist override.
+        # INSTANT messages (trivial social phrases) bypass this check entirely
+        # because they are already handled by their own fast-path below.
+        if message_tier != "INSTANT" and _is_nonfin_message(last_user_text):
+            logger.info(
+                "[NONFIN_GATE] rejected non-financial message | msg='%s'",
+                last_user_text[:50],
+            )
+
+            _rejection = (
+                "That's outside what I'm built for — I'm IRIS, "
+                "your financial intelligence system. I'm here "
+                "for anything finance-related: markets, portfolio "
+                "questions, investment education, or understanding "
+                "The Eye's scoring. What would you like to explore?"
+            )
+
+            async def _rejection_stream():
+                yield _sse_event({"content": _rejection})
+                yield _sse_event({"done": True})
+
+            return StreamingResponse(
+                _rejection_stream(),
+                media_type="text/event-stream",
+            )
+
         # ── Steps 1 & 1b–1d: concurrent pipeline ───────────────────────────────
         # BALANCED  → run all four concurrently via asyncio.gather (saves wall time).
         # FAST      → _classify_query with a hard 3 s timeout cap; skip Meridian.
@@ -1944,15 +2026,19 @@ async def chat_completion(
             logger.info("[TIER] INSTANT: skipped Meridian context")
 
         elif message_tier == "FAST":
-            logger.info(f"[DEBUG] about to call _classify_query | tier={message_tier} | msg='{last_user_text[:30]}'")
+            logger.info(
+                "[DEBUG] about to call _classify_query | tier=%s | msg='%s'",
+                message_tier,
+                last_user_text[:30],
+            )
             _t0_cq = time.perf_counter()
             try:
                 classification = await asyncio.wait_for(
-                    _classify_query(last_user_text), timeout=3.0
+                    _classify_query(last_user_text), timeout=2.0
                 )
             except asyncio.TimeoutError:
                 logger.warning(
-                    "[PIPELINE_TIMING] step=_classify_query FAST-tier timed out after 3.0s, using default"
+                    "[PIPELINE_TIMING] step=_classify_query FAST-tier timed out after 2.0s, using default"
                 )
                 classification = _default_classification
             elapsed_cq = (time.perf_counter() - _t0_cq) * 1000
@@ -1968,16 +2054,30 @@ async def chat_completion(
         else:  # BALANCED — run all four concurrently
             logger.info(f"[DEBUG] about to call _classify_query | tier={message_tier} | msg='{last_user_text[:30]}'")
             _t0_both = time.perf_counter()
-            _gather_results = await asyncio.gather(
-                _classify_query(last_user_text),
-                build_iris_context(verified_user_id),
-                classify_intent(last_user_text, tier=message_tier),
-                build_market_context(ticker=detected_ticker),
-                return_exceptions=True,
-            )
+            if INTENT_ROUTING_MODE == "regex":
+                # Compute intent synchronously — zero I/O, near-instant
+                _ci_result: Any = regex_classify_intent(last_user_text, ticker=detected_ticker)
+                logger.info(
+                    f"[INTENT] mode=regex result={_ci_result} elapsed=0ms"
+                )
+                _cq_result, _mc_result, _mkt_result = await asyncio.gather(
+                    _classify_query(last_user_text),
+                    build_iris_context(verified_user_id),
+                    build_market_context(ticker=detected_ticker),
+                    return_exceptions=True,
+                )
+            else:
+                _cq_result, _mc_result, _ci_result, _mkt_result = await asyncio.gather(
+                    _classify_query(last_user_text),
+                    build_iris_context(verified_user_id),
+                    classify_intent(last_user_text, tier=message_tier),
+                    build_market_context(ticker=detected_ticker),
+                    return_exceptions=True,
+                )
+                logger.info(
+                    f"[INTENT] mode=llm result={_ci_result if not isinstance(_ci_result, BaseException) else 'error'}"
+                )
             _elapsed_both = (time.perf_counter() - _t0_both) * 1000
-
-            _cq_result, _mc_result, _ci_result, _mkt_result = _gather_results
 
             if isinstance(_cq_result, BaseException):
                 logger.error(
@@ -2073,7 +2173,16 @@ async def chat_completion(
             logger.info("[TIER] INSTANT: intent=general (fast-path)")
         elif message_tier == "FAST":
             _t0_ci = time.perf_counter()
-            subagent_category = await classify_intent(last_user_text, tier=message_tier)
+            if INTENT_ROUTING_MODE == "regex":
+                subagent_category = regex_classify_intent(last_user_text, ticker=detected_ticker)
+                logger.info(
+                    f"[INTENT] mode=regex result={subagent_category} elapsed=0ms"
+                )
+            else:
+                subagent_category = await classify_intent(last_user_text, tier=message_tier)
+                logger.info(
+                    f"[INTENT] mode=llm result={subagent_category}"
+                )
             _elapsed_ci = (time.perf_counter() - _t0_ci) * 1000
             logger.info(
                 "[PIPELINE_TIMING] step=classify_intent elapsed=%.1fms user_msg='%s'",
@@ -2125,11 +2234,18 @@ async def chat_completion(
         elif message_tier == "FAST":
             _base_system_prompt = FAST_SYSTEM_PROMPT
             _chat_model = BALANCED_MODEL
-        else:  # BALANCED
+        else:  # BALANCED — high-stakes categories get the deep model
             _base_system_prompt = FINANCIAL_ADVISOR_SYSTEM_PROMPT
-            _chat_model = BALANCED_MODEL
+            if subagent_category in _DEEP_CATEGORIES:
+                _chat_model = DEEP_MODEL
+            else:
+                _chat_model = BALANCED_MODEL
 
-        logger.info(f"[MODEL] tier={message_tier} model={_chat_model}")
+        logger.info(
+            f"[MODEL] tier={message_tier} "
+            f"category={subagent_category} "
+            f"model={_chat_model}"
+        )
 
         system_parts = [_base_system_prompt]
         if meridian_context and meridian_context.strip():

@@ -205,6 +205,43 @@ async def _classify_via_api(message: str, timeout: float) -> str:
         return "general"
 
 
+# ── Regex intent classification patterns (precompiled) ─────────────────────────
+
+_REGEX_PORTFOLIO_PAT = re.compile(
+    r"\bmy\s+(?:portfolio|positions|holdings|allocation|stocks|investments|returns|performance)\b"
+    r"|\brebalance\b"
+    r"|\bhow\s+am\s+i\s+doing\b",
+    re.IGNORECASE,
+)
+
+# Ticker alone is sufficient; these keywords only fire when paired with a
+# financial-domain context (re-uses the existing FINANCIAL_KEYWORDS guard).
+_REGEX_STOCK_PAT = re.compile(
+    r"\b(?:buy|sell|analysis|analyse|analyze|score|research|valuation|earnings|revenue|fundamentals|technical)\b"
+    r"|\bprice\s+target\b",
+    re.IGNORECASE,
+)
+
+_REGEX_RISK_PAT = re.compile(
+    r"\b(?:risk|exposure|hedge|drawdown|volatility|downside|danger|safe|worst\s+case|lose\s+money)\b",
+    re.IGNORECASE,
+)
+
+_REGEX_MARKET_PAT = re.compile(
+    r"\b(?:market|macro|economy|sector|vix|nasdaq|index|indices|overall|economic)\b"
+    r"|\bs&p\b"
+    r"|\bbroad\s+market\b",
+    re.IGNORECASE,
+)
+
+_REGEX_EDUCATION_PAT = re.compile(
+    r"\b(?:what\s+is|what\s+are|how\s+does|how\s+do|explain|teach\s+me|what\s+does|define|why\s+does|why\s+is)\b"
+    r"|\bmeaning\s+of\b"
+    r"|\bdifference\s+between\b"
+    r"|\bhelp\s+me\s+understand\b",
+    re.IGNORECASE,
+)
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def classify_tier(message: str) -> str:
@@ -284,6 +321,43 @@ async def classify_intent(last_user_message: str, tier: str = "BALANCED") -> str
             intent,
             elapsed,
         )
+
+
+def regex_classify_intent(message: str, ticker: str | None = None) -> str:
+    """Classify intent using deterministic regex — zero I/O, under 1ms.
+
+    Returns one of the six VALID_CATEGORIES strings. Priority order is applied
+    top-down; the first match wins.
+
+    Priority:
+      1. portfolio_analysis — "my portfolio/positions/…", "rebalance", "how am i doing"
+      2. stock_research     — ticker detected, OR financial keywords (buy/sell/earnings/…)
+      3. risk_assessment    — risk/exposure/hedge/drawdown/…
+      4. market_overview    — market/macro/sector/vix/nasdaq/…
+      5. education          — what is/explain/how does/…
+      6. general            — fallback
+    """
+    msg = message.strip()
+
+    if _REGEX_PORTFOLIO_PAT.search(msg):
+        category = "portfolio_analysis"
+    elif ticker is not None or (
+        _REGEX_STOCK_PAT.search(msg) and FINANCIAL_KEYWORDS.search(msg)
+    ):
+        category = "stock_research"
+    elif _REGEX_RISK_PAT.search(msg):
+        category = "risk_assessment"
+    elif _REGEX_MARKET_PAT.search(msg):
+        category = "market_overview"
+    elif _REGEX_EDUCATION_PAT.search(msg):
+        category = "education"
+    else:
+        category = "general"
+
+    logger.debug(
+        f"regex_classify_intent: result={category} ticker={ticker} msg='{msg[:40]}'"
+    )
+    return category
 
 
 def get_subagent_block(category: str, meridian_context: str = "") -> str:
