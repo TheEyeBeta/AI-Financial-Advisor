@@ -22,7 +22,7 @@ afterEach(() => {
 // ─── Mock environment variables ─────────────────────────────────────────
 process.env.VITE_SUPABASE_URL = 'https://test.supabase.co';
 process.env.VITE_SUPABASE_ANON_KEY = 'test-anon-key';
-process.env.VITE_PYTHON_API_URL = 'http://localhost:8000';
+process.env.VITE_PYTHON_API_URL = 'http://localhost:7000';
 
 // ─── Browser API mocks ─────────────────────────────────────────────────
 // matchMedia — required by responsive/theme components

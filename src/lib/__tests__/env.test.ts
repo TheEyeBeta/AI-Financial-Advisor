@@ -55,7 +55,7 @@ describe('getSupabaseEnvConfig', () => {
 
 describe('getPythonApiUrl', () => {
   it('falls back to localhost in development', () => {
-    expect(getPythonApiUrl(createEnv())).toBe('http://localhost:8000');
+    expect(getPythonApiUrl(createEnv())).toBe('http://localhost:7000');
   });
 
   it('throws in production when missing', () => {
@@ -66,7 +66,7 @@ describe('getPythonApiUrl', () => {
 
   it('throws in production when pointing to localhost', () => {
     expect(() =>
-      getPythonApiUrl(createEnv({ PROD: true, VITE_PYTHON_API_URL: 'http://localhost:8000' })),
+      getPythonApiUrl(createEnv({ PROD: true, VITE_PYTHON_API_URL: 'http://localhost:7000' })),
     ).toThrow('VITE_PYTHON_API_URL must not point to localhost in production.');
   });
 });
@@ -86,7 +86,7 @@ describe('shouldMonitorBackendHealth', () => {
 
   it('does not enable monitoring in development for an explicitly local backend by default', () => {
     expect(
-      shouldMonitorBackendHealth(createEnv({ VITE_PYTHON_API_URL: 'http://localhost:8000' })),
+      shouldMonitorBackendHealth(createEnv({ VITE_PYTHON_API_URL: 'http://localhost:7000' })),
     ).toBe(false);
   });
 
@@ -100,7 +100,7 @@ describe('shouldMonitorBackendHealth', () => {
     expect(
       shouldMonitorBackendHealth(
         createEnv({
-          VITE_PYTHON_API_URL: 'http://localhost:8000',
+          VITE_PYTHON_API_URL: 'http://localhost:7000',
           VITE_ENABLE_LOCAL_BACKEND_MONITOR: 'true',
         }),
       ),

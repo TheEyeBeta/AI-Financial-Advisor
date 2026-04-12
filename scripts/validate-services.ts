@@ -1,6 +1,6 @@
 async function validateE2E() {
   const baseWebsearch = process.env.WEBSEARCH_BASE_URL || 'http://localhost:8001';
-  const baseTradeEngine = process.env.TRADE_ENGINE_BASE_URL || 'http://localhost:8000';
+  const baseTradeEngine = process.env.TRADE_ENGINE_BASE_URL || 'http://localhost:7000';
 
   const tests: Array<{ name: string; test: () => Promise<boolean> }> = [
     {

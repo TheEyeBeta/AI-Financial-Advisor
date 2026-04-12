@@ -20,14 +20,12 @@ if (-not $venvPath) {
     exit 1
 }
 
-Write-Host "Starting backend with Railway environment variables on http://127.0.0.1:8000"
+Write-Host "Starting backend with Railway environment variables on http://127.0.0.1:7000"
 Write-Host "This uses the linked Railway project/service from backend/websearch_service."
 Write-Host "Local overrides: ENVIRONMENT=development for localhost CORS/trusted-host behavior."
 Write-Host ""
 
-$launcher = @"
-$env:ENVIRONMENT = 'development'
-& $venvPath -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-"@
+$venvExe = Join-Path (Get-Location) $venvPath
+$launcher = "`$env:ENVIRONMENT='development'; & `"$venvExe`" -m uvicorn app.main:app --host 127.0.0.1 --port 7000 --reload"
 
 npx railway run powershell -ExecutionPolicy Bypass -Command $launcher

@@ -14,7 +14,7 @@ const backendServer = process.env.CI || useExternalBaseUrl
   : [
       {
         command: 'bash scripts/start-backend.sh',
-        url: 'http://localhost:8000/health',
+        url: 'http://localhost:7000/health',
         timeout: 120 * 1000,
         reuseExistingServer: true as const,
         stdout: 'pipe' as const,

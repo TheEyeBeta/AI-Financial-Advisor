@@ -901,7 +901,7 @@ export const pythonApi = {
 
         const chatUrl = new URL('/api/chat', pythonBackendUrl).toString();
         const timeout = getTimeoutForMessage(message);
-        const streamTimeout = createStreamTimeout(timeout);
+        const streamTimeout = createStreamTimeout(timeout, message);
 
         try {
           const response = await fetch(chatUrl, {
@@ -994,7 +994,7 @@ export const pythonApi = {
 
       const chatUrl = new URL('/api/chat', pythonBackendUrl).toString();
       const timeout = getTimeoutForMessage(message);
-      const streamTimeout = createStreamTimeout(timeout);
+      const streamTimeout = createStreamTimeout(timeout, message);
 
       try {
         const response = await fetch(chatUrl, {

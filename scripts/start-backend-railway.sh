@@ -15,9 +15,9 @@ else
   exit 1
 fi
 
-echo "Starting backend with Railway environment variables on http://127.0.0.1:8000"
+echo "Starting backend with Railway environment variables on http://127.0.0.1:7000"
 echo "This uses the linked Railway project/service from backend/websearch_service."
 echo "Local overrides: ENVIRONMENT=development for localhost CORS/trusted-host behavior."
 echo ""
 
-npx railway run bash -lc "export ENVIRONMENT=development; \"$PYTHON_BIN\" -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"
+npx railway run bash -lc "export ENVIRONMENT=development; \"$PYTHON_BIN\" -m uvicorn app.main:app --host 127.0.0.1 --port 7000 --reload"

@@ -29,6 +29,7 @@
     "validate": "npm run lint:ci && npm run type-check && npm run test",
     "generate:api-types": "openapi-typescript docs/openapi.json -o src/lib/generated/api-types.ts",
     "validate:services": "node --experimental-strip-types scripts/validate-services.ts",
+    "dev:local": "node scripts/dev-local-frontend.mjs",
     "start:backend": "node scripts/start-backend.mjs",
     "start:backend:railway": "node scripts/start-backend-railway.mjs",
     "start:backend:bash": "bash scripts/start-backend.sh",
