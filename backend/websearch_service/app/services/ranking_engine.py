@@ -275,12 +275,12 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             skipped_incomplete += 1
             continue
 
-        # Hard filter 1 & 2: overbought / oversold
-        if snap.get("is_overbought") or snap.get("is_oversold"):
-            skipped_hard_filter += 1
-            continue
+        # Overbought/oversold removed as hard filters — RSI is
+        # already a market signal and extreme readings often
+        # accompany the strongest momentum stocks.
+        # The scoring algorithm handles this via momentum components.
 
-        # Hard filter 3: ranging market (ADX < 20)
+        # Hard filter: ranging market (ADX < 20)
         adx = _f(snap.get("adx"))
         if adx < 20:  # type: ignore[operator]  # non-null guaranteed by completeness check
             skipped_hard_filter += 1
