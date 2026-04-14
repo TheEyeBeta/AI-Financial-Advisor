@@ -21,14 +21,22 @@ Hard filters (applied after completeness check):
                                      ignored due to pipeline bug, recalculated here)
 
 Scoring formula (weights):
-  trend_score     35%  normalise(price_vs_sma_50)
-  momentum_score  35%  normalise(return_6m) * 0.50
-                       + normalise(rsi_14)  * 0.25
-                       + normalise(macd_histogram) * 0.25
-  volume_score    20%  normalise(volume / avg_volume_10d)
-  adx_score       10%  normalise(adx) if is_bullish else 0
+  momentum_score  40%  multi-horizon return blend:
+                         normalise(return_1m)  * 0.20
+                         normalise(return_3m)  * 0.35
+                         normalise(return_6m)  * 0.30
+                         normalise(return_12m) * 0.15
+                       (rsi_14 and macd_histogram removed from momentum;
+                        MACD effect retained via trend score)
+  trend_score     25%  normalise(price_vs_sma_50)
+  quality_score   15%  eps_growth * 0.50 + revenue_growth * 0.30
+                         + earnings_yield (1/pe_ratio) * 0.20
+                       null fields default to 50.0 (neutral) — quality data
+                       is optional; winsorization handles PE outliers
+  volume_score    10%  normalise(volume / avg_volume_10d)
+  adx_score       10%  normalise(adx) if is_bullish else neutral 50.0
 
-  composite = 0.35*trend + 0.35*momentum + 0.20*volume + 0.10*adx
+  composite = 0.40*momentum + 0.25*trend + 0.15*quality + 0.10*volume + 0.10*adx
 
   Deliberately excluded (require > 6 months of history):
     price_vs_sma_200  — SMA-200 needs 200 days (~10 months)
@@ -48,6 +56,8 @@ import logging
 import time as _time
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+import numpy as np
 
 from .supabase_client import supabase_client
 
@@ -76,21 +86,40 @@ def _f(val: Any) -> Optional[float]:
         return None
 
 
+def _winsorize(
+    values: dict[str, float],
+    lower_pct: float = 5.0,
+    upper_pct: float = 95.0,
+) -> dict[str, float]:
+    """Clip values to [lower_pct, upper_pct] percentile range cross-sectionally.
+    Prevents a single outlier from compressing the rest of the universe
+    when passed into _minmax_normalize.
+    """
+    if len(values) < 4:
+        return values  # too few tickers to winsorize meaningfully
+    arr = np.array(list(values.values()), dtype=float)
+    lo = float(np.percentile(arr, lower_pct))
+    hi = float(np.percentile(arr, upper_pct))
+    return {k: float(np.clip(v, lo, hi)) for k, v in values.items()}
+
+
 def _minmax_normalize(
     values: dict[str, float], default: float = 50.0
 ) -> dict[str, float]:
-    """Min-max normalize {ticker: raw_value} → {ticker: 0-100, rounded to 2 dp}.
-
-    If all values are identical (range == 0), every ticker gets `default`.
+    """Winsorize then min-max normalize {ticker: raw_value} → {ticker: 0-100}.
+    Winsorization (5th/95th pct) prevents outliers from distorting the
+    cross-sectional ranking.  If all post-clip values are identical, every
+    ticker gets `default`.
     """
     if not values:
         return {}
-    lo = min(values.values())
-    hi = max(values.values())
+    clipped = _winsorize(values)
+    lo = min(clipped.values())
+    hi = max(clipped.values())
     rng = hi - lo
     if rng == 0:
         return {t: default for t in values}
-    return {t: round((v - lo) / rng * 100.0, 2) for t, v in values.items()}
+    return {t: round((v - lo) / rng * 100.0, 2) for t, v in clipped.items()}
 
 
 # ── Data fetching ─────────────────────────────────────────────────────────────
@@ -109,12 +138,19 @@ def _fetch_indicators_snapshot() -> dict[str, dict]:
             "rsi_14, macd_histogram, "
             "adx, is_bullish, "
             "price_vs_sma_50, "
-            "is_overbought, is_oversold"
+            "is_overbought, is_oversold, "
+            "eps_growth, revenue_growth, pe_ratio"
         )
+        .order("market_cap", desc=True)
         .limit(600)
         .execute()
     )
     rows = result.data or []
+    if len(rows) == 600:
+        logger.warning(
+            "_fetch_indicators_snapshot: hit 600-row cap — universe may be truncated. "
+            "Consider raising the limit."
+        )
     by_ticker = {row["ticker"]: row for row in rows if row.get("ticker")}
     logger.info("_fetch_indicators_snapshot: %d tickers", len(by_ticker))
     return by_ticker
@@ -169,6 +205,9 @@ def _has_complete_data(snap: dict, returns_row: Optional[dict]) -> bool:
         return False
     r6m = _f(returns_row.get("return_6m"))
     if r6m is None:
+        return False
+    r3m = _f(returns_row.get("return_3m"))
+    if r3m is None:
         return False
 
     # All snapshot scoring fields must be non-null / finite
@@ -295,22 +334,26 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     }
     trend_norm = _minmax_normalize(raw_trend)
 
-    # ── Momentum (6m-biased) ──────────────────────────────────────────────────
-    # return_6m drives 50% of the momentum score so that sustained 6-month
-    # price performance is rewarded over short-term oscillator readings alone.
-    raw_return_6m  = {t: s["_return_6m"]    for t, s in filtered.items()}  # guaranteed non-null
-    raw_rsi        = {t: _f(s["rsi_14"])    for t, s in filtered.items() if _f(s.get("rsi_14"))        is not None}  # type: ignore[misc]
-    raw_macd_hist  = {t: _f(s["macd_histogram"]) for t, s in filtered.items() if _f(s.get("macd_histogram")) is not None}  # type: ignore[misc]
-
-    return_6m_norm = _minmax_normalize(raw_return_6m)   # type: ignore[arg-type]
-    rsi_norm       = _minmax_normalize(raw_rsi)          # type: ignore[arg-type]
-    macd_hist_norm = _minmax_normalize(raw_macd_hist)    # type: ignore[arg-type]
+    # ── Momentum (multi-horizon blend) ───────────────────────────────────────────
+    # Weights: 1M=20%, 3M=35%, 6M=30%, 12M=15%
+    # 3M and 6M carry the most weight — medium-term momentum is most predictive.
+    # 1M adds short-term acceleration; 12M adds long-term persistence context.
+    # All four are already fetched; only normalise tickers where the value is non-null.
+    raw_return_1m  = {t: s["_return_1m"]  for t, s in filtered.items() if s.get("_return_1m")  is not None}
+    raw_return_3m  = {t: s["_return_3m"]  for t, s in filtered.items() if s.get("_return_3m")  is not None}
+    raw_return_6m  = {t: s["_return_6m"]  for t, s in filtered.items() if s.get("_return_6m")  is not None}
+    raw_return_12m = {t: s["_return_12m"] for t, s in filtered.items() if s.get("_return_12m") is not None}
+    return_1m_norm  = _minmax_normalize(raw_return_1m)
+    return_3m_norm  = _minmax_normalize(raw_return_3m)
+    return_6m_norm  = _minmax_normalize(raw_return_6m)
+    return_12m_norm = _minmax_normalize(raw_return_12m)
 
     momentum_scores: dict[str, float] = {
         ticker: round(
-            return_6m_norm.get(ticker, 50.0) * 0.50
-            + rsi_norm.get(ticker,       50.0) * 0.25
-            + macd_hist_norm.get(ticker,  50.0) * 0.25,
+            return_1m_norm.get(ticker,  50.0) * 0.20
+            + return_3m_norm.get(ticker,  50.0) * 0.35
+            + return_6m_norm.get(ticker,  50.0) * 0.30
+            + return_12m_norm.get(ticker, 50.0) * 0.15,
             2,
         )
         for ticker in filtered
@@ -322,6 +365,39 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
 
     # range_score removed — high_52w / low_52w require ~252 days (> 6-month gate).
 
+    # ── Quality / Growth ──────────────────────────────────────────────────────
+    # Uses eps_growth (50%), revenue_growth (30%), earnings yield 1/pe_ratio (20%).
+    # pe_ratio is inverted so higher earnings yield = higher score.
+    # Tickers with null fields are excluded from that sub-pool and receive 50.0.
+    # Winsorization inside _minmax_normalize handles PE ratio outliers.
+    raw_eps_growth = {
+        t: _f(s.get("eps_growth"))
+        for t, s in filtered.items()
+        if _f(s.get("eps_growth")) is not None
+    }
+    raw_rev_growth = {
+        t: _f(s.get("revenue_growth"))
+        for t, s in filtered.items()
+        if _f(s.get("revenue_growth")) is not None
+    }
+    raw_earnings_yield = {
+        t: 1.0 / _f(s.get("pe_ratio"))
+        for t, s in filtered.items()
+        if _f(s.get("pe_ratio")) is not None and _f(s.get("pe_ratio")) > 0
+    }
+    eps_growth_norm     = _minmax_normalize(raw_eps_growth)
+    rev_growth_norm     = _minmax_normalize(raw_rev_growth)
+    earnings_yield_norm = _minmax_normalize(raw_earnings_yield)
+    quality_scores: dict[str, float] = {
+        ticker: round(
+            eps_growth_norm.get(ticker,      50.0) * 0.50
+            + rev_growth_norm.get(ticker,    50.0) * 0.30
+            + earnings_yield_norm.get(ticker, 50.0) * 0.20,
+            2,
+        )
+        for ticker in filtered
+    }
+
     # ── ADX (bullish-only) ────────────────────────────────────────────────────
     # Normalisation pool is restricted to is_bullish tickers so their ADX
     # values are ranked relative to each other.  Non-bullish → score = 0.
@@ -331,8 +407,12 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
         if snap.get("is_bullish") and _f(snap.get("adx")) is not None
     }
     adx_bullish_norm = _minmax_normalize(raw_adx_bullish)
+    # Non-bullish tickers receive a neutral 50.0 (not 0) on the ADX leg.
+    # The bullish-only normalisation pool means bullish tickers compete for
+    # 0-100 among themselves; non-bullish tickers are excluded from that pool
+    # but are not penalised — they receive the midpoint score instead.
     adx_scores: dict[str, float] = {
-        ticker: adx_bullish_norm.get(ticker, 0.0)
+        ticker: adx_bullish_norm.get(ticker, 50.0)
         for ticker in filtered
     }
 
@@ -346,13 +426,15 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             t_score = trend_norm.get(ticker, 50.0)
             m_score = momentum_scores.get(ticker, 50.0)
             v_score = volume_norm.get(ticker, 50.0)
-            a_score = adx_scores.get(ticker, 0.0)
+            a_score = adx_scores.get(ticker, 50.0)
+            q_score = quality_scores.get(ticker, 50.0)
 
             composite = round(
-                0.35 * t_score
-                + 0.35 * m_score
-                + 0.20 * v_score
-                + 0.10 * a_score,
+                0.40 * m_score   # momentum is the primary driver
+                + 0.25 * t_score  # trend confirmation
+                + 0.15 * q_score  # quality/growth anchor
+                + 0.10 * v_score  # liquidity (halved — already a hard filter)
+                + 0.10 * a_score, # ADX trend strength (bullish only)
                 2,
             )
 
@@ -371,6 +453,7 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
                 "momentum_score":    round(m_score, 2),
                 "trend_score":       round(t_score, 2),
                 "volume_score":      round(v_score, 2),
+                "quality_score":     round(q_score, 2),
                 "range_score":       None,   # removed — requires 52-week data (> 6-month gate)
                 "adx_score":         round(a_score, 2),
                 # Legacy dimension fields
@@ -457,6 +540,9 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             len(top_50_tickers),
         )
 
+    # ── Step 8: Persist full scored set to stock_ranking_history ──────────────
+    _persist_ranking_history(scored_results, cycle_start)
+
     elapsed = round(_time.monotonic() - start_ts, 2)
     summary: dict = {
         "tickers_scored":         tickers_scored,
@@ -469,6 +555,55 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     }
     logger.info("Ranking cycle complete: %s", summary)
     return summary
+
+
+def _persist_ranking_history(
+    scored_results: list[dict], cycle_start: datetime
+) -> None:
+    """Write all scored tickers (not just top 50) to market.stock_ranking_history.
+
+    This powers the intelligence_engine.py 'top 10' lookups (which reads the
+    latest scored_at snapshot ordered by composite_score) and enables EMA score
+    smoothing in future iterations.
+
+    Table schema mapping:
+    - scored_at         ← cycle_start (intelligence_engine reads this field)
+    - dimension_scores  ← JSONB holding per-component scores
+    - ticker_id_fk      ← nullable FK, omitted here (no ticker UUID lookup)
+    - horizon           hardcoded to 'balanced' to match existing read queries
+    """
+    if not scored_results:
+        return
+    now_iso = cycle_start.isoformat()
+    rows = [
+        {
+            "ticker":          r["ticker"],
+            "composite_score": r["composite_score"],
+            "rank_tier":       r["rank_tier"],
+            "conviction":      r["conviction"],
+            "horizon":         "balanced",
+            "scored_at":       now_iso,
+            "dimension_scores": {
+                "momentum_score": r["momentum_score"],
+                "trend_score":    r["trend_score"],
+                "volume_score":   r["volume_score"],
+                "adx_score":      r.get("adx_score", 50.0),
+                "quality_score":  r.get("quality_score", 50.0),
+            },
+        }
+        for r in scored_results
+    ]
+    try:
+        supabase_client.schema("market").table("stock_ranking_history").insert(
+            rows
+        ).execute()
+        logger.info(
+            "_persist_ranking_history: wrote %d rows to stock_ranking_history",
+            len(rows),
+        )
+    except Exception as exc:
+        logger.error("Failed to persist ranking history: %s", exc)
+        # Non-fatal — do not re-raise; cycle summary is still returned
 
 
 # ── Public async entry point ──────────────────────────────────────────────────
