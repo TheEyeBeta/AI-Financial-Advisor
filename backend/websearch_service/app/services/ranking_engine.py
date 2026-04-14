@@ -286,13 +286,14 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             skipped_hard_filter += 1
             continue
 
-        # Hard filter 4: thin volume (recalculated ratio < 0.8)
-        volume     = _f(snap.get("volume"))
+        # Volume hard filter removed — avg_volume_10d and volume
+        # are stored in different units in stock_snapshots, making
+        # ratio comparison unreliable. Volume is already a scoring
+        # factor at 15% weight which handles liquidity ranking.
+        # TODO: restore filter once upstream unit mismatch is fixed.
+        volume      = _f(snap.get("volume"))
         avg_vol_10d = _f(snap.get("avg_volume_10d"))
-        recalc_ratio = volume / avg_vol_10d  # type: ignore[operator]  # non-null guaranteed
-        if recalc_ratio < 0.8:
-            skipped_hard_filter += 1
-            continue
+        recalc_ratio = volume / avg_vol_10d  # type: ignore[operator]  # non-null guaranteed by completeness check
 
         # Merge returns into the snap dict for convenience
         merged = dict(snap)
