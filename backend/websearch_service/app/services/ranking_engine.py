@@ -582,6 +582,7 @@ def _persist_ranking_history(
         {
             "ticker":          r["ticker"],
             "composite_score": r["composite_score"],
+            "smoothed_score":  r["composite_score"],
             "rank_tier":       r["rank_tier"],
             "conviction":      r["conviction"],
             "horizon":         "balanced",
