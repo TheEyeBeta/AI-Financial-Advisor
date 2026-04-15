@@ -6,13 +6,13 @@ but the columns were never created.  PostgREST silently drops unknown
 keys in the upsert payload, so these four always come back as NULL
 and the frontend falls back to 50 (neutral).
 
-Backfill from existing columns where possible:
+Backfill from existing data:
   technical_score   ← trend_score      (trend = technical)
   signal_score      ← momentum_score   (momentum = signal)
   consistency_score ← volume_score     (volume = consistency)
-  fundamental_score ← NULL             (derived from eps_growth / revenue_growth /
-                                        pe_ratio which aren't stored in this table;
-                                        will be populated on next ranking cycle)
+  fundamental_score ← stock_ranking_history.dimension_scores->>'quality_score'
+                      (quality = fundamental; sourced from the latest balanced-
+                      horizon ranking cycle)
 """
 from __future__ import annotations
 
@@ -39,6 +39,18 @@ def upgrade() -> None:
             signal_score      = momentum_score,
             consistency_score = volume_score
         WHERE technical_score IS NULL;
+    """)
+    # Backfill fundamental_score from the latest ranking history cycle
+    op.execute("""
+        UPDATE market.trending_stocks t
+        SET fundamental_score = (
+            SELECT (h.dimension_scores->>'quality_score')::numeric
+            FROM market.stock_ranking_history h
+            WHERE h.ticker = t.ticker AND h.horizon = 'balanced'
+            ORDER BY h.scored_at DESC
+            LIMIT 1
+        )
+        WHERE t.fundamental_score IS NULL;
     """)
 
 
