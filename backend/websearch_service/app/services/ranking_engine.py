@@ -430,14 +430,17 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             a_score = adx_scores.get(ticker, 50.0)
             q_score = quality_scores.get(ticker, 50.0)
 
-            # ADX zeroed out — upstream data pinned at 100 for most tickers.
-            # Weight redistributed to trend and volume until ADX pipeline is fixed.
-            # TODO: restore ADX weight once The Eye ADX calculation is verified.
+            # Composite weights: momentum 40%, trend 25%,
+            # quality 15%, volume 10%, ADX 10%
+            # ADX restored 2026-04-15 — upstream Wilder
+            # smoothing fix confirmed, avg ADX = 43.85,
+            # zero tickers pinned at 100.
             composite = round(
                 0.40 * m_score
-                + 0.30 * t_score
+                + 0.25 * t_score
                 + 0.15 * q_score
-                + 0.15 * v_score,
+                + 0.10 * v_score
+                + 0.10 * a_score,
                 2,
             )
 
