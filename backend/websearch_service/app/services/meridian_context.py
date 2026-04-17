@@ -197,6 +197,10 @@ def _format_context_block(ctx: dict) -> str:
     if trading_positions or closed_trades:
         parts.append(_format_trading_positions(trading_positions, closed_trades))
 
+    # ── 10B. Portfolio value + aggregate trade statistics ─────────────────────
+    if ctx.get("portfolio_stats"):
+        parts.append(ctx["portfolio_stats"])
+
     # ── 11. Academy progress ───────────────────────────────────────────────────
     parts.append(_format_academy_progress(academy_progress))
 
@@ -346,6 +350,45 @@ def _format_trading_positions(positions: list, closed_trades: list) -> str:
             )
 
     return "".join(parts)
+
+
+def _format_portfolio_stats(
+    portfolio_history_rows: list,
+    total_trades: int,
+    total_open_positions: int,
+    win_rate: float,
+    realized_pnl: float,
+    avg_profit: float,
+    avg_loss: float,
+    profit_factor: Optional[float],
+) -> str:
+    """Format portfolio value + aggregate trade stats (context block 10B)."""
+    lines = ["\n=== PORTFOLIO SUMMARY ==="]
+
+    if portfolio_history_rows:
+        latest_value = float(portfolio_history_rows[0].get("value") or 0)
+        oldest_value = float(portfolio_history_rows[-1].get("value") or 0)
+        change = latest_value - oldest_value
+        pct = (change / oldest_value * 100) if oldest_value != 0 else 0.0
+        lines.append(f"Current Portfolio Value: €{latest_value:,.2f}")
+        lines.append(f"  (30-day change: {change:+,.2f} / {pct:+.1f}%)")
+
+    if total_trades == 0:
+        lines.append("\nNo closed trades yet.")
+    else:
+        lines.append("\nTrade Statistics (all-time):")
+        lines.append(f"  Total trades: {total_trades}")
+        lines.append(f"  Open positions: {total_open_positions}")
+        lines.append(f"  Win rate: {win_rate:.1f}%")
+        lines.append(f"  Realized P&L: €{realized_pnl:+,.2f}")
+        lines.append(f"  Avg profit per winner: €{avg_profit:,.2f}")
+        lines.append(f"  Avg loss per loser: €{avg_loss:,.2f}")
+        if profit_factor is None:
+            lines.append("  Profit factor: N/A")
+        else:
+            lines.append(f"  Profit factor: {profit_factor:.2f}x")
+
+    return "\n".join(lines) + "\n"
 
 
 def _format_academy_progress(progress: dict) -> str:
@@ -729,6 +772,76 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     except Exception:
         logger.exception("DB query failed: trading positions/trades for user_id=%s", user_id)
 
+    # ── NEW BLOCK 10B: Portfolio history + aggregate trade stats ─────────────
+    # Reuses core_user_id resolved above. Each query isolated so a single
+    # failure does not wipe out the others.
+    portfolio_history_rows: List[Dict[str, Any]] = []
+    all_closed_trades: List[Dict[str, Any]] = []
+    total_open_positions: int = 0
+    portfolio_stats_str: str = ""
+    if core_user_id:
+        try:
+            ph_res = (
+                _table(client, "trading", "portfolio_history")
+                .select("date, value")
+                .eq("user_id", core_user_id)
+                .order("date", desc=True)
+                .limit(30)
+                .execute()
+            )
+            portfolio_history_rows = (ph_res and ph_res.data) or []
+        except Exception:
+            logger.warning("Could not fetch trading.portfolio_history for user_id=%s", user_id)
+            portfolio_history_rows = []
+
+        try:
+            all_trades_res = (
+                _table(client, "trading", "trades")
+                .select("pnl, type")
+                .eq("user_id", core_user_id)
+                .filter("exit_date", "not.is", "null")
+                .execute()
+            )
+            all_closed_trades = (all_trades_res and all_trades_res.data) or []
+        except Exception:
+            logger.warning("Could not fetch trading.trades aggregate for user_id=%s", user_id)
+            all_closed_trades = []
+
+        try:
+            open_count_res = (
+                _table(client, "trading", "open_positions")
+                .select("id")
+                .eq("user_id", core_user_id)
+                .execute()
+            )
+            total_open_positions = len((open_count_res and open_count_res.data) or [])
+        except Exception:
+            logger.warning("Could not fetch trading.open_positions count for user_id=%s", user_id)
+            total_open_positions = 0
+
+        total_trades = len(all_closed_trades)
+        winning_pnls = [float(t.get("pnl") or 0) for t in all_closed_trades if float(t.get("pnl") or 0) > 0]
+        losing_pnls = [float(t.get("pnl") or 0) for t in all_closed_trades if float(t.get("pnl") or 0) < 0]
+        winning_trades = len(winning_pnls)
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+        realized_pnl = sum(float(t.get("pnl") or 0) for t in all_closed_trades)
+        avg_profit = (sum(winning_pnls) / len(winning_pnls)) if winning_pnls else 0.0
+        avg_loss = (sum(losing_pnls) / len(losing_pnls)) if losing_pnls else 0.0
+        profit_factor: Optional[float] = (
+            (sum(winning_pnls) / abs(sum(losing_pnls))) if losing_pnls else None
+        )
+
+        portfolio_stats_str = _format_portfolio_stats(
+            portfolio_history_rows=portfolio_history_rows,
+            total_trades=total_trades,
+            total_open_positions=total_open_positions,
+            win_rate=win_rate,
+            realized_pnl=realized_pnl,
+            avg_profit=avg_profit,
+            avg_loss=avg_loss,
+            profit_factor=profit_factor,
+        )
+
     # ── NEW BLOCK 11: Academy progress ────────────────────────────────────────
     academy_progress: Dict[str, Any] = {}
     try:
@@ -981,6 +1094,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         # New context blocks (10-13)
         "trading_positions": trading_positions,
         "closed_trades": closed_trades,
+        "portfolio_stats": portfolio_stats_str,
         "academy_progress": academy_progress,
         "recent_chat_summaries": recent_chat_summaries,
         "user_insights": user_insights,
