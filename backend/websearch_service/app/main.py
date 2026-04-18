@@ -170,12 +170,19 @@ async def _lifespan(app: FastAPI):
     # Gate startup background jobs to a single worker process. Railway runs
     # multiple uvicorn workers; without this guard each worker would trigger
     # its own ranking + memory scan, causing N simultaneous duplicate runs.
-    import os
-    _is_primary_worker = (os.getpid() == os.getppid() + 1)
+    import os as _os
+    _own_pid = -1
+    _parent_pid = -1
+    try:
+        _own_pid = _os.getpid()
+        _parent_pid = _os.getppid()
+        _is_primary_worker = (_own_pid == _parent_pid + 1)
+    except Exception:
+        _is_primary_worker = True  # safe fallback — allow startup
+
     logger.info(
-        f"STARTUP: pid={os.getpid()} "
-        f"ppid={os.getppid()} "
-        f"is_primary={_is_primary_worker}"
+        "STARTUP: pid=%d ppid=%d is_primary=%s",
+        _own_pid, _parent_pid, _is_primary_worker,
     )
 
     import asyncio as _asyncio
