@@ -294,9 +294,11 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
         # ratio comparison unreliable. Volume is already a scoring
         # factor at 15% weight which handles liquidity ranking.
         # TODO: restore filter once upstream unit mismatch is fixed.
-        volume      = _f(snap.get("volume"))
-        avg_vol_10d = _f(snap.get("avg_volume_10d"))
-        recalc_ratio = volume / avg_vol_10d  # type: ignore[operator]  # non-null guaranteed by completeness check
+        avg_vol = _f(snap.get("avg_volume_10d"))
+        if avg_vol and avg_vol > 0:
+            recalc_ratio = (_f(snap.get("volume")) or 0) / avg_vol
+        else:
+            recalc_ratio = None
 
         # Merge returns into the snap dict for convenience
         merged = dict(snap)
@@ -364,7 +366,11 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     }
 
     # ── Volume ────────────────────────────────────────────────────────────────
-    raw_volume = {t: s["_recalc_volume_ratio"] for t, s in filtered.items()}
+    raw_volume = {
+        t: s["_recalc_volume_ratio"]
+        for t, s in filtered.items()
+        if s.get("_recalc_volume_ratio") is not None
+    }
     volume_norm = _minmax_normalize(raw_volume)
 
     # range_score removed — high_52w / low_52w require ~252 days (> 6-month gate).
