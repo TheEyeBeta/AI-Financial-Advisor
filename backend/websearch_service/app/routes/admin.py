@@ -29,7 +29,9 @@ from ..services.auth import (
     verify_service_role,
 )
 from ..services.dataapi_client import get_dataapi_client
-from ..services.memory_agent import run_history_scan
+from ..services.intelligence_engine import run_intelligence_cycle
+from ..services.memory_agent import run_history_scan, run_memory_extraction_cycle
+from ..services.meridian_context import refresh_all_users_context
 from ..services.ranking_engine import run_ranking_cycle
 
 logger = logging.getLogger(__name__)
@@ -262,6 +264,84 @@ async def trigger_memory_scan(admin: str = Depends(_require_admin)) -> dict[str,
     asyncio.create_task(run_history_scan(limit=200))
     logger.info("Admin %s triggered memory history scan (limit=200) in background", admin)
     return {"status": "started", "limit": 200}
+
+
+@router.post("/api/admin/trigger-intelligence")
+async def trigger_intelligence(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Manually trigger an intelligence cycle in the background and return immediately."""
+    asyncio.create_task(run_intelligence_cycle())
+    logger.info("Admin %s triggered intelligence cycle in background", admin)
+    return {"status": "started"}
+
+
+@router.post("/api/admin/trigger-memory-extraction")
+async def trigger_memory_extraction(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Manually trigger a live memory extraction cycle in the background and return immediately."""
+    asyncio.create_task(run_memory_extraction_cycle())
+    logger.info("Admin %s triggered memory extraction cycle in background", admin)
+    return {"status": "started"}
+
+
+@router.post("/api/admin/trigger-meridian-refresh")
+async def trigger_meridian_refresh(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Manually trigger a Meridian context refresh for all users in the background."""
+    asyncio.create_task(refresh_all_users_context())
+    logger.info("Admin %s triggered Meridian context refresh in background", admin)
+    return {"status": "started"}
+
+
+@router.get("/api/admin/scheduler-status")
+async def scheduler_status(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Return last-run timestamps for each scheduled job, inferred from the database.
+
+    Never raises — always returns a valid response even if all DB queries fail.
+    """
+    _fallback_jobs = [
+        {"id": "ranking", "name": "Ranking Engine", "schedule": "Daily at 01:00 UTC", "last_run": None, "status": "unknown"},
+        {"id": "memory_extraction", "name": "Memory Extraction", "schedule": "Every 15 minutes", "last_run": None, "status": "unknown"},
+        {"id": "intelligence", "name": "Intelligence Engine", "schedule": "Every 6 hours", "last_run": None, "status": "unknown"},
+        {"id": "meridian_refresh", "name": "Meridian Context", "schedule": "On demand / cache miss", "last_run": None, "status": "unknown"},
+    ]
+
+    try:
+        base_url, service_role_key = _get_supabase_rest_config()
+    except HTTPException:
+        return {"jobs": _fallback_jobs}
+
+    async def _query_last(schema: str, table: str, column: str) -> str | None:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as http:
+                resp = await http.get(
+                    f"{base_url}/rest/v1/{table}",
+                    params={"select": column, "order": f"{column}.desc", "limit": "1"},
+                    headers={
+                        "apikey": service_role_key,
+                        "Authorization": f"Bearer {service_role_key}",
+                        "Accept-Profile": schema,
+                    },
+                )
+            if resp.status_code < 400:
+                data = resp.json()
+                return data[0].get(column) if data else None
+        except Exception as exc:
+            logger.warning("scheduler-status query failed (%s.%s.%s): %s", schema, table, column, exc)
+        return None
+
+    ranking_last, memory_last, intelligence_last, meridian_last = await asyncio.gather(
+        _query_last("market", "trending_stocks", "ranked_at"),
+        _query_last("meridian", "user_insights", "updated_at"),
+        _query_last("meridian", "intelligence_digests", "created_at"),
+        _query_last("ai", "iris_context_cache", "updated_at"),
+    )
+
+    return {
+        "jobs": [
+            {"id": "ranking", "name": "Ranking Engine", "schedule": "Daily at 01:00 UTC", "last_run": ranking_last, "status": "ok"},
+            {"id": "memory_extraction", "name": "Memory Extraction", "schedule": "Every 15 minutes", "last_run": memory_last, "status": "ok"},
+            {"id": "intelligence", "name": "Intelligence Engine", "schedule": "Every 6 hours", "last_run": intelligence_last, "status": "ok"},
+            {"id": "meridian_refresh", "name": "Meridian Context", "schedule": "On demand / cache miss", "last_run": meridian_last, "status": "ok"},
+        ]
+    }
 
 
 # ---------------------------------------------------------------------------

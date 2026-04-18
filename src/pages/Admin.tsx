@@ -39,6 +39,7 @@ import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { SupabaseConnectionTest } from "@/utils/test-connection";
 import { format } from "date-fns";
+import { adminApi, type SchedulerJob } from "@/services/api";
 
 interface User {
   id: string;
@@ -122,6 +123,38 @@ const getOverallTone = (overall?: string) => {
 };
 
 
+interface ScheduledJobDef {
+  id: string;
+  name: string;
+  schedule: string;
+  overdueSeconds: number | null;
+}
+
+const SCHEDULED_JOB_DEFS: ScheduledJobDef[] = [
+  { id: "ranking", name: "Ranking Engine", schedule: "Daily at 01:00 UTC", overdueSeconds: 90000 },
+  { id: "memory_extraction", name: "Memory Extraction", schedule: "Every 15 minutes", overdueSeconds: 1200 },
+  { id: "intelligence", name: "Intelligence Engine", schedule: "Every 6 hours", overdueSeconds: 25200 },
+  { id: "meridian_refresh", name: "Meridian Context Refresh", schedule: "On demand / cache miss", overdueSeconds: null },
+];
+
+const formatRelativeTime = (timestamp: string | null): string => {
+  if (!timestamp) return "Never";
+  const ms = Date.now() - new Date(timestamp).getTime();
+  if (Number.isNaN(ms)) return "Never";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+};
+
+const getJobHealth = (lastRun: string | null, overdueSeconds: number | null): "healthy" | "warning" | "unknown" => {
+  if (!lastRun) return "unknown";
+  if (overdueSeconds === null) return "healthy";
+  const secondsAgo = (Date.now() - new Date(lastRun).getTime()) / 1000;
+  return secondsAgo <= overdueSeconds ? "healthy" : "warning";
+};
+
 export default function Admin() {
   const { userProfile } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
@@ -142,6 +175,11 @@ export default function Admin() {
   const [queryResults, setQueryResults] = useState<Record<string, any> | null>(null);
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
+
+  const [schedulerJobs, setSchedulerJobs] = useState<SchedulerJob[]>([]);
+  const [schedulerLoading, setSchedulerLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState("users");
+  const [jobTriggerStates, setJobTriggerStates] = useState<Record<string, { loading: boolean; result: "idle" | "success" | "error" }>>({});
 
   const BACKEND_URL = getPythonApiUrl();
   /** Get the current Supabase access token for authenticated admin requests. */
@@ -396,6 +434,47 @@ export default function Admin() {
     toast({ title: "Exported", description: "User data exported to CSV" });
   };
 
+  const fetchSchedulerStatus = useCallback(async () => {
+    setSchedulerLoading(true);
+    try {
+      const data = await adminApi.getSchedulerStatus();
+      setSchedulerJobs(data.jobs ?? []);
+    } catch (err) {
+      console.error("Scheduler status fetch failed:", err);
+    } finally {
+      setSchedulerLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const triggerJob = async (jobId: string) => {
+    setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: true, result: "idle" } }));
+    try {
+      if (jobId === "ranking") await adminApi.triggerRanking();
+      else if (jobId === "memory_extraction") await adminApi.triggerMemoryExtraction();
+      else if (jobId === "intelligence") await adminApi.triggerIntelligence();
+      else if (jobId === "meridian_refresh") await adminApi.triggerMeridianRefresh();
+      else throw new Error(`Unknown job: ${jobId}`);
+      setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "success" } }));
+      setTimeout(() => {
+        setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "idle" } }));
+      }, 3000);
+    } catch (err) {
+      console.error(`Failed to trigger job ${jobId}:`, err);
+      setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "error" } }));
+      setTimeout(() => {
+        setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "idle" } }));
+      }, 3000);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab !== "scheduled-jobs") return;
+    void fetchSchedulerStatus();
+    const interval = setInterval(() => { void fetchSchedulerStatus(); }, 30000);
+    return () => clearInterval(interval);
+  }, [activeTab, fetchSchedulerStatus]);
+
   const stats = {
     totalUsers: users.length,
     adminUsers: users.filter((u) => u.userType === 'Admin').length,
@@ -547,8 +626,8 @@ export default function Admin() {
           ))}
         </section>
 
-        <Tabs defaultValue="users" className="space-y-4">
-          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/60 p-1 md:grid-cols-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/60 p-1 md:grid-cols-5">
             <TabsTrigger value="users" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
               <Users className="h-4 w-4" />
               Users
@@ -560,6 +639,10 @@ export default function Admin() {
             <TabsTrigger value="activity" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
               <Activity className="h-4 w-4" />
               Activity
+            </TabsTrigger>
+            <TabsTrigger value="scheduled-jobs" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
+              <Clock className="h-4 w-4" />
+              Scheduled Jobs
             </TabsTrigger>
             <TabsTrigger value="system-health" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
               <Heart className="h-4 w-4" />
@@ -856,6 +939,102 @@ export default function Admin() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="scheduled-jobs" className="space-y-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Scheduled Jobs</h2>
+                <p className="text-sm text-muted-foreground">
+                  Manually trigger background jobs that normally run on a schedule.
+                </p>
+              </div>
+              <Button
+                type="button"
+                onClick={() => { void fetchSchedulerStatus(); }}
+                disabled={schedulerLoading}
+                variant="outline"
+                size="sm"
+                className="w-full gap-2 rounded-xl sm:w-auto"
+              >
+                <RefreshCw className={`h-4 w-4 ${schedulerLoading ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2">
+              {SCHEDULED_JOB_DEFS.map((def) => {
+                const job = schedulerJobs.find((j) => j.id === def.id);
+                const lastRun = job?.last_run ?? null;
+                const triggerState = jobTriggerStates[def.id] ?? { loading: false, result: "idle" as const };
+                const health = getJobHealth(lastRun, def.overdueSeconds);
+
+                return (
+                  <Card key={def.id} className="rounded-3xl border-border/60 shadow-sm">
+                    <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
+                      <div className="space-y-1">
+                        <CardTitle className="text-base">{def.name}</CardTitle>
+                        <CardDescription>{def.schedule}</CardDescription>
+                      </div>
+                      <div
+                        className={`mt-1 h-3 w-3 rounded-full ${
+                          health === "healthy"
+                            ? "bg-emerald-500"
+                            : health === "warning"
+                            ? "bg-amber-500"
+                            : "bg-slate-400"
+                        }`}
+                      />
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-muted-foreground">Last run:</span>
+                        <span
+                          className={`font-medium ${
+                            health === "warning" ? "text-amber-600 dark:text-amber-400" : ""
+                          }`}
+                        >
+                          {schedulerLoading ? "Loading…" : formatRelativeTime(lastRun)}
+                        </span>
+                      </div>
+                      <Button
+                        size="sm"
+                        className="w-full gap-2 rounded-xl"
+                        variant={
+                          triggerState.result === "success"
+                            ? "default"
+                            : triggerState.result === "error"
+                            ? "destructive"
+                            : "outline"
+                        }
+                        disabled={triggerState.loading}
+                        onClick={() => { void triggerJob(def.id); }}
+                      >
+                        {triggerState.loading ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Running…
+                          </>
+                        ) : triggerState.result === "success" ? (
+                          <>
+                            <Play className="h-4 w-4" />
+                            Started
+                          </>
+                        ) : triggerState.result === "error" ? (
+                          "Failed — try again"
+                        ) : (
+                          <>
+                            <Play className="h-4 w-4" />
+                            Run Now
+                          </>
+                        )}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
           </TabsContent>
 
           <TabsContent value="system-health" className="space-y-4">
