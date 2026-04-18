@@ -39,14 +39,29 @@ _INTENT_CLASSIFIER_PROMPT = (
 
 # ── Tier detection constants ───────────────────────────────────────────────────
 
-# Matches any financial domain term using whole-word boundaries (case-insensitive).
+# Matches any financial domain term (case-insensitive).
 # A BALANCED tier is forced whenever any of these appear, regardless of message length.
+#
+# Group 1 — prefix terms: no trailing \b so plurals/suffixes (-s, -ing, -ment, -ion) match.
+# Group 2 — exact terms: \b on both sides.
+# Group 3 — multi-word phrases and company names.
 FINANCIAL_KEYWORDS = re.compile(
-    r"\b(?:stock|share|price|portfolio|invest|trade|market|etf|fund|crypto|bitcoin|"
-    r"dividend|return|profit|loss|risk|valuation|pe\s+ratio|earnings|revenue|forecast|"
+    # Prefix-matched terms (stock→stocks, invest→investing/investment, etc.)
+    r"\b(?:stock|share|invest|return|portfolio|ranking|dividend|reconcil|invoic|bookkeep)"
+    # Exact word-boundary terms
+    r"|\b(?:price|trade|market|etf|fund|crypto|bitcoin|"
+    r"profit|loss|risk|valuation|pe\s+ratio|earnings|revenue|forecast|"
     r"sector|ipo|bond|yield|inflation|interest\s+rate|recession|gdp|equity|hedge|"
     r"bullish|bearish|technical|fundamental|momentum|rsi|macd|moving\s+average|"
-    r"reconcil|vat|payroll|invoic|bookkeep|account)\b",
+    r"vat|payroll|account)\b"
+    # Multi-word financial phrases
+    r"|\b(?:top|best)\s+stocks?\b"
+    r"|\b(?:latest|recent)\s+news\b|\bnews\s+(?:on|about)\b|\bupdates?\s+on\b"
+    # Major company names (proper nouns — no word boundary needed)
+    r"|(?:Morgan\s+Stanley|Goldman\s+Sachs|JPMorgan|BlackRock|Berkshire|"
+    r"Apple|Tesla|Amazon|Google|Microsoft|Meta|Nvidia|Netflix)"
+    # Common tickers (word-bounded to avoid partial matches)
+    r"|\b(?:AAPL|TSLA|AMZN|GOOGL|MSFT|META|NVDA|NFLX|GS|MS|JPM|BLK)\b",
     re.IGNORECASE,
 )
 
