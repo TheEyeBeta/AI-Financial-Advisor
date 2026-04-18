@@ -186,7 +186,10 @@ _REQUIRED_SNAPSHOT_FIELDS = (
     "rsi_14",
     "macd_histogram",
     "volume",
-    "avg_volume_10d",
+    # avg_volume_10d excluded from required fields —
+    # populated by Mac Mini daily pipeline, not real-time.
+    # Null between pipeline runs causes full universe failure.
+    # Volume scoring uses 50.0 neutral when unavailable.
     "last_price",
     "adx",
     # Excluded — require more than 6 months of history:
