@@ -2401,7 +2401,11 @@ async def chat_completion(
                         upstream_response,
                         accumulate_tool_calls=bool(enabled_tools),
                     ):
-                        yield event
+                        if not enabled_tools:
+                            yield event
+                        # When tools enabled: accumulate only,
+                        # client sees nothing until tool results
+                        # are incorporated into follow-up response
 
                     # If the model requested tool calls, execute them and run a
                     # follow-up streaming completion with the results appended.
@@ -2436,7 +2440,7 @@ async def chat_completion(
 
                         assistant_tool_call_message: Dict[str, Any] = {
                             "role": "assistant",
-                            "content": "".join(collected_chunks) or None,
+                            "content": None,
                             "tool_calls": ordered_calls,
                         }
 
@@ -2480,6 +2484,9 @@ async def chat_completion(
                             accumulate_tool_calls=False,
                         ):
                             yield event
+                        logger.info(
+                            f"[TOOLS] follow-up stream complete, chunks={len(collected_chunks)}"
+                        )
 
                     final_answer = "".join(collected_chunks).strip()
                     if not final_answer:
