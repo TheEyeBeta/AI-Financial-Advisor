@@ -254,7 +254,6 @@ def _build_why_top(stock: Dict[str, Any]) -> str:
     score_fields = [
         ("momentum", float(stock.get("momentum_score") or 0), "strong momentum"),
         ("trend", float(stock.get("trend_score") or 0), "confirmed uptrend"),
-        ("quality", float(stock.get("quality_score") or 0), "high business quality"),
         ("volume", float(stock.get("volume_score") or 0), "rising volume flow"),
         ("adx", float(stock.get("adx_score") or 0), "strong directional strength"),
     ]
@@ -278,7 +277,7 @@ def _fetch_top_stocks_sync(limit: int) -> Dict[str, Any]:
         _table(client, "market", "trending_stocks")
         .select(
             "ticker, name, composite_score, momentum_score, trend_score, "
-            "quality_score, volume_score, adx_score, rank_tier, conviction, "
+            "volume_score, adx_score, rank_tier, conviction, "
             "change_percent, ranked_at"
         )
         .order("composite_score", desc=True)
@@ -312,7 +311,6 @@ def _fetch_top_stocks_sync(limit: int) -> Dict[str, Any]:
             "composite_score": s.get("composite_score"),
             "momentum_score": s.get("momentum_score"),
             "trend_score": s.get("trend_score"),
-            "quality_score": s.get("quality_score"),
             "volume_score": s.get("volume_score"),
             "adx_score": s.get("adx_score"),
             "rank_tier": s.get("rank_tier"),
