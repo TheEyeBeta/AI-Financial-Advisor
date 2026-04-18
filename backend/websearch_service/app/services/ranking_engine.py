@@ -366,7 +366,11 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     }
 
     # ── Volume ────────────────────────────────────────────────────────────────
-    raw_volume = {t: s["_recalc_volume_ratio"] for t, s in filtered.items()}
+    raw_volume = {
+        t: s["_recalc_volume_ratio"]
+        for t, s in filtered.items()
+        if s.get("_recalc_volume_ratio") is not None
+    }
     volume_norm = _minmax_normalize(raw_volume)
 
     # range_score removed — high_52w / low_52w require ~252 days (> 6-month gate).
