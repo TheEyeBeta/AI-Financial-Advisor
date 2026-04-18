@@ -2451,6 +2451,10 @@ async def chat_completion(
                             *tool_result_messages,
                         ]
 
+                        logger.info(
+                            "[TOOLS] follow-up call with %d tool results",
+                            len(tool_result_messages),
+                        )
                         try:
                             # Use the SAME model and system prompt; omit tools this round to
                             # force a final natural-language answer rather than another tool loop.
