@@ -1410,3 +1410,62 @@ export interface TradeEngineTickerDetails {
     volume: number | null;
   }>;
 }
+
+// ---------------------------------------------------------------------------
+// Admin API helpers
+// ---------------------------------------------------------------------------
+
+export interface SchedulerJob {
+  id: string;
+  name: string;
+  schedule: string;
+  last_run: string | null;
+  status: string;
+}
+
+async function _getAdminAuthHeaders(): Promise<HeadersInit> {
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+  if (!token) throw new Error("Not authenticated — please sign in again");
+  return {
+    "Authorization": `Bearer ${token}`,
+    "Content-Type": "application/json",
+  };
+}
+
+export const adminApi = {
+  async triggerRanking(): Promise<{ status: string }> {
+    const headers = await _getAdminAuthHeaders();
+    const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-ranking`, { method: "POST", headers });
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    return resp.json() as Promise<{ status: string }>;
+  },
+
+  async triggerIntelligence(): Promise<{ status: string }> {
+    const headers = await _getAdminAuthHeaders();
+    const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-intelligence`, { method: "POST", headers });
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    return resp.json() as Promise<{ status: string }>;
+  },
+
+  async triggerMemoryExtraction(): Promise<{ status: string }> {
+    const headers = await _getAdminAuthHeaders();
+    const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-memory-extraction`, { method: "POST", headers });
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    return resp.json() as Promise<{ status: string }>;
+  },
+
+  async triggerMeridianRefresh(): Promise<{ status: string }> {
+    const headers = await _getAdminAuthHeaders();
+    const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-meridian-refresh`, { method: "POST", headers });
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    return resp.json() as Promise<{ status: string }>;
+  },
+
+  async getSchedulerStatus(): Promise<{ jobs: SchedulerJob[] }> {
+    const headers = await _getAdminAuthHeaders();
+    const resp = await fetch(`${getPythonApiUrl()}/api/admin/scheduler-status`, { headers });
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    return resp.json() as Promise<{ jobs: SchedulerJob[] }>;
+  },
+};
