@@ -294,9 +294,11 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
         # ratio comparison unreliable. Volume is already a scoring
         # factor at 15% weight which handles liquidity ranking.
         # TODO: restore filter once upstream unit mismatch is fixed.
-        volume      = _f(snap.get("volume"))
-        avg_vol_10d = _f(snap.get("avg_volume_10d"))
-        recalc_ratio = volume / avg_vol_10d  # type: ignore[operator]  # non-null guaranteed by completeness check
+        avg_vol = _f(snap.get("avg_volume_10d"))
+        if avg_vol and avg_vol > 0:
+            recalc_ratio = (_f(snap.get("volume")) or 0) / avg_vol
+        else:
+            recalc_ratio = None
 
         # Merge returns into the snap dict for convenience
         merged = dict(snap)

@@ -329,7 +329,7 @@ async def scheduler_status(admin: str = Depends(_require_admin)) -> dict[str, An
 
     ranking_last, memory_last, intelligence_last, meridian_last = await asyncio.gather(
         _query_last("market", "trending_stocks", "ranked_at"),
-        _query_last("meridian", "user_insights", "updated_at"),
+        _query_last("meridian", "user_insights", "extracted_at"),
         _query_last("meridian", "intelligence_digests", "created_at"),
         _query_last("ai", "iris_context_cache", "updated_at"),
     )
