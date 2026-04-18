@@ -167,66 +167,83 @@ async def _lifespan(app: FastAPI):
         "memory_extraction=15m interval)"
     )
 
-    # Fire-and-forget: populate market.trending_stocks immediately on startup
-    # if the data is stale (>2 h old) or missing.  Querying Supabase directly
-    # means this logic is safe across multiple uvicorn worker processes — each
-    # worker checks the shared DB state rather than a per-process boolean flag.
+    # Gate startup background jobs to a single worker process. Railway runs
+    # multiple uvicorn workers; without this guard each worker would trigger
+    # its own ranking + memory scan, causing N simultaneous duplicate runs.
+    _is_primary_worker = (
+        os.environ.get("RAILWAY_REPLICA_ID") is None
+        or os.environ.get("WEB_CONCURRENCY", "1") == "1"
+    )
+
     import asyncio as _asyncio
-    from .services.supabase_client import supabase_client as _supabase_client
 
-    def _get_last_ranked_at():
-        result = (
-            _supabase_client.schema("market")
-            .table("trending_stocks")
-            .select("ranked_at")
-            .order("ranked_at", desc=True)
-            .limit(1)
-            .execute()
-        )
-        if result.data:
-            return result.data[0].get("ranked_at")
-        return None
+    if _is_primary_worker:
+        # Fire-and-forget: populate market.trending_stocks immediately on startup
+        # if the data is stale (>2 h old) or missing.  Querying Supabase directly
+        # means this logic is safe across multiple uvicorn worker processes — each
+        # worker checks the shared DB state rather than a per-process boolean flag.
+        from .services.supabase_client import supabase_client as _supabase_client
 
-    try:
-        logger.info("STARTUP: Checking last ranking timestamp...")
-        _last_ranked_at_raw = await _asyncio.to_thread(_get_last_ranked_at)
-        logger.info("STARTUP: Last ranked at: %s", _last_ranked_at_raw)
+        def _get_last_ranked_at():
+            result = (
+                _supabase_client.schema("market")
+                .table("trending_stocks")
+                .select("ranked_at")
+                .order("ranked_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            if result.data:
+                return result.data[0].get("ranked_at")
+            return None
 
-        _now = datetime.now(timezone.utc)
-        if _last_ranked_at_raw is not None:
-            if isinstance(_last_ranked_at_raw, str):
-                _ranked_at_dt = datetime.fromisoformat(
-                    _last_ranked_at_raw.replace("Z", "+00:00")
-                )
+        try:
+            logger.info("STARTUP: Checking last ranking timestamp...")
+            _last_ranked_at_raw = await _asyncio.to_thread(_get_last_ranked_at)
+            logger.info("STARTUP: Last ranked at: %s", _last_ranked_at_raw)
+
+            _now = datetime.now(timezone.utc)
+            if _last_ranked_at_raw is not None:
+                if isinstance(_last_ranked_at_raw, str):
+                    _ranked_at_dt = datetime.fromisoformat(
+                        _last_ranked_at_raw.replace("Z", "+00:00")
+                    )
+                else:
+                    _ranked_at_dt = _last_ranked_at_raw
             else:
-                _ranked_at_dt = _last_ranked_at_raw
-        else:
-            _ranked_at_dt = None
+                _ranked_at_dt = None
 
-        if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 90000:
-            logger.info("STARTUP: Triggering ranking cycle...")
+            if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 90000:
+                logger.info("STARTUP: Triggering ranking cycle...")
+                _asyncio.create_task(_run_scheduled_ranking_cycle())
+                logger.info("STARTUP: Ranking cycle task created")
+            else:
+                _minutes_ago = int((_now - _ranked_at_dt).total_seconds() / 60)
+                logger.info("STARTUP: Ranking cycle skipped - ranked %s minutes ago", _minutes_ago)
+        except Exception as e:
+            logger.error("STARTUP: Ranking check failed: %s", e, exc_info=True)
+            logger.info("STARTUP: Triggering ranking cycle as fallback")
             _asyncio.create_task(_run_scheduled_ranking_cycle())
-            logger.info("STARTUP: Ranking cycle task created")
-        else:
-            _minutes_ago = int((_now - _ranked_at_dt).total_seconds() / 60)
-            logger.info("STARTUP: Ranking cycle skipped - ranked %s minutes ago", _minutes_ago)
-    except Exception as e:
-        logger.error("STARTUP: Ranking check failed: %s", e, exc_info=True)
-        logger.info("STARTUP: Triggering ranking cycle as fallback")
-        _asyncio.create_task(_run_scheduled_ranking_cycle())
 
-    # Bootstrap: if meridian.user_insights has fewer than 10 rows, run a
-    # history scan in the background so the system is useful on first deploy.
-    from .services.memory_agent import _count_user_insights_sync as _count_insights
+        # Bootstrap: if meridian.user_insights has fewer than 10 rows, run a
+        # history scan in the background so the system is useful on first deploy.
+        from .services.memory_agent import _count_user_insights_sync as _count_insights
 
-    try:
-        _insight_count = await _asyncio.to_thread(_count_insights)
-        logger.info("STARTUP: meridian.user_insights row count (capped at 11): %d", _insight_count)
-        if _insight_count < 10:
-            logger.info("STARTUP: fewer than 10 insights found — triggering history scan (limit=50)")
-            _asyncio.create_task(run_history_scan(limit=50))
-    except Exception as _e:
-        logger.warning("STARTUP: insight bootstrap check failed: %s", _e)
+        try:
+            _insight_count = await _asyncio.to_thread(_count_insights)
+            logger.info("STARTUP: meridian.user_insights row count (capped at 11): %d", _insight_count)
+            if _insight_count < 10:
+                logger.info("STARTUP: fewer than 10 insights found — triggering history scan (limit=50)")
+                _asyncio.create_task(run_history_scan(limit=50))
+        except Exception as _e:
+            logger.warning("STARTUP: insight bootstrap check failed: %s", _e)
+    else:
+        logger.info(
+            "STARTUP: Skipping ranking + memory scan triggers — not primary worker "
+            "(RAILWAY_REPLICA_ID=%s, WEB_CONCURRENCY=%s)",
+            os.environ.get("RAILWAY_REPLICA_ID"),
+            os.environ.get("WEB_CONCURRENCY"),
+        )
 
     try:
         yield
