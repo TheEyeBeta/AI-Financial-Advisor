@@ -232,18 +232,39 @@ _REGEX_PORTFOLIO_PAT = re.compile(
 # Ticker alone is sufficient; these keywords only fire when paired with a
 # financial-domain context (re-uses the existing FINANCIAL_KEYWORDS guard).
 _REGEX_STOCK_PAT = re.compile(
+    # Original: explicit action/analysis keywords
     r"\b(?:buy|sell|analysis|analyse|analyze|score|research|valuation|earnings|revenue|fundamentals|technical)\b"
-    r"|\bprice\s+target\b",
+    r"|\bprice\s+target\b"
+    # Stock ranking/listing queries (FIX 2)
+    r"|\btop\s+\d*\s*stocks?\b"
+    r"|\bbest\s+stocks?\b"
+    r"|\bwhat\s+stocks?\b"
+    r"|\bwhich\s+stocks?\b"
+    r"|\bstock\s+rankings?\b"
+    r"|\branked\s+stocks?\b"
+    r"|\bwhat\s+are\s+the\s+(?:top|best)\b"
+    # News and company update phrases (FIX 3)
+    r"|\bnews\s+(?:on|about)\b"
+    r"|\blatest\s+news\b"
+    r"|\brecent\s+news\b"
+    r"|\bupdates?\s+on\b"
+    r"|\bwhat\s+happened\s+to\b"
+    r"|\btell\s+me\s+about\b"
+    # Major company names as direct stock_research triggers (FIX 3)
+    r"|(?:Morgan\s+Stanley|Goldman\s+Sachs|JPMorgan|BlackRock|Apple|Tesla|Amazon|Google|Microsoft|Meta|Nvidia|Netflix)"
+    # Common tickers as direct stock_research triggers (FIX 3)
+    r"|\b(?:MS|GS|JPM|BLK|AAPL|TSLA|AMZN|GOOGL|MSFT|META|NVDA|NFLX)\b",
     re.IGNORECASE,
 )
 
 _REGEX_RISK_PAT = re.compile(
-    r"\b(?:risk|exposure|hedge|drawdown|volatility|downside|danger|safe|worst\s+case|lose\s+money)\b",
+    r"\b(?:risk|risky|exposure|hedge|drawdown|volatility|downside|danger|safe|worst\s+case|lose\s+money)\b",
     re.IGNORECASE,
 )
 
 _REGEX_MARKET_PAT = re.compile(
-    r"\b(?:market|macro|economy|sector|vix|nasdaq|index|indices|overall|economic)\b"
+    r"\b(?:market|macro|economy|sector|vix|nasdaq|indices|overall|economic)\b"
+    r"|\bindex(?!\s+fund)\b"   # "index" alone but not "index fund" (educational concept)
     r"|\bs&p\b"
     r"|\bbroad\s+market\b",
     re.IGNORECASE,
@@ -346,15 +367,20 @@ def regex_classify_intent(message: str, ticker: str | None = None) -> str:
 
     Priority:
       1. portfolio_analysis — "my portfolio/positions/…", "rebalance", "how am i doing"
-      2. stock_research     — ticker detected, OR financial keywords (buy/sell/earnings/…)
-      3. risk_assessment    — risk/exposure/hedge/drawdown/…
+                              (skipped when risk keywords are also present, e.g. "how risky
+                               is my portfolio?" → risk_assessment wins)
+      2. stock_research     — ticker detected, OR expanded stock/company/news keywords
+                              paired with FINANCIAL_KEYWORDS guard (FIX 2 & 3)
+      3. risk_assessment    — risk/risky/exposure/hedge/drawdown/…
       4. market_overview    — market/macro/sector/vix/nasdaq/…
       5. education          — what is/explain/how does/…
       6. general            — fallback
     """
     msg = message.strip()
 
-    if _REGEX_PORTFOLIO_PAT.search(msg):
+    # FIX 4: risk keywords override portfolio so "how risky is my portfolio?"
+    # routes to risk_assessment rather than portfolio_analysis.
+    if _REGEX_PORTFOLIO_PAT.search(msg) and not _REGEX_RISK_PAT.search(msg):
         category = "portfolio_analysis"
     elif ticker is not None or (
         _REGEX_STOCK_PAT.search(msg) and FINANCIAL_KEYWORDS.search(msg)
