@@ -460,10 +460,10 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
                 "range_score":       None,   # removed — requires 52-week data (> 6-month gate)
                 "adx_score":         round(a_score, 2),
                 # Legacy dimension fields
-                "technical_score":   None,
-                "fundamental_score": None,
-                "consistency_score": None,
-                "signal_score":      None,
+                "technical_score":   round(t_score, 2),
+                "fundamental_score": round(q_score, 2),
+                "consistency_score": round(v_score, 2),
+                "signal_score":      round(m_score, 2),
                 # 6m return stored in momentum_6m for API consumers
                 "momentum_6m":       round(r6m * 100, 2) if r6m is not None else None,
                 "momentum_1m":       round(r1m * 100, 2) if r1m is not None else None,
