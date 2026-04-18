@@ -25,6 +25,7 @@ from ..services.meridian_context import (
 )
 from ..services.market_context import build_market_context
 from ..services.subagents import classify_intent, classify_tier, get_subagent_block, regex_classify_intent, FINANCIAL_KEYWORDS
+from ..services.iris_tools import TOOL_DEFINITIONS, execute_tool
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ try:
 except ValueError:
     OPENAI_MAX_TOKENS = 8000
 OPENAI_MAX_TOKENS = max(1, OPENAI_MAX_TOKENS)
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY", "")
 PERPLEXITY_API_KEY_ENV = "PERPLEXITY_API_KEY"
 PERPLEXITY_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_MODEL = "llama-3.1-sonar-small-128k-online"  # Cost-effective fallback model
@@ -1513,6 +1515,7 @@ def _build_openai_chat_stream_payload(
     max_output_tokens: int,
     reasoning_effort: str,
     model: str = OPENAI_CHAT_MODEL,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "model": model,
@@ -1523,7 +1526,30 @@ def _build_openai_chat_stream_payload(
     }
     if _is_reasoning_model(model):
         payload["reasoning_effort"] = reasoning_effort
+    if tools:
+        payload["tools"] = tools
+        payload["tool_choice"] = "auto"
     return payload
+
+
+# Map IRIS intent categories to the subset of tools they may invoke.
+# Only consulted on BALANCED tier — INSTANT/FAST never receive tools.
+_TOOLS_BY_INTENT: Dict[str, frozenset[str]] = {
+    "portfolio_analysis": frozenset({"get_portfolio", "get_top_stocks", "search_market_news"}),
+    "stock_research":     frozenset({"get_top_stocks", "search_market_news"}),
+    "market_overview":    frozenset({"get_top_stocks", "search_market_news"}),
+    "risk_assessment":    frozenset({"get_portfolio"}),
+    "education":          frozenset({"search_market_news"}),
+    "general":            frozenset(),
+}
+
+
+def _tools_for_intent(category: str) -> List[Dict[str, Any]]:
+    """Return the subset of TOOL_DEFINITIONS enabled for a given intent category."""
+    allowed = _TOOLS_BY_INTENT.get(category, frozenset())
+    if not allowed:
+        return []
+    return [t for t in TOOL_DEFINITIONS if t.get("function", {}).get("name") in allowed]
 
 
 def _build_perplexity_chat_stream_payload(
@@ -1583,9 +1609,10 @@ async def _start_chat_completion_stream(
     reasoning_effort: str,
     temperature: float,
     model: str = OPENAI_CHAT_MODEL,
+    tools: Optional[List[Dict[str, Any]]] = None,
 ) -> tuple[httpx.AsyncClient, httpx.Response]:
     perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
-    openai_payload = _build_openai_chat_stream_payload(messages, max_output_tokens, reasoning_effort, model)
+    openai_payload = _build_openai_chat_stream_payload(messages, max_output_tokens, reasoning_effort, model, tools=tools)
     perplexity_payload = _build_perplexity_chat_stream_payload(messages, max_output_tokens, temperature)
 
     try:
@@ -2279,6 +2306,19 @@ async def chat_completion(
         )
 
         if streaming_requested:
+            # Tools fire only on BALANCED tier, and only for intents that need them.
+            # INSTANT and FAST tiers never receive tool definitions.
+            enabled_tools: Optional[List[Dict[str, Any]]] = None
+            if message_tier == "BALANCED":
+                selected = _tools_for_intent(subagent_category)
+                if selected:
+                    enabled_tools = selected
+                    logger.info(
+                        "[TOOLS] enabled=%s for intent=%s",
+                        [t["function"]["name"] for t in selected],
+                        subagent_category,
+                    )
+
             # Step 3: Start streaming only after all pre-processing has completed.
             stream_client, upstream_response = await _start_chat_completion_stream(
                 messages=input_messages,
@@ -2286,23 +2326,30 @@ async def chat_completion(
                 reasoning_effort=reasoning_effort,
                 temperature=request.temperature,
                 model=_chat_model,
+                tools=enabled_tools,
             )
 
             async def generate_stream():
+                nonlocal stream_client, upstream_response
                 collected_chunks: List[str] = []
                 usage_entries: List[Dict[str, Any]] = []
-                try:
-                    assert upstream_response is not None
-                    async for line in upstream_response.aiter_lines():
+                # Accumulates streamed tool-call deltas indexed by `index` position.
+                tool_calls_acc: Dict[int, Dict[str, Any]] = {}
+
+                async def _consume_stream(
+                    response: httpx.Response,
+                    *,
+                    accumulate_tool_calls: bool,
+                ):
+                    """Drain an SSE stream; emit content deltas, optionally accumulate tool_calls."""
+                    async for line in response.aiter_lines():
                         if not line or not line.startswith("data:"):
                             continue
-
                         raw_chunk = line[5:].strip()
                         if not raw_chunk:
                             continue
                         if raw_chunk == "[DONE]":
                             break
-
                         try:
                             chunk_data = json.loads(raw_chunk)
                         except json.JSONDecodeError:
@@ -2318,12 +2365,117 @@ async def chat_completion(
                             continue
 
                         delta = choices[0].get("delta") or {}
-                        chunk_text = _coerce_text(delta.get("content"))
-                        if not chunk_text:
-                            continue
 
-                        collected_chunks.append(chunk_text)
-                        yield _sse_event({"content": chunk_text})
+                        chunk_text = _coerce_text(delta.get("content"))
+                        if chunk_text:
+                            collected_chunks.append(chunk_text)
+                            yield _sse_event({"content": chunk_text})
+
+                        if accumulate_tool_calls:
+                            tc_deltas = delta.get("tool_calls") or []
+                            if isinstance(tc_deltas, list):
+                                for tc in tc_deltas:
+                                    if not isinstance(tc, dict):
+                                        continue
+                                    idx = tc.get("index", 0) or 0
+                                    slot = tool_calls_acc.setdefault(
+                                        idx,
+                                        {
+                                            "id": "",
+                                            "type": "function",
+                                            "function": {"name": "", "arguments": ""},
+                                        },
+                                    )
+                                    if tc.get("id"):
+                                        slot["id"] = tc["id"]
+                                    func = tc.get("function") or {}
+                                    if func.get("name"):
+                                        slot["function"]["name"] += func["name"]
+                                    if func.get("arguments"):
+                                        slot["function"]["arguments"] += func["arguments"]
+
+                try:
+                    assert upstream_response is not None
+
+                    async for event in _consume_stream(
+                        upstream_response,
+                        accumulate_tool_calls=bool(enabled_tools),
+                    ):
+                        yield event
+
+                    # If the model requested tool calls, execute them and run a
+                    # follow-up streaming completion with the results appended.
+                    if tool_calls_acc:
+                        ordered_calls = [tool_calls_acc[k] for k in sorted(tool_calls_acc.keys())]
+                        logger.info(
+                            "[TOOLS] executing %d tool call(s): %s",
+                            len(ordered_calls),
+                            [c["function"]["name"] for c in ordered_calls],
+                        )
+
+                        tool_result_messages: List[Dict[str, Any]] = []
+                        for call in ordered_calls:
+                            name = call["function"]["name"] or ""
+                            args_raw = call["function"]["arguments"] or "{}"
+                            try:
+                                args = json.loads(args_raw)
+                                if not isinstance(args, dict):
+                                    args = {}
+                            except json.JSONDecodeError:
+                                args = {}
+                            try:
+                                result_json = await execute_tool(name, args, verified_user_id)
+                            except Exception as tool_exc:
+                                logger.exception("Tool execution crashed for %s", name)
+                                result_json = json.dumps({"error": f"Tool execution failed: {tool_exc}"})
+                            tool_result_messages.append({
+                                "role": "tool",
+                                "tool_call_id": call.get("id") or "",
+                                "content": result_json,
+                            })
+
+                        assistant_tool_call_message: Dict[str, Any] = {
+                            "role": "assistant",
+                            "content": "".join(collected_chunks) or None,
+                            "tool_calls": ordered_calls,
+                        }
+
+                        # Close the first stream before opening the second.
+                        await _close_stream_resources(stream_client, upstream_response)
+                        stream_client = None
+                        upstream_response = None
+
+                        follow_up_messages = [
+                            *input_messages,
+                            assistant_tool_call_message,
+                            *tool_result_messages,
+                        ]
+
+                        try:
+                            # Use the SAME model and system prompt; omit tools this round to
+                            # force a final natural-language answer rather than another tool loop.
+                            stream_client, upstream_response = await _start_chat_completion_stream(
+                                messages=follow_up_messages,
+                                max_output_tokens=effective_max_output_tokens,
+                                reasoning_effort=reasoning_effort,
+                                temperature=request.temperature,
+                                model=_chat_model,
+                                tools=None,
+                            )
+                        except Exception as follow_exc:
+                            logger.exception(
+                                "Follow-up tool-result stream failed for user %s: %s",
+                                verified_user_id,
+                                follow_exc,
+                            )
+                            yield _sse_event({"error": "Stream interrupted"})
+                            return
+
+                        async for event in _consume_stream(
+                            upstream_response,
+                            accumulate_tool_calls=False,
+                        ):
+                            yield event
 
                     final_answer = "".join(collected_chunks).strip()
                     if not final_answer:
@@ -2353,6 +2505,7 @@ async def chat_completion(
                                 "usage_attempts": usage_entries,
                                 "actual_tokens": actual_tokens,
                                 "reasoning_effort": reasoning_effort,
+                                "tool_calls": [c["function"]["name"] for c in tool_calls_acc.values()],
                             },
                         )
                     except Exception as audit_exc:
