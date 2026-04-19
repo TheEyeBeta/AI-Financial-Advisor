@@ -253,7 +253,7 @@ function getTodayStr(): string {
 // ── Component ────────────────────────────────────────────────────────────────
 
 const Onboarding = () => {
-  const { authUserId, appUserId, userProfile, refreshProfile } = useAuth();
+  const { authUserId, appUserId, userProfile, refreshProfile, onboardingComplete } = useAuth();
   const navigate = useNavigate();
 
   const [currentStep, setCurrentStep] = useState(1);
@@ -288,6 +288,13 @@ const Onboarding = () => {
   const [goals, setGoals] = useState<GoalEntry[]>([makeGoal()]);
 
   const totalSteps = 5;
+
+  // Redirect if onboarding is already complete
+  useEffect(() => {
+    if (onboardingComplete === true) {
+      navigate('/advisor', { replace: true });
+    }
+  }, [onboardingComplete, navigate]);
 
   // Check for existing Meridian profile
   useEffect(() => {
