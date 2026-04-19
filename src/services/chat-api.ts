@@ -272,7 +272,23 @@ export const chatApi = {
       if (isSchemaOrTableNotFound(error)) return [];
       throw error;
     }
-    return data || [];
+
+    const messages = data || [];
+    const lastMessage = messages[messages.length - 1];
+
+    if (lastMessage && lastMessage.role === 'user') {
+      const messageAge = Date.now() - new Date(lastMessage.created_at).getTime();
+      const STREAM_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes — longer than any stream timeout
+
+      if (messageAge > STREAM_TIMEOUT_MS) {
+        await fromAiChatMessages()
+          .delete()
+          .eq('id', lastMessage.id);
+        return messages.slice(0, -1);
+      }
+    }
+
+    return messages;
   },
 
   async getAllUserMessages(userId: string): Promise<ChatMessage[]> {
