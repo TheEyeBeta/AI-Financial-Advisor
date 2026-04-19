@@ -80,12 +80,6 @@ export default function AuthCallback() {
             if (timeoutId) clearTimeout(timeoutId);
             navigate('/advisor');
             setLoading(false);
-          } else if (event === 'TOKEN_REFRESHED' && newSession) {
-            // Session refreshed, redirect to dashboard
-            if (authSubscription) authSubscription.unsubscribe();
-            if (timeoutId) clearTimeout(timeoutId);
-            navigate('/advisor');
-            setLoading(false);
           }
         });
         
