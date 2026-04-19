@@ -228,6 +228,15 @@ async def dataapi_query(
     admin: str = Depends(_require_admin),
 ) -> dict[str, Any]:
     """Proxy a read-only SQL query to the DataAPI admin endpoint."""
+    normalized = q.lstrip().lower()
+    if not normalized.startswith("select"):
+        raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
+
+    # Wrap with an outer LIMIT 1000 to enforce a hard row cap at the SQL level.
+    wrapped = f"SELECT * FROM ({q}) AS _q LIMIT 1000"
+    # Prepend a per-query statement timeout; SET LOCAL confines it to this transaction.
+    final_sql = f"SET LOCAL statement_timeout = '5000'; {wrapped}"
+
     try:
         base_url, token = await _get_admin_token()
     except HTTPException:
@@ -239,15 +248,23 @@ async def dataapi_query(
         async with httpx.AsyncClient(timeout=30.0) as http:
             resp = await http.get(
                 f"{base_url}/api/v1/admin/query",
-                params={"q": q, "limit": limit},
+                params={"q": final_sql, "limit": limit},
                 headers={"Authorization": f"Bearer {token}"},
             )
             if resp.status_code != 200:
                 error_body = resp.text
                 raise HTTPException(status_code=resp.status_code, detail=f"DataAPI query error: {error_body}")
-            return resp.json()
+            result = resp.json()
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"DataAPI request failed: {exc}") from exc
+
+    logger.info(
+        "admin_dataapi_query admin=%s query=%r timestamp=%s",
+        admin,
+        q,
+        datetime.now(timezone.utc).isoformat(),
+    )
+    return result
 
 
 @router.post("/api/admin/trigger-ranking")
