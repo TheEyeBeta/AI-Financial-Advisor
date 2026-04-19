@@ -686,8 +686,6 @@ export const pythonApi = {
 
     const pythonBackendUrl = getPythonApiUrl();
 
-    const hasTradeEngineData = !!tradeEngineContext;
-
     // Extract ticker from message FIRST (before fetching all data)
     // This allows us to query for specific ticker if needed
     const messageUpper = message.toUpperCase();
@@ -735,145 +733,9 @@ export const pythonApi = {
       }
     }
 
-    // Store original query for company name search if ticker not found
-    const originalQuery = message.trim();
-
-    // Detect if this message is asking about stocks/market data
-    // Only query database when relevant to avoid unnecessary API calls
-    const stockRelatedPatterns = [
-      /(?:price|stock|share|ticker|symbol|market|trade|trading|invest|portfolio)/i,
-      /(?:buy|sell|hold|signal|analysis|chart|technical|fundamental)/i,
-      /(?:earnings|dividend|pe ratio|market cap|volume|rsi|macd|sma|ema)/i,
-      /\b[A-Z]{2,5}\b/, // Potential ticker symbols
-    ];
-
-    const isStockRelatedQuery = stockRelatedPatterns.some(pattern => pattern.test(message)) || !!requestedTicker;
-
-    // Fetch stock snapshots from database ONLY when needed
-    let stockSnapshotsData: StockSnapshot[] = [];
-    let specificTickerSnapshot: StockSnapshot | null = null;
-
-    // Only query database if:
-    // 1. User is asking about a specific ticker, OR
-    // 2. Query is stock-related and we don't have Trade Engine data
-    if (isStockRelatedQuery) {
-      try {
-        // Initialize cache on first stock-related query (loads 60 stocks)
-        // This is a no-op if cache is already initialized and valid
-        await stockSnapshotsApi.initializeCache();
-
-        // If we have a specific ticker, query for it (will hit cache if available)
-        if (requestedTicker) {
-          try {
-            // Try exact ticker match first
-            specificTickerSnapshot = await stockSnapshotsApi.getByTicker(requestedTicker);
-
-            // If not found, try common typos/variations
-            if (!specificTickerSnapshot) {
-              const typoMap: Record<string, string> = {
-                'APPL': 'AAPL',
-                'NVDIA': 'NVDA',
-                'MICROSOFT': 'MSFT',
-                'APPLE': 'AAPL',
-                'META': 'META',
-                'GOOGLE': 'GOOGL',
-                'ALPHABET': 'GOOGL',
-                'TESLA': 'TSLA',
-                'AMAZON': 'AMZN',
-              };
-
-              const correctedTicker = typoMap[requestedTicker];
-              if (correctedTicker) {
-                specificTickerSnapshot = await stockSnapshotsApi.getByTicker(correctedTicker);
-                if (specificTickerSnapshot) {
-                  requestedTicker = correctedTicker; // Update to corrected ticker
-                }
-              }
-            }
-
-            // If still not found, try company name search (for company names like "APPLE", "MICROSOFT")
-            if (!specificTickerSnapshot) {
-              specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(requestedTicker);
-              if (specificTickerSnapshot) {
-                requestedTicker = specificTickerSnapshot.ticker; // Update to actual ticker
-              }
-            }
-
-            console.log('[AI] Queried database for ticker:', requestedTicker, specificTickerSnapshot ? '(found)' : '(not found)');
-          } catch (_error) {
-            // Ignore errors, continue without specific ticker
-            console.log('[AI] Database query failed for ticker:', requestedTicker);
-          }
-        } else {
-          // No ticker extracted, but might be a company name - try searching by company name
-          const companyNameWords = originalQuery.split(/\s+/).filter(w =>
-            w.length > 3 && !skipWords.has(w.toUpperCase())
-          );
-
-          if (companyNameWords.length > 0) {
-            // Try the longest word as company name
-            const potentialCompanyName = companyNameWords.sort((a, b) => b.length - a.length)[0];
-
-            try {
-              specificTickerSnapshot = await stockSnapshotsApi.getByCompanyName(potentialCompanyName);
-              if (specificTickerSnapshot) {
-                requestedTicker = specificTickerSnapshot.ticker; // Set ticker from found company
-                console.log('[AI] Found ticker by company name:', potentialCompanyName, '->', requestedTicker);
-              }
-            } catch (_error) {
-              // Ignore errors, continue without specific ticker
-            }
-          }
-        }
-
-        // Only fetch general stock list if:
-        // - No specific ticker was found AND
-        // - No Trade Engine data is available AND
-        // - Query seems to be asking about general market/multiple stocks
-        const needsGeneralStockList = !specificTickerSnapshot && !hasTradeEngineData &&
-          /(?:market|stocks|portfolio|top|best|worst|signals|overview)/i.test(message);
-
-        if (needsGeneralStockList) {
-          stockSnapshotsData = await stockSnapshotsApi.getAll(50); // Reduced from 100 to 50
-          console.log('[AI] Fetched general stock list:', stockSnapshotsData.length, 'tickers');
-        }
-      } catch (error) {
-        console.error('Error fetching The Eye data from database:', error);
-        // Continue without database snapshots - will use Trade Engine data if available
-      }
-    } else {
-      console.log('[AI] Skipping database query - not a stock-related question');
-    }
-
-    // Fetch recent news from Supabase news table for AI context, sorted by importance
-    let supabaseNewsData: NewsArticle[] = [];
-    try {
-      const rawNews = await newsApi.getLatest(20); // fetch more, then pick top 8 by importance
-      supabaseNewsData = rawNews
-        .sort((a, b) => scoreNewsImportance(b) - scoreNewsImportance(a))
-        .slice(0, 8);
-    } catch (error) {
-      console.log('[AI] Supabase news fetch failed, continuing without news data:', error);
-    }
-
-    // Detect web search intent and fetch raw results (backend will format into prompt)
-    let rawSearchResults: WebSearchResult[] | null = null;
-    const searchIntent = detectSearchIntent(message);
-    if (searchIntent.shouldSearch && searchIntent.searchQuery) {
-      console.log('[AI] Web search triggered:', searchIntent.intentType, '-', searchIntent.searchQuery);
-      const searchResponse = await performWebSearch(searchIntent.searchQuery, 5);
-      if (searchResponse && searchResponse.results.length > 0) {
-        rawSearchResults = searchResponse.results;
-        console.log('[AI] Web search results fetched:', rawSearchResults.length);
-      }
-    }
-
     // Pass raw context to backend — backend assembles the full system prompt
     const context = {
       market_data: tradeEngineContext ?? null,
-      news: supabaseNewsData.length > 0 ? supabaseNewsData : null,
-      search_results: rawSearchResults,
-      stock_snapshot: specificTickerSnapshot ?? null,
     };
 
     // Build messages array — no system message (backend owns prompt assembly)
