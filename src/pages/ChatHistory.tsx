@@ -363,10 +363,14 @@ const ChatHistory = () => {
                                 <AlertDialogFooter>
                                   <AlertDialogCancel className="h-9">Cancel</AlertDialogCancel>
                                   <AlertDialogAction
-                                    onClick={() => handleDeleteChat(chat.id)}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDeleteChat(chat.id);
+                                    }}
+                                    disabled={deleteChatMutation.isPending}
                                     className="h-9 bg-destructive hover:bg-destructive/90"
                                   >
-                                    Delete
+                                    {deleteChatMutation.isPending ? 'Deleting...' : 'Delete'}
                                   </AlertDialogAction>
                                 </AlertDialogFooter>
                               </AlertDialogContent>
