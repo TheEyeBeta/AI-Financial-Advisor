@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -230,6 +231,11 @@ async def dataapi_query(
     """Proxy a read-only SQL query to the DataAPI admin endpoint."""
     normalized = q.lstrip().lower()
     if not normalized.startswith("select"):
+        raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
+
+    # Block CTE-wrapped mutations (e.g. WITH x AS (DELETE ...) SELECT * FROM x)
+    # and any other DDL/DML keywords appearing anywhere in the query.
+    if re.search(r"\b(delete|insert|update|drop|truncate|alter)\b", q, re.IGNORECASE):
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
 
     # Wrap with an outer LIMIT 1000 to enforce a hard row cap at the SQL level.
