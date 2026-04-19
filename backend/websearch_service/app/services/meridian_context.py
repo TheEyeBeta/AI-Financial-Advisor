@@ -83,13 +83,109 @@ def _fetch_iris_cache_sync(user_id: str) -> Optional[dict]:
         return None
 
 
+# core.users columns surfaced into IRIS context so the advisor knows
+# the user's name, age bracket, experience level, risk appetite, goal, etc.
+_CORE_USER_CONTEXT_COLUMNS = (
+    "id, auth_id, first_name, last_name, age, experience_level, "
+    "risk_level, investment_goal, marital_status"
+)
+
+
+def _fetch_core_user_sync(auth_id: str) -> Dict[str, Any]:
+    """Sync fetch of core.users row keyed by auth_id. Returns {} on miss/error."""
+    client = supabase_client
+    if not client or not auth_id:
+        return {}
+    try:
+        res = (
+            _table(client, "core", "users")
+            .select(_CORE_USER_CONTEXT_COLUMNS)
+            .eq("auth_id", auth_id)
+            .maybe_single()
+            .execute()
+        )
+        return ((res and res.data) or {}) or {}
+    except Exception:
+        logger.exception("DB query failed: core.users SELECT for auth_id=%s", auth_id)
+        return {}
+
+
+def _build_minimal_context_sync(auth_id: str) -> str:
+    """
+    Build a small, fast context block from core.users only, for use on cache
+    miss. Never queries meridian.* or trading.* — the full refresh runs
+    asynchronously so the chat pipeline is not blocked.
+    """
+    core_user = _fetch_core_user_sync(auth_id)
+    if not core_user:
+        return ""
+    tier = 1
+    first_name = _sanitise_for_prompt(core_user.get("first_name"), max_length=40)
+    last_name = _sanitise_for_prompt(core_user.get("last_name"), max_length=40)
+    name_parts = [p for p in (first_name, last_name) if p and p != "not set"]
+    display_name = " ".join(name_parts) if name_parts else "not set"
+    return (
+        "\n"
+        "################################################################################\n"
+        "# MERIDIAN — MINIMAL USER CONTEXT (full refresh running in background)\n"
+        "################################################################################\n"
+        "\n"
+        "USER PROFILE:\n"
+        f"- Name: {display_name}\n"
+        f"- Experience level: {_sanitise_for_prompt(core_user.get('experience_level'), max_length=30)}\n"
+        f"- Risk level: {_sanitise_for_prompt(core_user.get('risk_level'), max_length=30)}\n"
+        f"- Investment goal: {_sanitise_for_prompt(core_user.get('investment_goal'), max_length=40)}\n"
+        "\n"
+        f"KNOWLEDGE TIER: {tier}\n"
+        "Adapt communication depth and vocabulary accordingly.\n"
+        "\n"
+        "################################################################################\n"
+        "# END MERIDIAN CONTEXT — IRIS SYSTEM PROMPT FOLLOWS\n"
+        "################################################################################\n"
+        "\n"
+    )
+
+
+# Cache staleness threshold. Beyond this age the cache is still served,
+# but a refresh is scheduled asynchronously in the background.
+_CACHE_STALE_AFTER = timedelta(hours=24)
+
+
+def _is_cache_stale(updated_at: Any) -> bool:
+    """Return True if the cache row's updated_at is older than _CACHE_STALE_AFTER."""
+    if not updated_at:
+        return True
+    try:
+        if hasattr(updated_at, "isoformat"):
+            ts = updated_at
+        else:
+            ts = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts) > _CACHE_STALE_AFTER
+    except Exception:
+        return True
+
+
+def _schedule_background_refresh(user_id: str) -> None:
+    """Fire-and-forget: kick off a full Meridian cache refresh without blocking."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    loop.create_task(refresh_iris_context_cache(user_id))
+
+
 async def build_iris_context(user_id: Optional[str]) -> str:
     """
     Fetches user's Meridian context from ai.iris_context_cache.
     Returns a formatted string prepended to FINANCIAL_ADVISOR_SYSTEM_PROMPT.
 
-    On cache miss, triggers a one-time refresh so newly-onboarded users
-    (or users whose cache was lost) still get personalised context.
+    Non-blocking policy:
+      - Fresh cache hit  → serve it.
+      - Stale cache hit  → serve it, schedule async refresh.
+      - Cache miss       → serve minimal context from core.users, schedule async refresh.
+    The chat pipeline is never blocked by a full 13-table rebuild.
 
     GRACEFUL DEGRADATION: Any failure returns "" so IRIS always works.
     """
@@ -99,20 +195,20 @@ async def build_iris_context(user_id: Optional[str]) -> str:
     try:
         data = await asyncio.to_thread(_fetch_iris_cache_sync, user_id)
 
-        # Cache miss — attempt a just-in-time refresh before giving up.
-        if not data:
-            logger.info("IRIS cache miss for user %s — triggering JIT refresh", user_id)
-            try:
-                await asyncio.to_thread(_refresh_iris_context_cache_sync, user_id)
-                data = await asyncio.to_thread(_fetch_iris_cache_sync, user_id)
-            except Exception as refresh_exc:
-                logger.warning(
-                    "JIT cache refresh failed for user %s: %s", user_id, refresh_exc
-                )
+        if data:
+            if _is_cache_stale(data.get("updated_at")):
+                logger.info("IRIS cache stale for user %s — scheduling async refresh", user_id)
+                _schedule_background_refresh(user_id)
+            return _format_context_block(data)
 
-        if not data:
-            return ""
-        return _format_context_block(data)
+        # Cache miss — never block the chat. Build a minimal context from
+        # core.users (name + tier) so IRIS still greets the user personally,
+        # then kick off a full refresh in the background.
+        logger.info("IRIS cache miss for user %s — scheduling async refresh", user_id)
+        _schedule_background_refresh(user_id)
+
+        minimal = await asyncio.to_thread(_build_minimal_context_sync, user_id)
+        return minimal or ""
     except Exception as exc:
         logger.debug("Meridian context unavailable for user %s: %s", user_id, exc)
         return ""
@@ -137,6 +233,13 @@ def _format_context_block(ctx: dict) -> str:
     parts: List[str] = []
 
     # ── 1. User profile + 2. Knowledge tier + 3. Investment profile ──────────
+    first_name = _sanitise_for_prompt(profile.get("first_name"), max_length=40)
+    last_name = _sanitise_for_prompt(profile.get("last_name"), max_length=40)
+    name_parts = [p for p in (first_name, last_name) if p and p != "not set"]
+    display_name = " ".join(name_parts) if name_parts else "not set"
+    age_value = profile.get("age")
+    age_str = str(age_value) if age_value not in (None, "") else "not set"
+
     parts.append(
         "\n"
         "################################################################################\n"
@@ -147,7 +250,12 @@ def _format_context_block(ctx: dict) -> str:
         "################################################################################\n"
         "\n"
         "USER PROFILE:\n"
+        f"- Name: {display_name}\n"
+        f"- Age: {age_str}\n"
         f"- Age range: {profile.get('age_range', 'not set')}\n"
+        f"- Marital status: {_sanitise_for_prompt(profile.get('marital_status'), max_length=30)}\n"
+        f"- Experience level: {_sanitise_for_prompt(profile.get('experience_level'), max_length=30)}\n"
+        f"- Investment goal: {_sanitise_for_prompt(profile.get('investment_goal'), max_length=40)}\n"
         f"- Income range: {profile.get('income_range', 'not set')}\n"
         f"- Emergency fund status: {profile.get('emergency_fund_status', 'not set')}\n"
         "\n"
@@ -157,6 +265,7 @@ def _format_context_block(ctx: dict) -> str:
         "\n"
         "INVESTMENT PROFILE:\n"
         f"- Risk profile: {_sanitise_for_prompt(profile.get('risk_profile'))}\n"
+        f"- Risk level: {_sanitise_for_prompt(profile.get('risk_level'), max_length=30)}\n"
         f"- Investment horizon: {_sanitise_for_prompt(profile.get('investment_horizon'))}\n"
         f"- Monthly investable amount: {profile.get('monthly_investable', 'not set')}\n"
     )
@@ -691,16 +800,19 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     trading_positions: List[Dict[str, Any]] = []
     closed_trades: List[Dict[str, Any]] = []
     core_user_id: Optional[str] = None  # resolved once; reused by blocks 11 and beyond
+    core_user_row: Dict[str, Any] = {}
     try:
-        # Resolve core.users.id from auth_id
+        # Resolve core.users.id from auth_id AND surface identity fields that
+        # IRIS needs (name, age, experience/risk, investment_goal, marital_status).
         core_user_res = (
             _table(client, "core", "users")
-            .select("id")
+            .select(_CORE_USER_CONTEXT_COLUMNS)
             .eq("auth_id", user_id)
             .maybe_single()
             .execute()
         )
-        core_user_id = ((core_user_res and core_user_res.data) or {}).get("id")
+        core_user_row = ((core_user_res and core_user_res.data) or {}) or {}
+        core_user_id = core_user_row.get("id")
 
         if core_user_id:
             # Open positions (20 most recent by entry_date DESC)
@@ -931,18 +1043,22 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         logger.exception("DB query failed: academy progress for user_id=%s", user_id)
 
     # ── NEW BLOCK 12: Recent chat summaries ───────────────────────────────────
+    # ai.chats.user_id FK → core.users(id), so we must use core_user_id here —
+    # NOT the auth_id used for meridian.* tables.
     recent_chat_summaries: List[Dict[str, Any]] = []
     try:
-        # Get 3 most recent chats (using auth_id / user_id — same as iris_context_cache)
-        chats_res = (
-            _table(client, "ai", "chats")
-            .select("id, title")
-            .eq("user_id", user_id)
-            .order("updated_at", desc=True)
-            .limit(3)
-            .execute()
-        )
-        recent_chats = (chats_res and chats_res.data) or []
+        if not core_user_id:
+            recent_chats: List[Dict[str, Any]] = []
+        else:
+            chats_res = (
+                _table(client, "ai", "chats")
+                .select("id, title")
+                .eq("user_id", core_user_id)
+                .order("updated_at", desc=True)
+                .limit(3)
+                .execute()
+            )
+            recent_chats = (chats_res and chats_res.data) or []
 
         if recent_chats:
             chat_ids = [c["id"] for c in recent_chats if c.get("id")]
@@ -1035,7 +1151,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     else:
         ef_status = "None — building an emergency fund should come before investing"
 
-    # 11. Build profile summary
+    # 11. Build profile summary (merges core.user_profiles + core.users)
     profile_summary: Dict[str, Any] = {
         "risk_profile": profile.get("risk_profile", "not set"),
         "investment_horizon": profile.get("investment_horizon", "not set"),
@@ -1043,6 +1159,15 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "emergency_fund_status": ef_status,
         "income_range": profile.get("income_range"),
         "age_range": profile.get("age_range"),
+        # From core.users — surfaces identity + declared preferences so IRIS
+        # can address the user by name and tailor advice to their stated goals.
+        "first_name": core_user_row.get("first_name"),
+        "last_name": core_user_row.get("last_name"),
+        "age": core_user_row.get("age"),
+        "experience_level": core_user_row.get("experience_level"),
+        "risk_level": core_user_row.get("risk_level"),
+        "investment_goal": core_user_row.get("investment_goal"),
+        "marital_status": core_user_row.get("marital_status"),
     }
 
     # 12. Format goals for context injection
