@@ -1259,6 +1259,27 @@ def _is_nonfin_message(message: str) -> bool:
     return True
 
 
+INJECTION_PATTERNS = [
+    r"ignore\s+(all\s+)?(previous|prior|above)\s+instructions",
+    r"forget\s+(all\s+)?(previous|prior|above)\s+instructions",
+    r"disregard\s+(all\s+)?(previous|prior|above)",
+    r"you\s+are\s+now\s+a",
+    r"act\s+as\s+(if\s+you\s+are\s+)?a",
+    r"new\s+persona",
+    r"system\s*:",
+    r"<\s*system\s*>",
+    r"\[system\]",
+    r"jailbreak",
+    r"dan\s+mode",
+    r"developer\s+mode",
+]
+
+
+def _contains_injection(text: str) -> bool:
+    lowered = text.lower()
+    return any(re.search(p, lowered) for p in INJECTION_PATTERNS)
+
+
 def _extract_ticker(message: str) -> Optional[str]:
     """Return the first plausible ticker symbol found in message, or None.
 
@@ -1990,6 +2011,21 @@ async def chat_completion(
         # Identify the last user message for classification
         user_messages = [m for m in messages if m.get("role") == "user"]
         last_user_text = user_messages[-1]["content"] if user_messages else ""
+
+        # Prompt injection guard — fires before any I/O or tier classification.
+        if _contains_injection(last_user_text):
+            logger.warning(
+                "[INJECTION_GATE] blocked suspected injection attempt | user=%s | msg='%s'",
+                verified_user_id[-8:] if verified_user_id else "unknown",
+                last_user_text[:80],
+            )
+
+            async def injection_response():
+                yield f"data: {json.dumps({'content': 'I can only help with financial questions. Please ask me about markets, investments, or your portfolio.'})}\n\n"
+                yield f"data: {json.dumps({'done': True})}\n\n"
+
+            release_request()
+            return StreamingResponse(injection_response(), media_type="text/event-stream")
 
         # Tier detection — zero I/O, drives all subsequent gating decisions.
         message_tier = classify_tier(last_user_text)
