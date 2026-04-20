@@ -1,7 +1,7 @@
 import { TrendingUp, TrendingDown, LineChart } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Area, AreaChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { useOpenPositions, usePortfolioHistory } from "@/hooks/use-data";
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useOpenPositions, usePortfolioHistory, useTrades } from "@/hooks/use-data";
 import { format, parseISO } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,11 @@ export function PortfolioPerformance({
   const { data: fallbackPortfolioHistory = [], isLoading: isPortfolioHistoryLoading } = usePortfolioHistory();
   const { data: fallbackOpenPositions = [], isLoading: isOpenPositionsLoading } = useOpenPositions();
   const navigate = useNavigate();
+  const { data: allTrades = [] } = useTrades();
+  const closedTrades = allTrades
+    .filter(t => t.action === 'CLOSED' && t.pnl !== null)
+    .map(t => ({ label: t.symbol, pnl: t.pnl as number, date: t.exit_date }))
+    .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
   const portfolioHistory = portfolioHistoryProp ?? fallbackPortfolioHistory;
   const openPositions = openPositionsProp ?? fallbackOpenPositions;
   const isLoading = isLoadingProp ?? (isPortfolioHistoryLoading || isOpenPositionsLoading);
@@ -122,49 +127,47 @@ export function PortfolioPerformance({
 
         {/* Chart */}
         <div className="h-[200px] w-full -mx-2">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={displayData}>
-              <defs>
-                <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} stopOpacity={0.2} />
-                  <stop offset="95%" stopColor={isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <XAxis
-                dataKey="date"
-                stroke="hsl(var(--muted-foreground) / 0.3)"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                stroke="hsl(var(--muted-foreground) / 0.3)"
-                fontSize={10}
-                tickLine={false}
-                axisLine={false}
-                tickFormatter={(value) => `$${(value / 1000).toFixed(0)}k`}
-                width={45}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border) / 0.5)",
-                  borderRadius: "8px",
-                  boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)",
-                  fontSize: "12px",
-                }}
-                labelStyle={{ color: "hsl(var(--muted-foreground))", fontSize: "10px" }}
-                formatter={(value: number) => [`$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, ""]}
-              />
-              <Area
-                type="monotone"
-                dataKey="value"
-                stroke={isPositive ? "hsl(var(--profit))" : "hsl(var(--loss))"}
-                strokeWidth={2}
-                fill="url(#colorValue)"
-              />
-            </AreaChart>
-          </ResponsiveContainer>
+          {closedTrades.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+              <p className="text-sm">Close your first trade to see performance</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={closedTrades}>
+                <XAxis
+                  dataKey="label"
+                  stroke="hsl(var(--muted-foreground) / 0.3)"
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                />
+                <YAxis
+                  stroke="hsl(var(--muted-foreground) / 0.3)"
+                  fontSize={10}
+                  tickLine={false}
+                  axisLine={false}
+                  width={55}
+                  tickFormatter={(v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: "hsl(var(--card))",
+                    border: "1px solid hsl(var(--border) / 0.5)",
+                    borderRadius: "8px",
+                    boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)",
+                    fontSize: "12px",
+                  }}
+                  labelStyle={{ color: "hsl(var(--muted-foreground))", fontSize: "10px" }}
+                  formatter={(v: number) => [`${v >= 0 ? '+' : ''}$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "P&L"]}
+                />
+                <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                  {closedTrades.map((entry, i) => (
+                    <Cell key={`cell-${i}`} fill={entry.pnl >= 0 ? '#1D9E75' : '#E24B4A'} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </CardContent>
     </Card>

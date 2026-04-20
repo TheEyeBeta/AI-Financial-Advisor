@@ -1,7 +1,5 @@
 import { Card, CardContent } from "@/components/ui/card";
 import {
-  Area,
-  AreaChart,
   Bar,
   BarChart,
   Cell,
@@ -45,33 +43,13 @@ export function PerformanceCharts({
     [positions],
   );
 
-  const hasOpenPositions = positions.length > 0;
-
-  // Calculate equity curve
-  const equityData = useMemo(() => {
-    if (portfolioHistory.length > 0) {
-      return [...portfolioHistory]
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .map((entry) => ({
-          date: entry.date,
-          value: entry.value,
-          fullDate: format(parseISO(entry.date), "MMM d, yyyy"),
-        }));
-    }
-
-    if (hasOpenPositions) {
-      const today = format(new Date(), "yyyy-MM-dd");
-      return [
-        {
-          date: today,
-          value: currentPortfolioValue,
-          fullDate: format(parseISO(today), "MMM d, yyyy"),
-        },
-      ];
-    }
-
-    return [];
-  }, [hasOpenPositions, portfolioHistory, currentPortfolioValue]);
+  const closedTrades = useMemo(() =>
+    trades
+      .filter(t => t.action === 'CLOSED' && t.pnl !== null)
+      .map(t => ({ label: t.symbol, pnl: t.pnl as number, date: t.exit_date }))
+      .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? '')),
+    [trades]
+  );
 
   // Calculate win/loss distribution
   const winLossData = useMemo(() => {
@@ -187,46 +165,41 @@ export function PerformanceCharts({
         <CardContent className="pt-4 pb-3">
           <div className="flex items-center gap-2 mb-3">
             <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Equity Curve</span>
-            <span className="text-[10px] text-muted-foreground/50">(Journal replay)</span>
+            <span className="text-[10px] text-muted-foreground/50">Closed trades</span>
           </div>
           <div className="h-[180px]">
-            {equityData.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-xs text-muted-foreground/60">
-                Start trading to see your equity curve
+            {closedTrades.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                <p className="text-sm">Close your first trade to see performance</p>
               </div>
             ) : (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={equityData}>
-                  <defs>
-                    <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.2} />
-                      <stop offset="95%" stopColor="hsl(var(--primary))" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
+                <BarChart data={closedTrades}>
                   <XAxis
-                    dataKey="date"
+                    dataKey="label"
                     stroke="hsl(var(--muted-foreground) / 0.3)"
                     fontSize={10}
                     tickLine={false}
                     axisLine={false}
-                    minTickGap={24}
-                    tickFormatter={(value: string) => format(parseISO(value), "MMM yyyy")}
                   />
                   <YAxis
                     stroke="hsl(var(--muted-foreground) / 0.3)"
                     fontSize={10}
                     tickLine={false}
                     axisLine={false}
-                    tickFormatter={formatAxisCurrency}
-                    width={48}
+                    width={55}
+                    tickFormatter={(v: number) => `${v >= 0 ? '+' : '-'}$${Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border) / 0.5)", borderRadius: "8px", fontSize: "11px" }}
-                    formatter={(value: number) => [`$${value.toLocaleString()}`, ""]}
-                    labelFormatter={(label: string) => format(parseISO(label), "MMM yyyy")}
+                    formatter={(v: number) => [`${v >= 0 ? '+' : ''}$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "P&L"]}
                   />
-                  <Area type="monotone" dataKey="value" stroke="hsl(var(--primary))" strokeWidth={2} fill="url(#colorEquity)" />
-                </AreaChart>
+                  <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
+                    {closedTrades.map((entry, i) => (
+                      <Cell key={`cell-${i}`} fill={entry.pnl >= 0 ? '#1D9E75' : '#E24B4A'} />
+                    ))}
+                  </Bar>
+                </BarChart>
               </ResponsiveContainer>
             )}
           </div>
