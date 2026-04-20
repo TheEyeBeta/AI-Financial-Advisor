@@ -164,7 +164,7 @@ export function PerformanceCharts({
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardContent className="pt-4 pb-3">
           <div className="flex items-center gap-2 mb-3">
-            <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Equity Curve</span>
+            <span className="text-xs text-muted-foreground/70 uppercase tracking-wide">Trade Performance</span>
             <span className="text-[10px] text-muted-foreground/50">Closed trades</span>
           </div>
           <div className="h-[180px]">
