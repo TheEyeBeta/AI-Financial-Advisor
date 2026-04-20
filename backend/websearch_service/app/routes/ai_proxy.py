@@ -2300,7 +2300,7 @@ async def chat_completion(
         else:  # BALANCED — high-stakes categories get the deep model
             _base_system_prompt = FINANCIAL_ADVISOR_SYSTEM_PROMPT
             if subagent_category in _DEEP_CATEGORIES:
-                _chat_model = DEEP_MODEL
+                _chat_model = BALANCED_MODEL
             else:
                 _chat_model = BALANCED_MODEL
 
