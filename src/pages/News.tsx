@@ -372,7 +372,7 @@ const News = () => {
           </Card>
         ) : (
           <>
-            <section className={cn("grid items-start gap-4", spotlightArticles.length > 0 && "xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]")}>
+            <section className={cn("grid items-stretch gap-4", spotlightArticles.length > 0 && "xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]")}>
               {leadArticle && (
                 <a
                   href={leadArticle.safeLink ?? undefined}
@@ -444,7 +444,7 @@ const News = () => {
               )}
 
               {spotlightArticles.length > 0 && (
-                <div className="grid content-start gap-4">
+                <div className="grid content-between gap-4">
                   {spotlightArticles.map((article, index) => {
                     const impactTone = getImpactTone(article.impactScore);
 
@@ -457,7 +457,7 @@ const News = () => {
                         onClick={() => handleArticleClick(article, "spotlight")}
                         aria-label={`Open article: ${article.title}`}
                         aria-disabled={!article.safeLink}
-                        className={cn("group block", !article.safeLink && "pointer-events-none opacity-75")}
+                        className={cn("group block h-full", !article.safeLink && "pointer-events-none opacity-75")}
                       >
                         <article className="h-full rounded-[24px] border border-border/60 bg-card/92 p-5 shadow-[0_24px_60px_-52px_rgba(15,23,42,0.7)] transition-all duration-300 hover:-translate-y-1 hover:border-primary/35 hover:bg-card">
                           <div className="flex items-center justify-between gap-3">
