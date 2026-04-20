@@ -239,9 +239,7 @@ async def dataapi_query(
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
 
     # Wrap with an outer LIMIT 1000 to enforce a hard row cap at the SQL level.
-    wrapped = f"SELECT * FROM ({q}) AS _q LIMIT 1000"
-    # Prepend a per-query statement timeout; SET LOCAL confines it to this transaction.
-    final_sql = f"SET LOCAL statement_timeout = '5000'; {wrapped}"
+    final_sql = f"SELECT * FROM ({q}) AS _q LIMIT 1000"
 
     try:
         base_url, token = await _get_admin_token()

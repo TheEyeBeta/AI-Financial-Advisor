@@ -72,6 +72,15 @@ interface ActivityLog {
   timestamp: string;
 }
 
+interface EngagementStats {
+  avgMessagesPerChat: number;
+  weeklyActiveChats: number;
+  lessonsStarted: number;
+  journalEntries: number;
+  quizAttempts: number;
+  retentionRate: number;
+}
+
 const EXPERIENCE_STYLES: Record<string, string> = {
   beginner: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
   intermediate: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
@@ -165,6 +174,14 @@ export default function Admin() {
   const [chatStats, setChatStats] = useState<ChatStats>({ totalChats: 0, totalMessages: 0, activeToday: 0 });
   const [tradingStats, setTradingStats] = useState<TradingStats>({ totalPositions: 0, totalTrades: 0, totalJournalEntries: 0 });
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
+  const [engagementStats, setEngagementStats] = useState<EngagementStats>({
+    avgMessagesPerChat: 0,
+    weeklyActiveChats: 0,
+    lessonsStarted: 0,
+    journalEntries: 0,
+    quizAttempts: 0,
+    retentionRate: 0,
+  });
 
   // System Health state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -179,7 +196,8 @@ export default function Admin() {
   const [schedulerJobs, setSchedulerJobs] = useState<SchedulerJob[]>([]);
   const [schedulerLoading, setSchedulerLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("users");
-  const [jobTriggerStates, setJobTriggerStates] = useState<Record<string, { loading: boolean; result: "idle" | "success" | "error" }>>({});
+  const [jobStatuses, setJobStatuses] = useState<Record<string, "idle" | "running" | "success" | "error">>({});
+  const [jobMessages, setJobMessages] = useState<Record<string, string>>({});
 
   const BACKEND_URL = getPythonApiUrl();
   /** Get the current Supabase access token for authenticated admin requests. */
@@ -272,6 +290,7 @@ export default function Admin() {
       fetchUsers(),
       fetchChatStats(),
       fetchTradingStats(),
+      fetchEngagementStats(),
       fetchSystemHealth(),
     ]);
     setLoading(false);
@@ -349,6 +368,32 @@ export default function Admin() {
       });
     } catch (error) {
       console.error("Error fetching trading stats:", error);
+    }
+  };
+
+  const fetchEngagementStats = async () => {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const [chatsRes, msgsRes, weeklyActiveRes, lessonProgressRes, journalRes, quizRes] = await Promise.all([
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chat_messages").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }).gte("updated_at", sevenDaysAgo),
+        supabase.schema("academy").from("user_lesson_progress").select("id", { count: "exact", head: true }),
+        supabase.schema("trading").from("trade_journal").select("id", { count: "exact", head: true }),
+        supabase.schema("academy").from("quiz_attempts").select("id", { count: "exact", head: true }),
+      ]);
+
+      setEngagementStats({
+        avgMessagesPerChat: chatsRes.count && msgsRes.count ? Math.round(msgsRes.count / chatsRes.count) : 0,
+        weeklyActiveChats: weeklyActiveRes.count ?? 0,
+        lessonsStarted: lessonProgressRes.count ?? 0,
+        journalEntries: journalRes.count ?? 0,
+        quizAttempts: quizRes.count ?? 0,
+        retentionRate: chatsRes.count ? Math.round(((weeklyActiveRes.count ?? 0) / chatsRes.count) * 100) : 0,
+      });
+    } catch (error) {
+      console.error("Error fetching engagement stats:", error);
     }
   };
 
@@ -448,23 +493,22 @@ export default function Admin() {
   }, []);
 
   const triggerJob = async (jobId: string) => {
-    setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: true, result: "idle" } }));
+    setJobStatuses((prev) => ({ ...prev, [jobId]: "running" }));
+    setJobMessages((prev) => ({ ...prev, [jobId]: "" }));
     try {
       if (jobId === "ranking") await adminApi.triggerRanking();
       else if (jobId === "memory_extraction") await adminApi.triggerMemoryExtraction();
       else if (jobId === "intelligence") await adminApi.triggerIntelligence();
       else if (jobId === "meridian_refresh") await adminApi.triggerMeridianRefresh();
       else throw new Error(`Unknown job: ${jobId}`);
-      setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "success" } }));
-      setTimeout(() => {
-        setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "idle" } }));
-      }, 3000);
+      const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      setJobStatuses((prev) => ({ ...prev, [jobId]: "success" }));
+      setJobMessages((prev) => ({ ...prev, [jobId]: `Completed at ${time}` }));
     } catch (err) {
       console.error(`Failed to trigger job ${jobId}:`, err);
-      setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "error" } }));
-      setTimeout(() => {
-        setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "idle" } }));
-      }, 3000);
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setJobStatuses((prev) => ({ ...prev, [jobId]: "error" }));
+      setJobMessages((prev) => ({ ...prev, [jobId]: `Failed: ${msg}` }));
     }
   };
 
@@ -670,7 +714,7 @@ export default function Admin() {
                         className="h-10 rounded-xl border-border/70 bg-background pl-9"
                       />
                     </div>
-                    <Button onClick={exportUsers} variant="outline" className="w-full gap-2 rounded-xl sm:w-auto">
+                    <Button onClick={exportUsers} variant="outline" className="w-full flex-shrink-0 gap-2 rounded-xl sm:w-auto">
                       <Download className="h-4 w-4" />
                       Export CSV
                     </Button>
@@ -701,8 +745,8 @@ export default function Admin() {
                 ) : (
                   <>
                     <div className="overflow-hidden rounded-2xl border">
-                      <div className="max-w-full overflow-x-auto">
-                        <Table className="min-w-[720px] table-fixed md:min-w-[860px] xl:min-w-full">
+                      <div className="overflow-x-auto">
+                        <Table className="min-w-[900px]">
                           <TableHeader>
                             <TableRow className="bg-muted/30">
                               <TableHead className="w-[16rem]">User</TableHead>
@@ -901,6 +945,36 @@ export default function Admin() {
                   ))}
                 </CardContent>
               </Card>
+
+              <Card className="rounded-3xl border-border/60 shadow-sm">
+                <CardHeader>
+                  <CardTitle>Engagement metrics</CardTitle>
+                  <CardDescription>Computed from live platform activity.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {[
+                    { icon: MessageSquare, label: "Avg messages per chat", subtext: "Engagement depth per session", value: engagementStats.avgMessagesPerChat },
+                    { icon: Activity, label: "Weekly active chats", subtext: "Sessions updated in last 7 days", value: engagementStats.weeklyActiveChats },
+                    { icon: TrendingUp, label: "7-day retention rate", subtext: "Active chats vs total", value: `${engagementStats.retentionRate}%` },
+                    { icon: BarChart3, label: "Lessons started", subtext: "Academy lesson progress rows", value: engagementStats.lessonsStarted },
+                    { icon: Shield, label: "Quiz attempts", subtext: "Academy quiz submissions", value: engagementStats.quizAttempts },
+                    { icon: Database, label: "Journal entries", subtext: "Trade documentation records", value: engagementStats.journalEntries },
+                  ].map((item) => (
+                    <div key={item.label} className="flex flex-col gap-4 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="rounded-xl bg-primary/10 p-2 text-primary">
+                          <item.icon className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-medium">{item.label}</div>
+                          <div className="text-xs text-muted-foreground">{item.subtext}</div>
+                        </div>
+                      </div>
+                      <div className="text-left text-2xl font-semibold sm:text-right">{item.value}</div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
             </div>
           </TabsContent>
 
@@ -966,7 +1040,8 @@ export default function Admin() {
               {SCHEDULED_JOB_DEFS.map((def) => {
                 const job = schedulerJobs.find((j) => j.id === def.id);
                 const lastRun = job?.last_run ?? null;
-                const triggerState = jobTriggerStates[def.id] ?? { loading: false, result: "idle" as const };
+                const jobStatus = jobStatuses[def.id] ?? "idle";
+                const jobMessage = jobMessages[def.id] ?? "";
                 const health = getJobHealth(lastRun, def.overdueSeconds);
 
                 return (
@@ -998,38 +1073,40 @@ export default function Admin() {
                           {schedulerLoading ? "Loading…" : formatRelativeTime(lastRun)}
                         </span>
                       </div>
-                      <Button
-                        size="sm"
-                        className="w-full gap-2 rounded-xl"
-                        variant={
-                          triggerState.result === "success"
-                            ? "default"
-                            : triggerState.result === "error"
-                            ? "destructive"
-                            : "outline"
-                        }
-                        disabled={triggerState.loading}
-                        onClick={() => { void triggerJob(def.id); }}
-                      >
-                        {triggerState.loading ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Running…
-                          </>
-                        ) : triggerState.result === "success" ? (
-                          <>
-                            <Play className="h-4 w-4" />
-                            Started
-                          </>
-                        ) : triggerState.result === "error" ? (
-                          "Failed — try again"
-                        ) : (
-                          <>
-                            <Play className="h-4 w-4" />
-                            Run Now
-                          </>
+                      <div>
+                        <Button
+                          size="sm"
+                          className="w-full gap-2 rounded-xl"
+                          variant="outline"
+                          disabled={jobStatus === "running"}
+                          onClick={() => { void triggerJob(def.id); }}
+                        >
+                          {jobStatus === "running" ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Running…
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-4 w-4" />
+                              Run Now
+                            </>
+                          )}
+                        </Button>
+                        {jobStatus !== "idle" && (
+                          <p
+                            className={`mt-1.5 text-xs ${
+                              jobStatus === "running"
+                                ? "text-muted-foreground"
+                                : jobStatus === "success"
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-red-600 dark:text-red-400"
+                            }`}
+                          >
+                            {jobStatus === "running" ? "Running..." : jobMessage}
+                          </p>
                         )}
-                      </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 );
