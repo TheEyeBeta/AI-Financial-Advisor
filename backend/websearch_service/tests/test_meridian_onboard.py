@@ -2,8 +2,8 @@
 Pytest for Meridian onboarding endpoint and IRIS context flow.
 
 1. POST /api/meridian/onboard with sample data
-2. Assert iris_context_cache record was written with correct structure
-   (by querying the same Supabase client used in the app, or a mock store)
+2. Trigger the scheduled refresh in-process and assert iris_context_cache
+   was written with the correct structure.
 3. POST /api/chat with "What should I focus on given my goals?"
 4. Assert the response contains contextualised content (e.g. goal-related),
    not just generic financial advice.
@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch, AsyncMock
 from fastapi.testclient import TestClient
 
 from app.services.auth import DEV_BYPASS_USER_ID
+from app.services.meridian_context import _refresh_iris_context_cache_sync, build_iris_context
 from app.services.rate_limit import rate_limiter
 
 
@@ -109,6 +110,24 @@ def _make_supabase_mock():
                     stored_goals.append(row)
             elif self._table == "meridian_events":
                 pass
+            else:
+                result = MagicMock()
+                if self._table == "users":
+                    result.data = {
+                        "id": "core-user-1",
+                        "auth_id": DEV_BYPASS_USER_ID,
+                        "first_name": "Test",
+                        "last_name": "User",
+                        "age": 30,
+                        "experience_level": "beginner",
+                        "risk_level": "medium",
+                        "investment_goal": "House deposit",
+                        "marital_status": "single",
+                    }
+                else:
+                    result.data = []
+                result.count = 0
+                return result
             return MagicMock()
 
     class MockSupabase:
@@ -139,12 +158,20 @@ async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
     }
 
     # 1) POST /api/meridian/onboard
-    with patch("app.services.meridian_context.supabase_client", new=mock_supabase):
+    def _close_scheduled_refresh(coro):
+        coro.close()
+        return MagicMock()
+
+    with patch("app.services.meridian_context.supabase_client", new=mock_supabase), \
+         patch("app.routes.ai_proxy.asyncio.create_task", side_effect=_close_scheduled_refresh):
         onboard_resp = client.post("/api/meridian/onboard", json=sample_body)
     assert onboard_resp.status_code == 200
     data = onboard_resp.json()
     assert data.get("status") == "ok"
     assert "Meridian profile created" in data.get("message", "")
+
+    with patch("app.services.meridian_context.supabase_client", new=mock_supabase):
+        _refresh_iris_context_cache_sync(DEV_BYPASS_USER_ID)
 
     # 2) Query "iris_context_cache" (our mock store) for correct structure
     stored = getattr(mock_supabase, "_stored_iris_cache", {})
@@ -156,6 +183,11 @@ async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
     assert row["profile_summary"].get("investment_horizon") == "balanced"
     assert row["profile_summary"].get("monthly_investable") == 500.0
     assert "emergency_fund_status" in row["profile_summary"]
+    assert "monthly_expenses" in row["profile_summary"]
+    assert "total_debt" in row["profile_summary"]
+    assert "dependants" in row["profile_summary"]
+    assert "country_of_residence" in row["profile_summary"]
+    assert "employment_status" in row["profile_summary"]
     assert "active_goals" in row
     assert len(row["active_goals"]) >= 1
     goal = row["active_goals"][0]
@@ -167,6 +199,15 @@ async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
     assert "plan_status" in row
     assert row["plan_status"].get("on_track") is True
     assert "knowledge_tier" in row
+    assert row.get("journal_summary") == "No journal entries yet"
+    assert row.get("achievement_summary") == "None yet"
+
+    with patch("app.services.meridian_context.supabase_client", new=mock_supabase):
+        context = await build_iris_context(user_id)
+    assert "TRADING BEHAVIOUR" in context
+    assert "No journal entries yet" in context
+    assert "USER ACHIEVEMENTS" in context
+    assert "None yet" in context
 
     # 3) POST /api/chat with goal-focused question; 4) assert contextualised content
     # build_iris_context will run and, with our mock, return data from stored_iris_cache

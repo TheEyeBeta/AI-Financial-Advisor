@@ -107,7 +107,7 @@ export interface paths {
         put?: never;
         /**
          * Meridian Onboard
-         * @description Create or update Meridian profile and first goal; refresh IRIS context cache.
+         * @description Create or update Meridian profile and first goal; schedule an IRIS cache refresh.
          */
         post: operations["meridian_onboard_api_meridian_onboard_post"];
         delete?: never;
@@ -451,6 +451,88 @@ export interface paths {
          * @description Manually trigger a full history memory scan in the background and return immediately.
          */
         post: operations["trigger_memory_scan_api_admin_trigger_memory_scan_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trigger-intelligence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Intelligence
+         * @description Manually trigger an intelligence cycle in the background and return immediately.
+         */
+        post: operations["trigger_intelligence_api_admin_trigger_intelligence_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trigger-memory-extraction": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Memory Extraction
+         * @description Manually trigger a live memory extraction cycle in the background and return immediately.
+         */
+        post: operations["trigger_memory_extraction_api_admin_trigger_memory_extraction_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/trigger-meridian-refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Trigger Meridian Refresh
+         * @description Manually trigger a Meridian context refresh for all users in the background.
+         */
+        post: operations["trigger_meridian_refresh_api_admin_trigger_meridian_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/scheduler-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Scheduler Status
+         * @description Return last-run timestamps for each scheduled job, inferred from the database.
+         *
+         *     Never raises — always returns a valid response even if all DB queries fail.
+         */
+        get: operations["scheduler_status_api_admin_scheduler_status_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1643,6 +1725,94 @@ export interface operations {
         };
     };
     trigger_memory_scan_api_admin_trigger_memory_scan_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    trigger_intelligence_api_admin_trigger_intelligence_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    trigger_memory_extraction_api_admin_trigger_memory_extraction_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    trigger_meridian_refresh_api_admin_trigger_meridian_refresh_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    scheduler_status_api_admin_scheduler_status_get: {
         parameters: {
             query?: never;
             header?: never;

@@ -4,6 +4,7 @@ import time
 from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 import httpx
+from app.routes import ai_proxy
 from app.services.rate_limit import rate_limiter
 
 
@@ -600,3 +601,30 @@ async def test_chat_endpoint_network_error(client: TestClient):
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.post("/api/chat", json={"message": "Hello"})
         assert response.status_code == 502
+
+
+def test_meridian_onboard_schedules_background_cache_refresh(client: TestClient):
+    sample_body = {
+        "knowledge_tier": 1,
+        "risk_profile": "moderate",
+        "investment_horizon": "balanced",
+        "monthly_investable": 500.0,
+        "emergency_fund_months": 2.0,
+        "goal_name": "House deposit",
+        "target_amount": 30000.0,
+        "target_date": "2027-01-01",
+    }
+
+    mock_to_thread = MagicMock(return_value="refresh-coro")
+    with patch("app.routes.ai_proxy.run_meridian_onboard", new=AsyncMock()) as mock_onboard, \
+         patch("app.routes.ai_proxy.asyncio.to_thread", new=mock_to_thread), \
+         patch("app.routes.ai_proxy.asyncio.create_task") as mock_create_task:
+        response = client.post("/api/meridian/onboard", json=sample_body)
+
+    assert response.status_code == 200
+    mock_onboard.assert_awaited_once()
+    mock_to_thread.assert_called_once_with(
+        ai_proxy._refresh_iris_context_cache_sync,
+        "43245b18-2feb-49a4-9958-44fa5c17881e",
+    )
+    mock_create_task.assert_called_once_with("refresh-coro")
