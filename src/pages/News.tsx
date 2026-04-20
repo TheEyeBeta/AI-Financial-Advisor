@@ -167,8 +167,8 @@ const News = () => {
 
   const visibleArticles = allArticles.slice(0, visibleCount);
   const leadArticle = visibleArticles[0];
-  const spotlightArticles = visibleArticles.slice(1, 4);
-  const streamArticles = visibleArticles.slice(4);
+  const spotlightArticles = visibleArticles.slice(1, 5);
+  const streamArticles = visibleArticles.slice(5);
   const hasMore = visibleCount < allArticles.length;
 
   const highImpactCount = useMemo(
