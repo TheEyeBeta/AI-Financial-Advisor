@@ -24,7 +24,13 @@ export function PortfolioPerformance({
   const { data: allTrades = [] } = useTrades();
   const closedTrades = allTrades
     .filter(t => t.action === 'CLOSED' && t.pnl !== null)
-    .map(t => ({ label: t.symbol, pnl: t.pnl as number, date: t.exit_date }))
+    .map(t => ({
+      label: t.symbol,
+      pnl: t.pnl as number,
+      date: t.exit_date,
+      entry_date: t.entry_date,
+      exit_date: t.exit_date,
+    }))
     .sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
   const portfolioHistory = portfolioHistoryProp ?? fallbackPortfolioHistory;
   const openPositions = openPositionsProp ?? fallbackOpenPositions;
@@ -154,11 +160,18 @@ export function PortfolioPerformance({
                     backgroundColor: "hsl(var(--card))",
                     border: "1px solid hsl(var(--border) / 0.5)",
                     borderRadius: "8px",
-                    boxShadow: "0 4px 12px rgb(0 0 0 / 0.1)",
                     fontSize: "12px",
                   }}
-                  labelStyle={{ color: "hsl(var(--muted-foreground))", fontSize: "10px" }}
-                  formatter={(v: number) => [`${v >= 0 ? '+' : ''}$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, "P&L"]}
+                  labelFormatter={(label) => label}
+                  formatter={(value: number, _name: string, props: { payload?: { entry_date?: string | null; exit_date?: string | null } }) => {
+                    const entry = props.payload;
+                    const entryDate = entry?.entry_date ? format(parseISO(entry.entry_date), "MMM d, yyyy") : '—';
+                    const exitDate = entry?.exit_date ? format(parseISO(entry.exit_date), "MMM d, yyyy") : '—';
+                    return [
+                      `${value >= 0 ? '+' : ''}$${value.toLocaleString(undefined, { minimumFractionDigits: 2 })}`,
+                      `${entryDate} → ${exitDate}`,
+                    ];
+                  }}
                 />
                 <Bar dataKey="pnl" radius={[3, 3, 0, 0]}>
                   {closedTrades.map((entry, i) => (
