@@ -89,6 +89,8 @@ export function useTrades() {
     queryKey: ['trades', userId],
     queryFn: () => tradesApi.getAll(userId!),
     enabled: !!userId,
+    staleTime: 0,
+    refetchOnMount: true,
   });
 }
 
@@ -109,6 +111,8 @@ export function useTradeStatistics() {
     queryKey: ['trade-statistics', userId],
     queryFn: () => tradesApi.getStatistics(userId!),
     enabled: !!userId,
+    staleTime: 0,
+    refetchOnMount: true,
   });
 }
 
