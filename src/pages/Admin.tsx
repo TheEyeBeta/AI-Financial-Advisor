@@ -489,7 +489,6 @@ export default function Admin() {
     } finally {
       setSchedulerLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const triggerJob = async (jobId: string) => {

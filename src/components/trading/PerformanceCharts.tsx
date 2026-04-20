@@ -23,14 +23,6 @@ interface PerformanceChartsProps {
   isLoading?: boolean;
 }
 
-function formatAxisCurrency(value: number) {
-  if (Math.abs(value) >= 1000) {
-    return `$${(value / 1000).toFixed(0)}k`;
-  }
-
-  return `$${Math.round(value)}`;
-}
-
 export function PerformanceCharts({
   portfolioHistory,
   trades,

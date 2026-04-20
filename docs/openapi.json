@@ -159,7 +159,7 @@
           "ai-proxy"
         ],
         "summary": "Meridian Onboard",
-        "description": "Create or update Meridian profile and first goal; refresh IRIS context cache.",
+        "description": "Create or update Meridian profile and first goal; schedule an IRIS cache refresh.",
         "operationId": "meridian_onboard_api_meridian_onboard_post",
         "requestBody": {
           "content": {
@@ -1016,6 +1016,102 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Trigger Memory Scan Api Admin Trigger Memory Scan Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/trigger-intelligence": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Trigger Intelligence",
+        "description": "Manually trigger an intelligence cycle in the background and return immediately.",
+        "operationId": "trigger_intelligence_api_admin_trigger_intelligence_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Intelligence Api Admin Trigger Intelligence Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/trigger-memory-extraction": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Trigger Memory Extraction",
+        "description": "Manually trigger a live memory extraction cycle in the background and return immediately.",
+        "operationId": "trigger_memory_extraction_api_admin_trigger_memory_extraction_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Memory Extraction Api Admin Trigger Memory Extraction Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/trigger-meridian-refresh": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Trigger Meridian Refresh",
+        "description": "Manually trigger a Meridian context refresh for all users in the background.",
+        "operationId": "trigger_meridian_refresh_api_admin_trigger_meridian_refresh_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Trigger Meridian Refresh Api Admin Trigger Meridian Refresh Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/scheduler-status": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Scheduler Status",
+        "description": "Return last-run timestamps for each scheduled job, inferred from the database.\n\nNever raises \u2014 always returns a valid response even if all DB queries fail.",
+        "operationId": "scheduler_status_api_admin_scheduler_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Scheduler Status Api Admin Scheduler Status Get"
                 }
               }
             }

@@ -226,6 +226,8 @@ def _format_context_block(ctx: dict) -> str:
     user_positions = ctx.get("user_positions") or []
     trading_positions = ctx.get("trading_positions") or []
     closed_trades = ctx.get("closed_trades") or []
+    journal_summary = ctx.get("journal_summary") or "No journal entries yet"
+    achievement_summary = ctx.get("achievement_summary") or "None yet"
     academy_progress = ctx.get("academy_progress") or {}
     recent_chat_summaries = ctx.get("recent_chat_summaries") or []
     user_insights = ctx.get("user_insights") or []
@@ -309,6 +311,18 @@ def _format_context_block(ctx: dict) -> str:
     # ── 10B. Portfolio value + aggregate trade statistics ─────────────────────
     if ctx.get("portfolio_stats"):
         parts.append(ctx["portfolio_stats"])
+
+    parts.append(
+        "\n"
+        "TRADING BEHAVIOUR:\n"
+        f"{_sanitise_for_prompt(journal_summary, max_length=300)}\n"
+    )
+
+    parts.append(
+        "\n"
+        "USER ACHIEVEMENTS:\n"
+        f"{_sanitise_for_prompt(achievement_summary, max_length=300)}\n"
+    )
 
     # ── 11. Academy progress ───────────────────────────────────────────────────
     parts.append(_format_academy_progress(academy_progress))
@@ -799,6 +813,8 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     # Requires core.users.id (app UUID), not the auth_id stored in user_id.
     trading_positions: List[Dict[str, Any]] = []
     closed_trades: List[Dict[str, Any]] = []
+    journal_summary = "No journal entries yet"
+    achievement_summary = "None yet"
     core_user_id: Optional[str] = None  # resolved once; reused by blocks 11 and beyond
     core_user_row: Dict[str, Any] = {}
     try:
@@ -815,6 +831,26 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         core_user_id = core_user_row.get("id")
 
         if core_user_id:
+            try:
+                achievements_res = (
+                    _table(client, "core", "achievements")
+                    .select("name, unlocked_at")
+                    .eq("user_id", core_user_id)
+                    .order("unlocked_at", desc=True)
+                    .limit(10)
+                    .execute()
+                )
+                achievement_rows = (achievements_res and achievements_res.data) or []
+                achievement_names = [
+                    _sanitise_for_prompt(row.get("name"), max_length=60)
+                    for row in achievement_rows
+                    if row.get("name")
+                ]
+                if achievement_names:
+                    achievement_summary = ", ".join(achievement_names)
+            except Exception:
+                logger.warning("Could not fetch core.achievements for user_id=%s", user_id)
+
             # Open positions (20 most recent by entry_date DESC)
             open_pos_res = (
                 _table(client, "trading", "open_positions")
@@ -883,6 +919,40 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 })
     except Exception:
         logger.exception("DB query failed: trading positions/trades for user_id=%s", user_id)
+    if core_user_id:
+        try:
+            journal_res = (
+                _table(client, "trading", "trade_journal")
+                .select("symbol, type, date, strategy")
+                .eq("user_id", core_user_id)
+                .order("date", desc=True)
+                .limit(20)
+                .execute()
+            )
+            journal_rows = (journal_res and journal_res.data) or []
+            if journal_rows:
+                strategies = [
+                    _sanitise_for_prompt(row.get("strategy"), max_length=60)
+                    for row in journal_rows
+                    if row.get("strategy")
+                ]
+                symbols = [
+                    _sanitise_for_prompt(row.get("symbol"), max_length=20)
+                    for row in journal_rows
+                    if row.get("symbol")
+                ]
+                buys = sum(1 for row in journal_rows if (row.get("type") or "").upper() == "BUY")
+                sells = sum(1 for row in journal_rows if (row.get("type") or "").upper() == "SELL")
+                top_strategy = max(set(strategies), key=strategies.count) if strategies else "none"
+                top_symbols = list(dict.fromkeys(symbols))[:5]
+                most_traded = ", ".join(top_symbols) if top_symbols else "none"
+                journal_summary = (
+                    f"Top strategy: {top_strategy} | "
+                    f"Most traded: {most_traded} | "
+                    f"BUY/SELL ratio: {buys}/{sells}"
+                )
+        except Exception:
+            logger.warning("Could not fetch trading.trade_journal for user_id=%s", user_id)
 
     # ── NEW BLOCK 10B: Portfolio history + aggregate trade stats ─────────────
     # Reuses core_user_id resolved above. Each query isolated so a single
@@ -1161,6 +1231,9 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "age_range": profile.get("age_range"),
         # From core.users — surfaces identity + declared preferences so IRIS
         # can address the user by name and tailor advice to their stated goals.
+        "monthly_expenses": profile.get("monthly_expenses"),
+        "total_debt": profile.get("total_debt"),
+        "dependants": profile.get("dependants"),
         "first_name": core_user_row.get("first_name"),
         "last_name": core_user_row.get("last_name"),
         "age": core_user_row.get("age"),
@@ -1221,7 +1294,9 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         # New context blocks (10-13)
         "trading_positions": trading_positions,
         "closed_trades": closed_trades,
+        "journal_summary": journal_summary,
         "portfolio_stats": portfolio_stats_str,
+        "achievement_summary": achievement_summary,
         "academy_progress": academy_progress,
         "recent_chat_summaries": recent_chat_summaries,
         "user_insights": user_insights,

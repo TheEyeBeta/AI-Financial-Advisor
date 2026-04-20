@@ -17,6 +17,7 @@ from ..services.audit import audit_log
 from ..services.auth import AuthenticatedUser, require_auth, verify_service_role
 from ..services.rate_limit import rate_limiter
 from ..services.meridian_context import (
+    _refresh_iris_context_cache_sync,
     build_iris_context,
     refresh_all_users_context,
     refresh_iris_context_cache,
@@ -1932,11 +1933,13 @@ async def meridian_onboard(
     body: MeridianOnboardRequest,
     auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
-    """Create or update Meridian profile and first goal; refresh IRIS context cache."""
+    """Create or update Meridian profile and first goal; schedule an IRIS cache refresh."""
     verified_user_id = auth_user.auth_id
     try:
         await run_meridian_onboard(verified_user_id, body.model_dump())
-        await refresh_iris_context_cache(verified_user_id)
+        asyncio.create_task(
+            asyncio.to_thread(_refresh_iris_context_cache_sync, verified_user_id)
+        )
         return {"status": "ok", "message": "Meridian profile created"}
     except Exception as exc:
         logger.exception("Meridian onboarding failed for user_id=%s: %s", verified_user_id, exc)
