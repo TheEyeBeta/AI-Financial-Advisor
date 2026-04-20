@@ -2111,8 +2111,17 @@ async def chat_completion(
                 last_user_text[:30],
             )
             reasoning_effort = _get_reasoning_effort(classification)
-            meridian_context = None
-            logger.info("[TIER] FAST: skipped Meridian context")
+            # FAST tier — inject compact user context (core block only, no full rebuild)
+            fast_meridian = None
+            try:
+                fast_meridian = await asyncio.wait_for(
+                    build_iris_context(verified_user_id),
+                    timeout=1.5  # hard 1.5s cap — serve stale cache or skip
+                )
+            except (asyncio.TimeoutError, Exception):
+                fast_meridian = None  # never block the response
+            meridian_context = fast_meridian
+            logger.info("[TIER] FAST: meridian=%s", "present" if meridian_context else "None")
 
         else:  # BALANCED — run all four concurrently
             logger.info(f"[DEBUG] about to call _classify_query | tier={message_tier} | msg='{last_user_text[:30]}'")
