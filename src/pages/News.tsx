@@ -373,9 +373,8 @@ const News = () => {
         ) : (
           <>
             <section className="grid gap-4">
-              {/* Top row: lead story left, DESK 2+3 stacked right */}
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]">
-                {leadArticle && (
+              {/* Row 1: Lead story full width */}
+              {leadArticle && (
                   <a
                     href={leadArticle.safeLink ?? undefined}
                     target="_blank"
@@ -445,9 +444,9 @@ const News = () => {
                   </a>
                 )}
 
-                {/* DESK 2 + DESK 3 stacked — right */}
-                {spotlightArticles.length > 0 && (
-                  <div className="grid gap-4 content-start">
+              {/* Row 2: DESK 2 + DESK 3 */}
+              {spotlightArticles.length > 0 && (
+                <div className="grid grid-cols-2 gap-4">
                     {spotlightArticles.slice(0, 2).map((article, index) => {
                       const impactTone = getImpactTone(article.impactScore);
 
@@ -488,12 +487,11 @@ const News = () => {
                       );
                     })}
                   </div>
-                )}
-              </div>
+              )}
 
-              {/* Bottom row: DESK 4 + DESK 5 side by side */}
+              {/* Row 3: DESK 4 + DESK 5 */}
               {spotlightArticles.length > 2 && (
-                <div className="grid gap-4 xl:grid-cols-2">
+                <div className="grid grid-cols-2 gap-4">
                   {spotlightArticles.slice(2, 4).map((article, index) => {
                     const impactTone = getImpactTone(article.impactScore);
 
