@@ -26,14 +26,25 @@ VALID_CATEGORIES = frozenset({
     "risk_assessment",
     "market_overview",
     "education",
+    "goal_tracking",
+    "financial_planning",
+    "deep_analysis",
     "general",
 })
 
 _INTENT_CLASSIFIER_PROMPT = (
     "Classify this message into exactly one category. Reply with only the "
     "category name, nothing else.\n"
-    "Categories: portfolio_analysis, stock_research, risk_assessment, "
-    "market_overview, education, general\n"
+    "Categories:\n"
+    "  portfolio_analysis   - questions about the user's own portfolio, positions, holdings, performance\n"
+    "  stock_research       - analysis of specific stocks, tickers, company news, valuations\n"
+    "  risk_assessment      - risk to a position, portfolio, or market; hedging, drawdown, volatility\n"
+    "  market_overview      - broad market conditions, macro economy, sectors, indices\n"
+    "  education            - learning financial concepts; what is, explain, how does\n"
+    "  goal_tracking        - savings goals, financial plans, target amounts, progress tracking, milestones\n"
+    "  financial_planning   - budgeting, debt management, emergency funds, monthly expenses, life events, cash flow\n"
+    "  deep_analysis        - complex multi-factor analysis requiring synthesis across portfolio, goals, market conditions, and risk\n"
+    "  general              - everything else\n"
     "Message: {message}"
 )
 
@@ -278,6 +289,22 @@ _REGEX_EDUCATION_PAT = re.compile(
     re.IGNORECASE,
 )
 
+_REGEX_GOAL_PAT = re.compile(
+    r"\b(?:goal|saving|savings|target|milestone|progress|on\s+track)\b"
+    r"|\bmy\s+plan\b",
+    re.IGNORECASE,
+)
+
+_REGEX_FINANCIAL_PLANNING_PAT = re.compile(
+    r"\b(?:budget|debt|emergency\s+fund|expenses|cash\s+flow|afford|monthly)\b",
+    re.IGNORECASE,
+)
+
+_REGEX_DEEP_ANALYSIS_PAT = re.compile(
+    r"\b(?:compare|analyse|analyze|breakdown|comprehensive|overall|everything)\b",
+    re.IGNORECASE,
+)
+
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def classify_tier(message: str) -> str:
@@ -390,8 +417,14 @@ def regex_classify_intent(message: str, ticker: str | None = None) -> str:
         category = "risk_assessment"
     elif _REGEX_MARKET_PAT.search(msg):
         category = "market_overview"
+    elif _REGEX_GOAL_PAT.search(msg):
+        category = "goal_tracking"
+    elif _REGEX_FINANCIAL_PLANNING_PAT.search(msg):
+        category = "financial_planning"
     elif _REGEX_EDUCATION_PAT.search(msg):
         category = "education"
+    elif _REGEX_DEEP_ANALYSIS_PAT.search(msg):
+        category = "deep_analysis"
     else:
         category = "general"
 
