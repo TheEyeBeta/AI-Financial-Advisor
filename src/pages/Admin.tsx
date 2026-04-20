@@ -72,6 +72,15 @@ interface ActivityLog {
   timestamp: string;
 }
 
+interface EngagementStats {
+  avgMessagesPerChat: number;
+  weeklyActiveChats: number;
+  lessonsStarted: number;
+  journalEntries: number;
+  quizAttempts: number;
+  retentionRate: number;
+}
+
 const EXPERIENCE_STYLES: Record<string, string> = {
   beginner: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
   intermediate: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
@@ -165,6 +174,14 @@ export default function Admin() {
   const [chatStats, setChatStats] = useState<ChatStats>({ totalChats: 0, totalMessages: 0, activeToday: 0 });
   const [tradingStats, setTradingStats] = useState<TradingStats>({ totalPositions: 0, totalTrades: 0, totalJournalEntries: 0 });
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
+  const [engagementStats, setEngagementStats] = useState<EngagementStats>({
+    avgMessagesPerChat: 0,
+    weeklyActiveChats: 0,
+    lessonsStarted: 0,
+    journalEntries: 0,
+    quizAttempts: 0,
+    retentionRate: 0,
+  });
 
   // System Health state
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -273,6 +290,7 @@ export default function Admin() {
       fetchUsers(),
       fetchChatStats(),
       fetchTradingStats(),
+      fetchEngagementStats(),
       fetchSystemHealth(),
     ]);
     setLoading(false);
@@ -350,6 +368,32 @@ export default function Admin() {
       });
     } catch (error) {
       console.error("Error fetching trading stats:", error);
+    }
+  };
+
+  const fetchEngagementStats = async () => {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+      const [chatsRes, msgsRes, weeklyActiveRes, lessonProgressRes, journalRes, quizRes] = await Promise.all([
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chat_messages").select("id", { count: "exact", head: true }),
+        supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }).gte("updated_at", sevenDaysAgo),
+        supabase.schema("academy").from("user_lesson_progress").select("id", { count: "exact", head: true }),
+        supabase.schema("trading").from("trade_journal").select("id", { count: "exact", head: true }),
+        supabase.schema("academy").from("quiz_attempts").select("id", { count: "exact", head: true }),
+      ]);
+
+      setEngagementStats({
+        avgMessagesPerChat: chatsRes.count && msgsRes.count ? Math.round(msgsRes.count / chatsRes.count) : 0,
+        weeklyActiveChats: weeklyActiveRes.count ?? 0,
+        lessonsStarted: lessonProgressRes.count ?? 0,
+        journalEntries: journalRes.count ?? 0,
+        quizAttempts: quizRes.count ?? 0,
+        retentionRate: chatsRes.count ? Math.round(((weeklyActiveRes.count ?? 0) / chatsRes.count) * 100) : 0,
+      });
+    } catch (error) {
+      console.error("Error fetching engagement stats:", error);
     }
   };
 
@@ -885,6 +929,36 @@ export default function Admin() {
                     { icon: Activity, label: "Total messages", subtext: "User and AI exchanges", value: chatStats.totalMessages },
                     { icon: TrendingUp, label: "Open positions", subtext: "Active paper trades", value: tradingStats.totalPositions },
                     { icon: Database, label: "Journal entries", subtext: "Trade documentation", value: tradingStats.totalJournalEntries },
+                  ].map((item) => (
+                    <div key={item.label} className="flex flex-col gap-4 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <div className="rounded-xl bg-primary/10 p-2 text-primary">
+                          <item.icon className="h-5 w-5" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-medium">{item.label}</div>
+                          <div className="text-xs text-muted-foreground">{item.subtext}</div>
+                        </div>
+                      </div>
+                      <div className="text-left text-2xl font-semibold sm:text-right">{item.value}</div>
+                    </div>
+                  ))}
+                </CardContent>
+              </Card>
+
+              <Card className="rounded-3xl border-border/60 shadow-sm">
+                <CardHeader>
+                  <CardTitle>Engagement metrics</CardTitle>
+                  <CardDescription>Computed from live platform activity.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {[
+                    { icon: MessageSquare, label: "Avg messages per chat", subtext: "Engagement depth per session", value: engagementStats.avgMessagesPerChat },
+                    { icon: Activity, label: "Weekly active chats", subtext: "Sessions updated in last 7 days", value: engagementStats.weeklyActiveChats },
+                    { icon: TrendingUp, label: "7-day retention rate", subtext: "Active chats vs total", value: `${engagementStats.retentionRate}%` },
+                    { icon: BarChart3, label: "Lessons started", subtext: "Academy lesson progress rows", value: engagementStats.lessonsStarted },
+                    { icon: Shield, label: "Quiz attempts", subtext: "Academy quiz submissions", value: engagementStats.quizAttempts },
+                    { icon: Database, label: "Journal entries", subtext: "Trade documentation records", value: engagementStats.journalEntries },
                   ].map((item) => (
                     <div key={item.label} className="flex flex-col gap-4 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex min-w-0 items-center gap-3">
