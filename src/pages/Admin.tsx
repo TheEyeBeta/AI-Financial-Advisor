@@ -670,7 +670,7 @@ export default function Admin() {
                         className="h-10 rounded-xl border-border/70 bg-background pl-9"
                       />
                     </div>
-                    <Button onClick={exportUsers} variant="outline" className="w-full gap-2 rounded-xl sm:w-auto">
+                    <Button onClick={exportUsers} variant="outline" className="w-full flex-shrink-0 gap-2 rounded-xl sm:w-auto">
                       <Download className="h-4 w-4" />
                       Export CSV
                     </Button>
@@ -701,8 +701,8 @@ export default function Admin() {
                 ) : (
                   <>
                     <div className="overflow-hidden rounded-2xl border">
-                      <div className="max-w-full overflow-x-auto">
-                        <Table className="min-w-[720px] table-fixed md:min-w-[860px] xl:min-w-full">
+                      <div className="overflow-x-auto">
+                        <Table className="min-w-[900px]">
                           <TableHeader>
                             <TableRow className="bg-muted/30">
                               <TableHead className="w-[16rem]">User</TableHead>
