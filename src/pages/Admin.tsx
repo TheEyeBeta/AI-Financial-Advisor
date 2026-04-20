@@ -179,7 +179,8 @@ export default function Admin() {
   const [schedulerJobs, setSchedulerJobs] = useState<SchedulerJob[]>([]);
   const [schedulerLoading, setSchedulerLoading] = useState(false);
   const [activeTab, setActiveTab] = useState("users");
-  const [jobTriggerStates, setJobTriggerStates] = useState<Record<string, { loading: boolean; result: "idle" | "success" | "error" }>>({});
+  const [jobStatuses, setJobStatuses] = useState<Record<string, "idle" | "running" | "success" | "error">>({});
+  const [jobMessages, setJobMessages] = useState<Record<string, string>>({});
 
   const BACKEND_URL = getPythonApiUrl();
   /** Get the current Supabase access token for authenticated admin requests. */
@@ -448,23 +449,22 @@ export default function Admin() {
   }, []);
 
   const triggerJob = async (jobId: string) => {
-    setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: true, result: "idle" } }));
+    setJobStatuses((prev) => ({ ...prev, [jobId]: "running" }));
+    setJobMessages((prev) => ({ ...prev, [jobId]: "" }));
     try {
       if (jobId === "ranking") await adminApi.triggerRanking();
       else if (jobId === "memory_extraction") await adminApi.triggerMemoryExtraction();
       else if (jobId === "intelligence") await adminApi.triggerIntelligence();
       else if (jobId === "meridian_refresh") await adminApi.triggerMeridianRefresh();
       else throw new Error(`Unknown job: ${jobId}`);
-      setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "success" } }));
-      setTimeout(() => {
-        setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "idle" } }));
-      }, 3000);
+      const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      setJobStatuses((prev) => ({ ...prev, [jobId]: "success" }));
+      setJobMessages((prev) => ({ ...prev, [jobId]: `Completed at ${time}` }));
     } catch (err) {
       console.error(`Failed to trigger job ${jobId}:`, err);
-      setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "error" } }));
-      setTimeout(() => {
-        setJobTriggerStates((prev) => ({ ...prev, [jobId]: { loading: false, result: "idle" } }));
-      }, 3000);
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setJobStatuses((prev) => ({ ...prev, [jobId]: "error" }));
+      setJobMessages((prev) => ({ ...prev, [jobId]: `Failed: ${msg}` }));
     }
   };
 
@@ -966,7 +966,8 @@ export default function Admin() {
               {SCHEDULED_JOB_DEFS.map((def) => {
                 const job = schedulerJobs.find((j) => j.id === def.id);
                 const lastRun = job?.last_run ?? null;
-                const triggerState = jobTriggerStates[def.id] ?? { loading: false, result: "idle" as const };
+                const jobStatus = jobStatuses[def.id] ?? "idle";
+                const jobMessage = jobMessages[def.id] ?? "";
                 const health = getJobHealth(lastRun, def.overdueSeconds);
 
                 return (
@@ -998,38 +999,40 @@ export default function Admin() {
                           {schedulerLoading ? "Loading…" : formatRelativeTime(lastRun)}
                         </span>
                       </div>
-                      <Button
-                        size="sm"
-                        className="w-full gap-2 rounded-xl"
-                        variant={
-                          triggerState.result === "success"
-                            ? "default"
-                            : triggerState.result === "error"
-                            ? "destructive"
-                            : "outline"
-                        }
-                        disabled={triggerState.loading}
-                        onClick={() => { void triggerJob(def.id); }}
-                      >
-                        {triggerState.loading ? (
-                          <>
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                            Running…
-                          </>
-                        ) : triggerState.result === "success" ? (
-                          <>
-                            <Play className="h-4 w-4" />
-                            Started
-                          </>
-                        ) : triggerState.result === "error" ? (
-                          "Failed — try again"
-                        ) : (
-                          <>
-                            <Play className="h-4 w-4" />
-                            Run Now
-                          </>
+                      <div>
+                        <Button
+                          size="sm"
+                          className="w-full gap-2 rounded-xl"
+                          variant="outline"
+                          disabled={jobStatus === "running"}
+                          onClick={() => { void triggerJob(def.id); }}
+                        >
+                          {jobStatus === "running" ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Running…
+                            </>
+                          ) : (
+                            <>
+                              <Play className="h-4 w-4" />
+                              Run Now
+                            </>
+                          )}
+                        </Button>
+                        {jobStatus !== "idle" && (
+                          <p
+                            className={`mt-1.5 text-xs ${
+                              jobStatus === "running"
+                                ? "text-muted-foreground"
+                                : jobStatus === "success"
+                                ? "text-emerald-600 dark:text-emerald-400"
+                                : "text-red-600 dark:text-red-400"
+                            }`}
+                          >
+                            {jobStatus === "running" ? "Running..." : jobMessage}
+                          </p>
                         )}
-                      </Button>
+                      </div>
                     </CardContent>
                   </Card>
                 );
