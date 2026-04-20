@@ -372,80 +372,129 @@ const News = () => {
           </Card>
         ) : (
           <>
-            <section className={cn("grid items-stretch gap-4", spotlightArticles.length > 0 && "xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]")}>
-              {leadArticle && (
-                <a
-                  href={leadArticle.safeLink ?? undefined}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  onClick={() => handleArticleClick(leadArticle, "lead")}
-                  aria-label={`Open article: ${leadArticle.title}`}
-                  aria-disabled={!leadArticle.safeLink}
-                  className={cn("group block self-start", !leadArticle.safeLink && "pointer-events-none opacity-75")}
-                >
-                  <article className="relative overflow-hidden rounded-[28px] border border-border/60 bg-card/95 p-6 shadow-[0_28px_80px_-52px_rgba(15,23,42,0.75)] transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_32px_90px_-54px_rgba(30,64,175,0.28)] sm:p-7">
-                    <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
-                    <div className="absolute right-5 top-3 text-6xl font-semibold tracking-[-0.08em] text-foreground/[0.05] sm:text-7xl">
-                      01
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-2 pr-16">
-                      <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
-                        Lead story
-                      </Badge>
-                      <Badge variant="outline" className={getImpactTone(leadArticle.impactScore).className}>
-                        {getImpactTone(leadArticle.impactScore).label}
-                      </Badge>
-                      <span className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
-                        {formatRelativeAge(leadArticle.published_at)}
-                      </span>
-                    </div>
-
-                    <div className="mt-8 max-w-3xl">
-                      <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
-                        {leadArticle.provider || "Market wire"}
-                      </p>
-                      <h2 className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl lg:text-[2.5rem] lg:leading-[1.05]">
-                        {leadArticle.title}
-                      </h2>
-                      <p className="mt-4 max-w-2xl text-sm leading-7 text-muted-foreground whitespace-pre-line sm:text-base">
-                        {leadArticle.summary}
-                      </p>
-                    </div>
-
-                    <div className="mt-8 flex flex-col gap-4 border-t border-border/60 pt-4 sm:flex-row sm:items-end sm:justify-between">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        {leadArticle.ticker && (
-                          <Badge variant="outline" className="border-border/70 bg-muted/70 text-foreground">
-                            {leadArticle.ticker}
-                          </Badge>
-                        )}
-                        {(() => {
-                          const sentimentTone = getSentimentTone(leadArticle.sentiment);
-                          if (!sentimentTone) {
-                            return null;
-                          }
-
-                          return (
-                            <Badge variant="outline" className={sentimentTone.className}>
-                              {sentimentTone.label}
-                            </Badge>
-                          );
-                        })()}
-                        <span>{formatRelativeAge(leadArticle.published_at)}</span>
+            <section className="grid gap-4">
+              {/* Top row: lead story left, DESK 2+3 stacked right */}
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(0,0.95fr)]">
+                {leadArticle && (
+                  <a
+                    href={leadArticle.safeLink ?? undefined}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => handleArticleClick(leadArticle, "lead")}
+                    aria-label={`Open article: ${leadArticle.title}`}
+                    aria-disabled={!leadArticle.safeLink}
+                    className={cn("group block self-start", !leadArticle.safeLink && "pointer-events-none opacity-75")}
+                  >
+                    <article className="relative overflow-hidden rounded-[28px] border border-border/60 bg-card/95 p-6 shadow-[0_28px_80px_-52px_rgba(15,23,42,0.75)] transition-all duration-300 hover:-translate-y-1 hover:border-primary/40 hover:shadow-[0_32px_90px_-54px_rgba(30,64,175,0.28)] sm:p-7">
+                      <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent" />
+                      <div className="absolute right-5 top-3 text-6xl font-semibold tracking-[-0.08em] text-foreground/[0.05] sm:text-7xl">
+                        01
                       </div>
-                      <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground transition-colors group-hover:text-primary">
-                        Open coverage
-                        <ArrowUpRight className="h-4 w-4" />
-                      </span>
-                    </div>
-                  </article>
-                </a>
-              )}
 
-              {spotlightArticles.length > 0 && (
-                <div className="grid content-between gap-4">
-                  {spotlightArticles.map((article, index) => {
+                      <div className="flex flex-wrap items-center gap-2 pr-16">
+                        <Badge variant="outline" className="border-primary/20 bg-primary/5 text-primary">
+                          Lead story
+                        </Badge>
+                        <Badge variant="outline" className={getImpactTone(leadArticle.impactScore).className}>
+                          {getImpactTone(leadArticle.impactScore).label}
+                        </Badge>
+                        <span className="text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
+                          {formatRelativeAge(leadArticle.published_at)}
+                        </span>
+                      </div>
+
+                      <div className="mt-8 max-w-3xl">
+                        <p className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
+                          {leadArticle.provider || "Market wire"}
+                        </p>
+                        <h2 className="mt-3 text-2xl font-semibold tracking-tight text-foreground sm:text-3xl lg:text-[2.5rem] lg:leading-[1.05]">
+                          {leadArticle.title}
+                        </h2>
+                        <p className="mt-4 max-w-2xl text-sm leading-7 text-muted-foreground whitespace-pre-line sm:text-base">
+                          {leadArticle.summary}
+                        </p>
+                      </div>
+
+                      <div className="mt-8 flex flex-col gap-4 border-t border-border/60 pt-4 sm:flex-row sm:items-end sm:justify-between">
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          {leadArticle.ticker && (
+                            <Badge variant="outline" className="border-border/70 bg-muted/70 text-foreground">
+                              {leadArticle.ticker}
+                            </Badge>
+                          )}
+                          {(() => {
+                            const sentimentTone = getSentimentTone(leadArticle.sentiment);
+                            if (!sentimentTone) {
+                              return null;
+                            }
+
+                            return (
+                              <Badge variant="outline" className={sentimentTone.className}>
+                                {sentimentTone.label}
+                              </Badge>
+                            );
+                          })()}
+                          <span>{formatRelativeAge(leadArticle.published_at)}</span>
+                        </div>
+                        <span className="inline-flex items-center gap-2 text-sm font-medium text-foreground transition-colors group-hover:text-primary">
+                          Open coverage
+                          <ArrowUpRight className="h-4 w-4" />
+                        </span>
+                      </div>
+                    </article>
+                  </a>
+                )}
+
+                {/* DESK 2 + DESK 3 stacked — right */}
+                {spotlightArticles.length > 0 && (
+                  <div className="grid gap-4 content-start">
+                    {spotlightArticles.slice(0, 2).map((article, index) => {
+                      const impactTone = getImpactTone(article.impactScore);
+
+                      return (
+                        <a
+                          key={article.id}
+                          href={article.safeLink ?? undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={() => handleArticleClick(article, "spotlight")}
+                          aria-label={`Open article: ${article.title}`}
+                          aria-disabled={!article.safeLink}
+                          className={cn("group block h-full", !article.safeLink && "pointer-events-none opacity-75")}
+                        >
+                          <article className="h-full rounded-[24px] border border-border/60 bg-card/92 p-5 shadow-[0_24px_60px_-52px_rgba(15,23,42,0.7)] transition-all duration-300 hover:-translate-y-1 hover:border-primary/35 hover:bg-card">
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
+                                Desk {String(index + 2).padStart(2, "0")}
+                              </span>
+                              <Badge variant="outline" className={impactTone.className}>
+                                {impactTone.label}
+                              </Badge>
+                            </div>
+
+                            <h3 className="mt-4 text-lg font-semibold tracking-tight text-foreground transition-colors group-hover:text-primary">
+                              {article.title}
+                            </h3>
+                            <p className="mt-3 line-clamp-3 text-sm leading-6 text-muted-foreground">
+                              {article.summary}
+                            </p>
+
+                            <div className="mt-5 flex items-center justify-between gap-3 border-t border-border/60 pt-4 text-xs text-muted-foreground">
+                              <span className="truncate">{article.provider || "Market wire"}</span>
+                              <span className="shrink-0">{formatRelativeAge(article.published_at)}</span>
+                            </div>
+                          </article>
+                        </a>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom row: DESK 4 + DESK 5 side by side */}
+              {spotlightArticles.length > 2 && (
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {spotlightArticles.slice(2, 4).map((article, index) => {
                     const impactTone = getImpactTone(article.impactScore);
 
                     return (
@@ -462,7 +511,7 @@ const News = () => {
                         <article className="h-full rounded-[24px] border border-border/60 bg-card/92 p-5 shadow-[0_24px_60px_-52px_rgba(15,23,42,0.7)] transition-all duration-300 hover:-translate-y-1 hover:border-primary/35 hover:bg-card">
                           <div className="flex items-center justify-between gap-3">
                             <span className="text-[11px] uppercase tracking-[0.28em] text-muted-foreground">
-                              Desk {String(index + 2).padStart(2, "0")}
+                              Desk {String(index + 4).padStart(2, "0")}
                             </span>
                             <Badge variant="outline" className={impactTone.className}>
                               {impactTone.label}
