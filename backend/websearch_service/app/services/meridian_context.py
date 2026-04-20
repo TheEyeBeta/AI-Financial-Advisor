@@ -1168,6 +1168,8 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "risk_level": core_user_row.get("risk_level"),
         "investment_goal": core_user_row.get("investment_goal"),
         "marital_status": core_user_row.get("marital_status"),
+        "country_of_residence": profile.get("country_of_residence"),
+        "employment_status": profile.get("employment_status"),
     }
 
     # 12. Format goals for context injection
