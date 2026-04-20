@@ -1562,6 +1562,9 @@ _TOOLS_BY_INTENT: Dict[str, frozenset[str]] = {
     "risk_assessment":    frozenset({"get_portfolio"}),
     "education":          frozenset({"search_market_news"}),
     "general":            frozenset(),
+    "goal_tracking":      frozenset({"get_portfolio"}),
+    "financial_planning": frozenset({"get_portfolio"}),
+    "deep_analysis":      frozenset({"get_portfolio", "get_top_stocks", "search_market_news"}),
 }
 
 
@@ -1841,6 +1844,54 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
     return response.json()
 
 
+async def _fetch_fresh_goals(auth_id: str) -> str | None:
+    """Pull live goal + financial plan data for goal_tracking / financial_planning intents."""
+    try:
+        from .services.supabase_client import get_supabase_client
+        client = get_supabase_client()
+        goals = client.schema("meridian").from_("user_goals")\
+            .select("goal_name,target_amount,current_amount,status,target_date,monthly_contribution")\
+            .eq("user_id", auth_id).eq("status", "active").execute()
+        plans = client.schema("meridian").from_("financial_plans")\
+            .select("plan_data,is_current")\
+            .eq("user_id", auth_id).eq("is_current", True).limit(1).execute()
+
+        if not goals.data and not plans.data:
+            return None
+
+        lines = ["=== LIVE GOAL DATA (fetched this request) ==="]
+        for g in (goals.data or []):
+            pct = round((g["current_amount"] / g["target_amount"]) * 100) if g["target_amount"] else 0
+            lines.append(f"- {g['goal_name']}: ${g['current_amount']:,.0f} / ${g['target_amount']:,.0f} ({pct}%) | Target: {g['target_date']} | Monthly: ${g.get('monthly_contribution') or 0:,.0f}")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
+async def _fetch_fresh_portfolio(auth_id: str) -> str | None:
+    """Pull live trading positions for portfolio_analysis / deep_analysis intents."""
+    try:
+        from .services.supabase_client import get_supabase_client
+        client = get_supabase_client()
+        core = client.schema("core").from_("users")\
+            .select("id").eq("auth_id", auth_id).maybe_single().execute()
+        if not core.data:
+            return None
+        core_id = core.data["id"]
+        positions = client.schema("trading").from_("open_positions")\
+            .select("symbol,type,quantity,entry_price,current_price")\
+            .eq("user_id", core_id).limit(10).execute()
+        if not positions.data:
+            return None
+        lines = ["=== LIVE PORTFOLIO (fetched this request) ==="]
+        for p in positions.data:
+            pnl = ((p["current_price"] - p["entry_price"]) / p["entry_price"]) * 100 if p["entry_price"] else 0
+            lines.append(f"- {p['symbol']} {p['type']}: {p['quantity']} shares @ ${p['entry_price']} | Now: ${p['current_price']} ({pnl:+.1f}%)")
+        return "\n".join(lines)
+    except Exception:
+        return None
+
+
 async def _classify_query(user_message: str) -> Dict[str, Any]:
     """Classify query complexity using a lightweight Responses model."""
     default_classification: Dict[str, Any] = {
@@ -2081,6 +2132,8 @@ async def chat_completion(
         # BALANCED  → run all four concurrently via asyncio.gather (saves wall time).
         # FAST      → _classify_query with a hard 3 s timeout cap; skip Meridian.
         # INSTANT   → skip both entirely; use safe defaults.
+        fresh_goals_data: Optional[str] = None
+        fresh_portfolio_data: Optional[str] = None
         if message_tier == "INSTANT":
             logger.info("[TIER] INSTANT: skipped _classify_query")
             classification: Dict[str, Any] = _default_classification
@@ -2132,18 +2185,32 @@ async def chat_completion(
                 logger.info(
                     f"[INTENT] mode=regex result={_ci_result} elapsed=0ms"
                 )
-                _cq_result, _mc_result, _mkt_result = await asyncio.gather(
+                fresh_goals_task = (
+                    _fetch_fresh_goals(verified_user_id)
+                    if _ci_result in {"goal_tracking", "financial_planning", "deep_analysis"}
+                    else asyncio.sleep(0)
+                )
+                fresh_portfolio_task = (
+                    _fetch_fresh_portfolio(verified_user_id)
+                    if _ci_result in {"portfolio_analysis", "deep_analysis"}
+                    else asyncio.sleep(0)
+                )
+                _cq_result, _mc_result, _mkt_result, _fresh_goals_result, _fresh_portfolio_result = await asyncio.gather(
                     _classify_query(last_user_text),
                     build_iris_context(verified_user_id),
                     build_market_context(ticker=detected_ticker),
+                    asyncio.wait_for(fresh_goals_task, timeout=2.0),
+                    asyncio.wait_for(fresh_portfolio_task, timeout=2.0),
                     return_exceptions=True,
                 )
             else:
-                _cq_result, _mc_result, _ci_result, _mkt_result = await asyncio.gather(
+                _cq_result, _mc_result, _ci_result, _mkt_result, _fresh_goals_result, _fresh_portfolio_result = await asyncio.gather(
                     _classify_query(last_user_text),
                     build_iris_context(verified_user_id),
                     classify_intent(last_user_text, tier=message_tier),
                     build_market_context(ticker=detected_ticker),
+                    asyncio.sleep(0),
+                    asyncio.sleep(0),
                     return_exceptions=True,
                 )
                 logger.info(
@@ -2206,6 +2273,11 @@ async def chat_completion(
                 "[PIPELINE_TIMING] step=build_market_context tier=%s skipped=False",
                 message_tier,
             )
+
+            if not isinstance(_fresh_goals_result, BaseException) and isinstance(_fresh_goals_result, str):
+                fresh_goals_data = _fresh_goals_result
+            if not isinstance(_fresh_portfolio_result, BaseException) and isinstance(_fresh_portfolio_result, str):
+                fresh_portfolio_data = _fresh_portfolio_result
 
             logger.info(
                 "[PARALLEL_GATHER] all four completed | intent=%s meridian=%s market=%s elapsed=%.1fms",
@@ -2310,6 +2382,8 @@ async def chat_completion(
             _base_system_prompt = FINANCIAL_ADVISOR_SYSTEM_PROMPT
             if subagent_category in _DEEP_CATEGORIES:
                 _chat_model = BALANCED_MODEL
+            elif subagent_category == "deep_analysis":
+                _chat_model = BALANCED_MODEL  # gpt-4o with full context
             else:
                 _chat_model = BALANCED_MODEL
 
@@ -2327,6 +2401,10 @@ async def chat_completion(
             system_parts.append(context_block)
         if market_context:
             system_parts.append(market_context)
+        if fresh_goals_data:
+            system_parts.append(fresh_goals_data)
+        if fresh_portfolio_data:
+            system_parts.append(fresh_portfolio_data)
         if subagent_block:
             system_parts.append(subagent_block)
         if session_block:
