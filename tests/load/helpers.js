@@ -19,21 +19,23 @@ export function getFirstNonEmptyEnv(...names) {
 }
 
 export function jsonHeaders(extraHeaders = {}) {
-  return {
+  const headers = {
     "Content-Type": "application/json",
-    ...extraHeaders,
   };
+  return Object.assign(headers, extraHeaders || {});
 }
 
 export function supabaseRestHeaders(apiKey, profile, extraHeaders = {}) {
-  return {
+  const headers = {
     apikey: apiKey,
     Authorization: `Bearer ${apiKey}`,
     "Content-Type": "application/json",
     Accept: "application/json",
-    ...(profile ? { "Accept-Profile": profile } : {}),
-    ...extraHeaders,
   };
+  if (profile) {
+    headers["Accept-Profile"] = profile;
+  }
+  return Object.assign(headers, extraHeaders || {});
 }
 
 export function parseTokenPool(rawValue) {
