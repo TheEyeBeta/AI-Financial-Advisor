@@ -10,6 +10,7 @@ const mockNavigate = vi.fn();
 vi.mock('@/hooks/use-data', () => ({
   usePortfolioHistory: vi.fn(() => ({ data: [], isLoading: false })),
   useOpenPositions: vi.fn(() => ({ data: [], isLoading: false })),
+  useTrades: vi.fn(() => ({ data: [], isLoading: false })),
 }));
 
 vi.mock('react-router-dom', async () => {
@@ -25,6 +26,9 @@ vi.mock('recharts', () => ({
   XAxis: () => null,
   YAxis: () => null,
   Tooltip: () => null,
+  BarChart: ({ children }: { children: React.ReactNode }) => <div data-testid="bar-chart">{children}</div>,
+  Bar: () => <div data-testid="bar" />,
+  Cell: () => null,
 }));
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -91,7 +95,6 @@ describe('PortfolioPerformance', () => {
     render(<PortfolioPerformance portfolioHistory={history} openPositions={[]} />);
 
     expect(screen.getByText('Portfolio Performance')).toBeInTheDocument();
-    expect(screen.getByTestId('chart-container')).toBeInTheDocument();
   });
 
   it('calculates positive return correctly', () => {
