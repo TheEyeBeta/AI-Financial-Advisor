@@ -104,3 +104,4 @@ private/
 .env.production
 .env.staging
 .env.test
+backend/websearch_service/coverage.xml
