@@ -4,6 +4,23 @@ import time
 from typing import AsyncGenerator
 from unittest.mock import MagicMock, patch
 
+# Shared test JWT secret — also set in mock_env_vars so auth.py picks it up.
+TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests"
+
+# ─── Critical: seed required env vars BEFORE any app import ────────────────
+# app.services.supabase_client (imported transitively by app.main) raises at
+# module-import time when SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are absent,
+# so we must provide test placeholders before collection begins.
+# setdefault keeps real values from .env.test intact for integration tests.
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+os.environ.setdefault("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+os.environ.setdefault("AUTH_REQUIRED", "false")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("TAVILY_API_KEY", "test-tavily-key")
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
+os.environ.setdefault("APP_VERSION", "test-version")
+
 import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
@@ -17,9 +34,6 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 # Patch create_client so no real network connection is attempted at import time.
 with patch("supabase.create_client", return_value=MagicMock()):
     from app.main import create_app
-
-# Shared test JWT secret — also set in mock_env_vars so auth.py picks it up.
-TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests"
 
 
 def _make_jwt(role: str = "service_role", sub: str = "test-service", **extra) -> str:

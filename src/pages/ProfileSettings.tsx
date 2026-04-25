@@ -433,7 +433,7 @@ function LoadingSkeleton() {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const ProfileSettings = () => {
-  const { authUserId } = useAuth();
+  const { authUserId, userProfile, refreshProfile } = useAuth();
 
   const [loading, setLoading] = useState(true);
 
@@ -492,7 +492,9 @@ const ProfileSettings = () => {
           setInvestmentHorizon(p.investment_horizon ?? "");
           setMonthlyInvestable(p.monthly_investable?.toString() ?? "");
           setEmergencyFund(monthsToEmergencyFund(p.emergency_fund_months));
-          setExperienceLevel(tierToExperienceLevel(p.knowledge_tier));
+          setExperienceLevel(
+            userProfile?.experience_level ?? tierToExperienceLevel(p.knowledge_tier),
+          );
         }
 
         setGoals(goalsResult.data ?? []);
@@ -504,7 +506,7 @@ const ProfileSettings = () => {
     };
 
     load();
-  }, [authUserId]);
+  }, [authUserId, userProfile?.experience_level]);
 
   // ── IRIS cache invalidation ──────────────────────────────────────────────────
 
@@ -656,7 +658,7 @@ const ProfileSettings = () => {
     setSavingS4(true);
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (coreDb.from("user_profiles") as any).upsert(
+      const { error: profileError } = await (coreDb.from("user_profiles") as any).upsert(
         {
           user_id: authUserId,
           knowledge_tier: experienceLevelToTier(experienceLevel),
@@ -664,8 +666,21 @@ const ProfileSettings = () => {
         },
         { onConflict: "user_id" },
       );
-      if (error) throw error;
+
+      if (profileError) throw profileError;
+
+      const { error: userError } = await coreDb
+        .from("users")
+        .update({
+          experience_level: experienceLevel,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("auth_id", authUserId);
+
+      if (userError) throw userError;
+
       await invalidateIrisCache();
+      await refreshProfile();
       toast({ title: "Saved", description: "Knowledge level updated." });
     } catch (e) {
       toast({
