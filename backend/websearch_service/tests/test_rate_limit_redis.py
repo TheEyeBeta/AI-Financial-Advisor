@@ -115,3 +115,208 @@ def test_redis_backend_contract_keeps_endpoint_buckets_separate():
 
     assert allowed_news is True
     assert allowed_stocks is True
+
+
+# ── Tests for actual RateLimitRedisBackend ────────────────────────────────────
+
+import time
+from unittest.mock import MagicMock
+
+from app.services.rate_limit_redis import (
+    RateLimitRedisBackend,
+    _expiry_ms,
+    _is_truthy,
+    _sanitize_endpoint,
+    _window_reset,
+    _window_start,
+    get_rate_limit_redis_client,
+)
+
+
+class TestIsTruthy:
+    def test_true_is_truthy(self): assert _is_truthy("true") is True
+    def test_one_is_truthy(self): assert _is_truthy("1") is True
+    def test_yes_is_truthy(self): assert _is_truthy("yes") is True
+    def test_on_is_truthy(self): assert _is_truthy("on") is True
+    def test_false_not_truthy(self): assert _is_truthy("false") is False
+    def test_none_not_truthy(self): assert _is_truthy(None) is False
+
+
+class TestWindowHelpers:
+    def test_window_start_aligned(self):
+        now = 1700000070.5
+        # 1700000070 % 60 = 30, so start = 1700000040
+        assert _window_start(now, 60) == 1700000040
+
+    def test_window_reset_is_start_plus_window(self):
+        now = 1700000070.5
+        assert _window_reset(now, 60) == 1700000040 + 60
+
+    def test_expiry_ms_minimum(self):
+        # reset_ts in the past → max(1, ...) = 1 → 1000 + 1000 = 2000
+        result = _expiry_ms(int(time.time()) - 10, time.time())
+        assert result == 2000
+
+    def test_expiry_ms_future(self):
+        reset_ts = int(time.time()) + 30
+        result = _expiry_ms(reset_ts, time.time())
+        assert result > 30000
+
+
+class TestSanitizeEndpoint:
+    def test_api_path(self): assert _sanitize_endpoint("/api/chat") == "api:chat"
+    def test_empty_returns_root(self): assert _sanitize_endpoint("") == "root"
+    def test_only_slashes_root(self): assert _sanitize_endpoint("///") == "root"
+    def test_strips_whitespace(self): assert _sanitize_endpoint("  /api/test  ") == "api:test"
+
+
+class TestGetRateLimitRedisClient:
+    def test_no_config_returns_none(self, monkeypatch):
+        monkeypatch.delenv("RATE_LIMIT_REDIS_URL", raising=False)
+        monkeypatch.delenv("REDIS_URL", raising=False)
+        monkeypatch.delenv("RATE_LIMIT_REDIS_HOST", raising=False)
+        assert get_rate_limit_redis_client() is None
+
+    def test_unreachable_url_returns_none(self, monkeypatch):
+        monkeypatch.setenv("RATE_LIMIT_REDIS_URL", "redis://localhost:9999")
+        assert get_rate_limit_redis_client() is None
+
+
+def _mock_redis(script_result=None):
+    mock = MagicMock()
+    result = script_result or [1, b"", 1, 1, 1, 1700000060, 1700003600, 1700086400]
+    mock.register_script.return_value = MagicMock(return_value=result)
+    mock.scan_iter.return_value = []
+    return mock
+
+
+class TestRateLimitRedisBackendInit:
+    def test_registers_three_scripts(self):
+        mock = _mock_redis()
+        RateLimitRedisBackend(client=mock)
+        assert mock.register_script.call_count == 3
+
+    def test_custom_key_prefix(self):
+        mock = _mock_redis()
+        b = RateLimitRedisBackend(client=mock, key_prefix="my:prefix")
+        assert b._key_prefix == "my:prefix"
+
+    def test_from_client_classmethod(self):
+        mock = _mock_redis()
+        b = RateLimitRedisBackend.from_client(mock)
+        assert b._client is mock
+
+    def test_from_env_no_redis_returns_none(self, monkeypatch):
+        monkeypatch.delenv("RATE_LIMIT_REDIS_URL", raising=False)
+        monkeypatch.delenv("REDIS_URL", raising=False)
+        monkeypatch.delenv("RATE_LIMIT_REDIS_HOST", raising=False)
+        assert RateLimitRedisBackend.from_env() is None
+
+
+class TestRateLimitRedisBackendAcquire:
+    def test_acquire_success(self):
+        mock = _mock_redis([1, b"", 1, 1, 1, 1700000060, 1700003600, 1700086400])
+        b = RateLimitRedisBackend(client=mock)
+        allowed, error, info = b.acquire(
+            "user:abc", endpoint="/api/test",
+            config=RateLimitConfig(), estimated_tokens=0,
+            now=time.time(), request_id="r1",
+        )
+        assert allowed is True
+        assert error is None
+        assert "limit_minute" in info
+
+    def test_acquire_blocked(self):
+        mock = _mock_redis([0, b"Account temporarily blocked. Retry after 3600 seconds."])
+        b = RateLimitRedisBackend(client=mock)
+        allowed, error, info = b.acquire(
+            "user:blocked", endpoint="/api/test",
+            config=RateLimitConfig(), estimated_tokens=0,
+            now=time.time(), request_id="r2",
+        )
+        assert allowed is False
+        assert info == {}
+
+    def test_acquire_remaining_calculated(self):
+        mock = _mock_redis([1, b"", 5, 10, 50, 1700000060, 1700003600, 1700086400])
+        b = RateLimitRedisBackend(client=mock)
+        cfg = RateLimitConfig(requests_per_minute=30, requests_per_hour=200, requests_per_day=1000)
+        allowed, _, info = b.acquire(
+            "user:test", endpoint="/api/test",
+            config=cfg, estimated_tokens=0,
+            now=time.time(), request_id="r3",
+        )
+        assert allowed is True
+        assert info["remaining_minute"] == 25
+        assert info["remaining_hour"] == 190
+
+
+class TestRateLimitRedisBackendRecordAndRelease:
+    def test_record_token_usage_no_raise(self):
+        mock = _mock_redis(100)
+        b = RateLimitRedisBackend(client=mock)
+        b.record_token_usage("user:test", "/api/test", "r1", 500)
+
+    def test_record_token_usage_exception_no_raise(self):
+        mock = _mock_redis()
+        b = RateLimitRedisBackend(client=mock)
+        b._record_tokens = MagicMock(side_effect=Exception("Redis down"))
+        b.record_token_usage("user:test", "/api/test", "r1", 500)
+
+    def test_release_no_raise(self):
+        mock = _mock_redis(1)
+        b = RateLimitRedisBackend(client=mock)
+        b.release("user:test", "/api/test", "r1")
+
+    def test_release_exception_no_raise(self):
+        mock = _mock_redis()
+        b = RateLimitRedisBackend(client=mock)
+        b._release = MagicMock(side_effect=Exception("Redis down"))
+        b.release("user:test", "/api/test", "r1")
+
+
+class TestRateLimitRedisBackendClearAll:
+    def test_deletes_found_keys(self):
+        mock = MagicMock()
+        mock.register_script.return_value = MagicMock(return_value=[1])
+        mock.scan_iter.return_value = ["k1", "k2"]
+        b = RateLimitRedisBackend(client=mock)
+        b.clear_all()
+        mock.delete.assert_called_once_with("k1", "k2")
+
+    def test_no_keys_no_delete(self):
+        mock = MagicMock()
+        mock.register_script.return_value = MagicMock(return_value=[1])
+        mock.scan_iter.return_value = []
+        b = RateLimitRedisBackend(client=mock)
+        b.clear_all()
+        mock.delete.assert_not_called()
+
+    def test_scan_exception_no_raise(self):
+        mock = MagicMock()
+        mock.register_script.return_value = MagicMock(return_value=[1])
+        mock.scan_iter.side_effect = Exception("Redis down")
+        b = RateLimitRedisBackend(client=mock)
+        b.clear_all()
+
+
+class TestRegisterScriptEvalFallback:
+    def test_noscript_falls_back_to_eval(self):
+        script_result = [1, b"", 1, 1, 1, 1700000060, 1700003600, 1700086400]
+        mock = MagicMock()
+        registered = MagicMock(side_effect=Exception("NOSCRIPT No matching script"))
+        mock.register_script.return_value = registered
+        mock.eval.return_value = script_result
+        b = RateLimitRedisBackend(client=mock)
+        result = b._acquire(keys=["k1"], args=["a1"])
+        assert result == script_result
+        mock.eval.assert_called_once()
+
+    def test_other_exception_re_raised(self):
+        mock = MagicMock()
+        registered = MagicMock(side_effect=Exception("connection refused"))
+        mock.register_script.return_value = registered
+        b = RateLimitRedisBackend(client=mock)
+        import pytest
+        with pytest.raises(Exception, match="connection refused"):
+            b._acquire(keys=["k1"], args=["a1"])

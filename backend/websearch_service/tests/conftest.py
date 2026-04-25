@@ -2,6 +2,7 @@
 import os
 import time
 from typing import AsyncGenerator
+from unittest.mock import MagicMock, patch
 
 # Shared test JWT secret — also set in mock_env_vars so auth.py picks it up.
 TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests"
@@ -25,7 +26,14 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
-from app.main import create_app
+# Set stub Supabase credentials before the app module chain is imported.
+# supabase_client.py calls create_client() at module level and raises if missing.
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+
+# Patch create_client so no real network connection is attempted at import time.
+with patch("supabase.create_client", return_value=MagicMock()):
+    from app.main import create_app
 
 
 def _make_jwt(role: str = "service_role", sub: str = "test-service", **extra) -> str:

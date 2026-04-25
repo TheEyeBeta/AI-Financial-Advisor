@@ -18,6 +18,7 @@ Schema routing:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime, timedelta, timezone
@@ -755,15 +756,22 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             created_at = d.get("created_at")
             if hasattr(created_at, "isoformat"):
                 created_at = created_at.isoformat()
+            # content is stored as JSONB; convert to a plain string for the prompt
+            raw_content = d.get("content")
+            if isinstance(raw_content, (dict, list)):
+                content_str = json.dumps(raw_content)
+            else:
+                content_str = str(raw_content) if raw_content is not None else None
             intelligence_digest = {
                 "digest_type": d.get("digest_type"),
-                "content": d.get("content"),
+                "content": content_str,
                 "created_at": str(created_at) if created_at else None,
             }
     except Exception:
         logger.exception("DB query failed: meridian.intelligence_digests SELECT for user_id=%s", user_id)
 
     # 7. Fetch life events within the next 90 days from meridian.life_events
+    # The DB column is "notes"; we expose it as "description" for the formatter.
     life_events: List[Dict[str, Any]] = []
     try:
         now = datetime.now(timezone.utc)
@@ -771,7 +779,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         cutoff_str = (now + timedelta(days=90)).date().isoformat()
         le_res = (
             _table(client, "meridian", "life_events")
-            .select("event_type, event_date, description")
+            .select("event_type, event_date, notes")
             .eq("user_id", user_id)
             .gte("event_date", today_str)
             .lte("event_date", cutoff_str)
@@ -785,7 +793,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             life_events.append({
                 "event_type": le.get("event_type"),
                 "event_date": str(event_date) if event_date else None,
-                "description": le.get("description"),
+                "description": le.get("notes"),  # DB column is "notes"
             })
     except Exception:
         logger.exception("DB query failed: meridian.life_events SELECT for user_id=%s", user_id)
