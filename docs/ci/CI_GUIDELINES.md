@@ -140,6 +140,11 @@ Three jobs:
   on the PR.
 - New tests must work in both modes. Use `process.env.PLAYWRIGHT_BASE_URL`
   to detect the staging mode if you need to skip mock-only assertions.
+- **TODO (stabilisation):** the mocked-Supabase suite is currently flagged
+  `continue-on-error: true` in `e2e.yml` while the timing on CI runners is
+  triaged. The job still uploads the playwright HTML report as an artifact;
+  download it to debug. Remove `continue-on-error` once the suite is
+  reliably green on a clean run.
 
 ### 3.7 Deploy (`deploy.yml`, `deploy-staging.yml`)
 
