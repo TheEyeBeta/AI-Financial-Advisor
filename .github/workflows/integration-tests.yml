@@ -45,7 +45,11 @@ jobs:
           ENVEOF
 
       - name: Run integration tests
-        run: pytest tests/integration/ -v --tb=short
+        # pytest.ini sets --cov=app --cov-fail-under=74 for the full unit suite,
+        # but this job only runs tests/integration/ — the threshold is meaningless
+        # against a subset that exercises a fraction of the code. Override addopts
+        # to clear the coverage gate (and skip coverage instrumentation) here.
+        run: pytest tests/integration/ -v --tb=short -o addopts=""
 
       - name: Cleanup .env.test
         if: always()
