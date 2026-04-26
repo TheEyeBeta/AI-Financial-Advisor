@@ -2533,6 +2533,14 @@ async def chat_completion(
                         # client sees nothing until tool results
                         # are incorporated into follow-up response
 
+                    # If tools were available but the model produced a direct
+                    # text answer without calling any, replay the suppressed
+                    # first-stream content — otherwise the client receives only
+                    # `done: true` and surfaces an empty-response error.
+                    if enabled_tools and not tool_calls_acc and collected_chunks:
+                        for chunk in collected_chunks:
+                            yield _sse_event({"content": chunk})
+
                     # If the model requested tool calls, execute them and run a
                     # follow-up streaming completion with the results appended.
                     if tool_calls_acc:
@@ -2617,7 +2625,12 @@ async def chat_completion(
                     final_answer = "".join(collected_chunks).strip()
                     if not final_answer:
                         logger.warning("Empty streamed response from /api/chat for user %s", verified_user_id)
-                        yield _sse_event({"error": "Stream interrupted"})
+                        fallback = (
+                            "I couldn't put a response together for that one — "
+                            "could you rephrase or try again in a moment?"
+                        )
+                        yield _sse_event({"content": fallback})
+                        yield _sse_event({"done": True})
                         return
 
                     final_answer = _ensure_test_mode_disclaimer(final_answer)
