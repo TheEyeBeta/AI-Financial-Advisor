@@ -27,6 +27,7 @@ from ..services.meridian_context import (
 from ..services.market_context import build_market_context
 from ..services.subagents import classify_intent, classify_tier, get_subagent_block, regex_classify_intent, FINANCIAL_KEYWORDS
 from ..services.iris_tools import TOOL_DEFINITIONS, execute_tool
+from ..services.supabase_client import get_schema
 
 logger = logging.getLogger(__name__)
 
@@ -1136,6 +1137,26 @@ def estimate_tokens(text: str, system_overhead: int = 100) -> int:
     return int(len(text) / 4 * 1.2) + system_overhead
 
 
+def _is_admin_profile(auth_id: str) -> bool:
+    """Return True when the authenticated user has core.users.userType='Admin'."""
+    if not auth_id:
+        return False
+    try:
+        result = (
+            get_schema("core")
+            .table("users")
+            .select("userType")
+            .eq("auth_id", auth_id)
+            .maybe_single()
+            .execute()
+        )
+        row = ((result and result.data) or {}) or {}
+        return row.get("userType") == "Admin"
+    except Exception:
+        logger.exception("Failed to resolve admin profile status for auth_id=%s", auth_id)
+        return False
+
+
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
 class Message(BaseModel):
@@ -2142,6 +2163,7 @@ async def chat_completion(
     # SECURITY: Use the auth_id from the verified JWT — never from the request body.
     # This prevents user_id spoofing for rate-limit bypass or false audit attribution.
     verified_user_id = auth_user.auth_id
+    token_limit_exempt = await asyncio.to_thread(_is_admin_profile, verified_user_id)
 
     # Build message list
     messages: List[Dict[str, str]]
@@ -2164,6 +2186,7 @@ async def chat_completion(
         "/api/chat",
         user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
+        token_limit_exempt=token_limit_exempt,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
@@ -2890,7 +2913,8 @@ async def chat_completion(
         # Step 5: Record token usage (Responses API uses input_tokens/output_tokens)
         usage = data.get("usage", {})
         actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
-        rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+        if not token_limit_exempt:
+            rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
         await audit_log(
             "chat_response",
             {
@@ -2949,6 +2973,7 @@ async def chat_title(
     auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
     verified_user_id = auth_user.auth_id
+    token_limit_exempt = await asyncio.to_thread(_is_admin_profile, verified_user_id)
 
     # Estimate tokens (title generation is lightweight)
     estimated_tokens = estimate_tokens(request.first_message, system_overhead=50) + 60
@@ -2959,6 +2984,7 @@ async def chat_title(
         "/api/chat/title",
         user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
+        token_limit_exempt=token_limit_exempt,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
@@ -2988,7 +3014,8 @@ async def chat_title(
             data = await _call_openai(payload)
             usage = data.get("usage", {})
             actual_tokens = usage.get("total_tokens", 0)
-            rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+            if not token_limit_exempt:
+                rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
             content = _extract_text_unified(data).strip().strip('"').strip("'")
         except Exception as exc:
             logger.warning("Title generation model call failed: %s", exc)
@@ -3025,6 +3052,7 @@ async def analyze_quantitative_data(
     auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
     verified_user_id = auth_user.auth_id
+    token_limit_exempt = await asyncio.to_thread(_is_admin_profile, verified_user_id)
 
     # Estimate tokens
     data_str = str(request.quantitative_data)
@@ -3036,6 +3064,7 @@ async def analyze_quantitative_data(
         "/api/ai/analyze-quantitative",
         user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
+        token_limit_exempt=token_limit_exempt,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
@@ -3065,7 +3094,8 @@ async def analyze_quantitative_data(
 
         usage = data.get("usage", {})
         actual_tokens = usage.get("total_tokens", 0)
-        rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+        if not token_limit_exempt:
+            rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
 
         content = _extract_text_unified(data).strip()
         if not content:

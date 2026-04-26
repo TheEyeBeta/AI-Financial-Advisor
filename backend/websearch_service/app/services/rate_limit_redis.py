@@ -128,6 +128,7 @@ class RateLimitRedisBackend:
     local day_ttl_ms = tonumber(ARGV[18])
     local lease_ttl_ms = tonumber(ARGV[19])
     local block_ttl_ms = tonumber(ARGV[20])
+    local token_limit_exempt = tonumber(ARGV[21])
 
     local blocked_until = tonumber(redis.call("GET", block_key) or "0")
     if blocked_until > now then
@@ -157,38 +158,48 @@ class RateLimitRedisBackend:
         return {0, "Rate limit exceeded: " .. tostring(requests_per_day) .. " requests per day. Retry after " .. tostring(math.max(1, day_reset - now)) .. " seconds."}
     end
 
-    if minute_tokens + estimated_tokens > tokens_per_minute then
-        return {0, "Token limit exceeded: " .. tostring(tokens_per_minute) .. " tokens per minute."}
-    end
-    if hour_tokens + estimated_tokens > tokens_per_hour then
-        return {0, "Token limit exceeded: " .. tostring(tokens_per_hour) .. " tokens per hour."}
-    end
-    if day_tokens + estimated_tokens > tokens_per_day then
-        return {0, "Token limit exceeded: " .. tostring(tokens_per_day) .. " tokens per day."}
+    if token_limit_exempt == 0 then
+        if minute_tokens + estimated_tokens > tokens_per_minute then
+            return {0, "Token limit exceeded: " .. tostring(tokens_per_minute) .. " tokens per minute."}
+        end
+        if hour_tokens + estimated_tokens > tokens_per_hour then
+            return {0, "Token limit exceeded: " .. tostring(tokens_per_hour) .. " tokens per hour."}
+        end
+        if day_tokens + estimated_tokens > tokens_per_day then
+            return {0, "Token limit exceeded: " .. tostring(tokens_per_day) .. " tokens per day."}
+        end
     end
 
     redis.call("INCRBY", minute_req_key, 1)
     redis.call("INCRBY", hour_req_key, 1)
     redis.call("INCRBY", day_req_key, 1)
-    redis.call("INCRBY", minute_tok_key, estimated_tokens)
-    redis.call("INCRBY", hour_tok_key, estimated_tokens)
-    redis.call("INCRBY", day_tok_key, estimated_tokens)
+    if token_limit_exempt == 0 then
+        redis.call("INCRBY", minute_tok_key, estimated_tokens)
+        redis.call("INCRBY", hour_tok_key, estimated_tokens)
+        redis.call("INCRBY", day_tok_key, estimated_tokens)
+    end
     redis.call("ZADD", leases_key, tostring((now * 1000) + lease_ttl_ms), request_id)
-    redis.call(
-        "HMSET",
-        reservation_key,
-        "minute_token_key", minute_tok_key,
-        "hour_token_key", hour_tok_key,
-        "day_token_key", day_tok_key,
-        "estimated_tokens", tostring(estimated_tokens)
-    )
+    if token_limit_exempt == 0 then
+        redis.call(
+            "HMSET",
+            reservation_key,
+            "minute_token_key", minute_tok_key,
+            "hour_token_key", hour_tok_key,
+            "day_token_key", day_tok_key,
+            "estimated_tokens", tostring(estimated_tokens)
+        )
+    else
+        redis.call("HMSET", reservation_key, "estimated_tokens", "")
+    end
 
     redis.call("PEXPIRE", minute_req_key, minute_ttl_ms)
     redis.call("PEXPIRE", hour_req_key, hour_ttl_ms)
     redis.call("PEXPIRE", day_req_key, day_ttl_ms)
-    redis.call("PEXPIRE", minute_tok_key, minute_ttl_ms)
-    redis.call("PEXPIRE", hour_tok_key, hour_ttl_ms)
-    redis.call("PEXPIRE", day_tok_key, day_ttl_ms)
+    if token_limit_exempt == 0 then
+        redis.call("PEXPIRE", minute_tok_key, minute_ttl_ms)
+        redis.call("PEXPIRE", hour_tok_key, hour_ttl_ms)
+        redis.call("PEXPIRE", day_tok_key, day_ttl_ms)
+    end
     redis.call("PEXPIRE", leases_key, lease_ttl_ms)
     redis.call("PEXPIRE", reservation_key, lease_ttl_ms)
 
@@ -299,6 +310,7 @@ class RateLimitRedisBackend:
         estimated_tokens: int,
         now: float,
         request_id: str,
+        token_limit_exempt: bool = False,
     ) -> Tuple[bool, Optional[str], Dict[str, int]]:
         window_map = {
             "minute": (60, int(getattr(config, "minute_window", 60))),
@@ -343,6 +355,7 @@ class RateLimitRedisBackend:
                 str(_expiry_ms(day_reset, now)),
                 str(max(60_000, int(getattr(config, "block_duration_seconds", 3600)) * 1000 + 1000)),
                 str(max(60_000, int(getattr(config, "block_duration_seconds", 3600)) * 1000 + 1000)),
+                "1" if token_limit_exempt else "0",
             ],
         )
 
