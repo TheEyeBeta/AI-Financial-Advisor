@@ -131,7 +131,8 @@ jobs:
 
       - name: Run tests with coverage
         working-directory: ./backend/websearch_service
-        run: pytest tests/ -v --cov=app --cov-branch --cov-fail-under=80 --cov-report=xml --cov-report=term-missing
+        # Coverage flags + threshold live in pytest.ini (single source of truth).
+        run: pytest tests/ -v
 
       - name: Upload coverage reports
         if: always()

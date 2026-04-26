@@ -239,7 +239,9 @@ async def dataapi_query(
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
 
     # Wrap with an outer LIMIT 1000 to enforce a hard row cap at the SQL level.
-    final_sql = f"SELECT * FROM ({q}) AS _q LIMIT 1000"
+    # nosec B608: admin-only endpoint (see _require_admin); SELECT-only with DML
+    # keywords blocked above; downstream DataAPI also enforces RLS and read-only role.
+    final_sql = f"SELECT * FROM ({q}) AS _q LIMIT 1000"  # nosec B608
 
     try:
         base_url, token = await _get_admin_token()
