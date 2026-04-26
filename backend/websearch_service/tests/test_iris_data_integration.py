@@ -553,6 +553,60 @@ async def test_fast_helper_swallows_exceptions(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# DEEP mode — escalation rules for heavier analysis
+# ---------------------------------------------------------------------------
+
+def test_deep_mode_triggers_on_explicit_deep_analysis_intent():
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("deep_analysis", {}) is True
+
+
+def test_deep_mode_triggers_on_portfolio_analysis_intent():
+    """portfolio_analysis is in _DEEP_CATEGORIES — needs maximum accuracy."""
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("portfolio_analysis", {}) is True
+
+
+def test_deep_mode_triggers_on_risk_assessment_intent():
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("risk_assessment", {}) is True
+
+
+def test_deep_mode_triggers_on_stock_research_intent():
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("stock_research", {}) is True
+
+
+def test_deep_mode_triggers_on_high_complexity_classification():
+    """A long multi-factor question with generic intent still escalates."""
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("general", {"complexity": "high"}) is True
+
+
+def test_deep_mode_triggers_on_high_risk_decision_flag():
+    """Real allocation/execution decisions always get the deep model."""
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("general", {"high_risk_decision": True}) is True
+
+
+def test_deep_mode_does_not_trigger_on_education_intent():
+    """Conceptual / educational questions stay on BALANCED."""
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("education", {"complexity": "low"}) is False
+
+
+def test_deep_mode_does_not_trigger_on_general_intent_low_complexity():
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("general", {"complexity": "medium"}) is False
+
+
+def test_deep_mode_does_not_trigger_on_market_overview_intent():
+    """market_overview is a survey, not deep analysis."""
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request("market_overview", {"complexity": "medium"}) is False
+
+
+# ---------------------------------------------------------------------------
 # In-process cache — hit/miss/eviction
 # (autouse cache-clearing fixture lives in tests/conftest.py)
 # ---------------------------------------------------------------------------

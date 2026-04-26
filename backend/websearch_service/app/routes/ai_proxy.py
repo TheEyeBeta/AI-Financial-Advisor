@@ -1577,6 +1577,28 @@ def _tools_for_intent(category: str) -> List[Dict[str, Any]]:
     return [t for t in TOOL_DEFINITIONS if t.get("function", {}).get("name") in allowed]
 
 
+def _is_deep_request(subagent_category: str, classification: Dict[str, Any]) -> bool:
+    """Decide whether a BALANCED request warrants the DEEP_MODEL upgrade.
+
+    Triggered by either:
+      - explicit ``deep_analysis`` intent (multi-factor / comparative / "everything"),
+      - a category in ``_DEEP_CATEGORIES`` (portfolio_analysis, risk_assessment,
+        stock_research) — categories the team has marked as needing maximum
+        accuracy,
+      - or the classifier flagging ``complexity=high`` or
+        ``high_risk_decision=true`` even when the intent is generic.
+    """
+    if subagent_category == "deep_analysis":
+        return True
+    if subagent_category in _DEEP_CATEGORIES:
+        return True
+    if classification.get("complexity") == "high":
+        return True
+    if classification.get("high_risk_decision") is True:
+        return True
+    return False
+
+
 def _build_perplexity_chat_stream_payload(
     messages: List[Dict[str, str]],
     max_output_tokens: int,
@@ -2410,21 +2432,20 @@ async def chat_completion(
         if message_tier == "INSTANT":
             _base_system_prompt = INSTANT_SYSTEM_PROMPT
             _chat_model = INSTANT_MODEL
+            _deep_mode = False
         elif message_tier == "FAST":
             _base_system_prompt = FAST_SYSTEM_PROMPT
             _chat_model = BALANCED_MODEL
-        else:  # BALANCED — high-stakes categories get the deep model
+            _deep_mode = False
+        else:  # BALANCED — escalate to DEEP_MODEL when the request demands it.
             _base_system_prompt = FINANCIAL_ADVISOR_SYSTEM_PROMPT
-            if subagent_category in _DEEP_CATEGORIES:
-                _chat_model = BALANCED_MODEL
-            elif subagent_category == "deep_analysis":
-                _chat_model = BALANCED_MODEL  # gpt-4o with full context
-            else:
-                _chat_model = BALANCED_MODEL
+            _deep_mode = _is_deep_request(subagent_category, classification)
+            _chat_model = DEEP_MODEL if _deep_mode else BALANCED_MODEL
 
         logger.info(
             f"[MODEL] tier={message_tier} "
             f"category={subagent_category} "
+            f"deep={_deep_mode} "
             f"model={_chat_model}"
         )
 
