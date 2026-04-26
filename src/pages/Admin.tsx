@@ -184,12 +184,10 @@ export default function Admin() {
   });
 
   // System Health state
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [systemHealth, setSystemHealth] = useState<Record<string, any> | null>(null);
+  const [systemHealth, setSystemHealth] = useState<Record<string, unknown> | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [queryInput, setQueryInput] = useState("");
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [queryResults, setQueryResults] = useState<Record<string, any> | null>(null);
+  const [queryResults, setQueryResults] = useState<Record<string, unknown> | null>(null);
   const [queryLoading, setQueryLoading] = useState(false);
   const [queryError, setQueryError] = useState<string | null>(null);
 

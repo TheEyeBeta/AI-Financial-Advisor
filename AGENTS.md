@@ -54,8 +54,12 @@ If you changed **Python service code** (always for backend tasks):
 
 ```bash
 cd backend/websearch_service
-pytest tests/ -v --cov=app --cov-branch --cov-fail-under=80
+pytest tests/ -v
 ```
+
+`pytest.ini` is the single source of truth for coverage flags and the
+`--cov-fail-under` threshold (currently a baseline floor — see
+`docs/ci/CI_GUIDELINES.md`).
 
 If you changed **Alembic migrations**:
 

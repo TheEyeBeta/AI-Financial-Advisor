@@ -99,7 +99,13 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
+        # Reflect the live schema, then *commit* the implicit read transaction
+        # so the upgrade transaction can later commit cleanly. Without the
+        # explicit commit() the reflect's open transaction holds DDL changes
+        # in limbo and they silently roll back at connection close.
         target_metadata = _build_reflected_metadata(connection)
+        connection.commit()
+
         context.configure(
             connection=connection,
             target_metadata=target_metadata,

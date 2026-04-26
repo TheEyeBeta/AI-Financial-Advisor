@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS core.users (
     risk_level core.risk_level_enum DEFAULT 'mid',
     is_verified BOOLEAN DEFAULT FALSE,
     email_verified_at TIMESTAMPTZ,
-    userType core.type_of_user NOT NULL DEFAULT 'User',
+    "userType" core.type_of_user NOT NULL DEFAULT 'User',
     onboarding_complete BOOLEAN DEFAULT FALSE,
     marital_status core.marital_status_enum,
     investment_goal core.investment_goal_enum,
