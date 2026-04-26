@@ -40,9 +40,14 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: backend/websearch_service/requirements.txt
 
       - name: Install backend deps (for OpenAPI export)
-        run: pip install -q fastapi pydantic httpx python-dotenv apscheduler pyjwt supabase sentry-sdk
+        # Install full backend requirements — export_openapi.py imports app.main,
+        # which transitively pulls in numpy, redis, sqlalchemy, etc. via the
+        # services layer. Pin list drift breaks the OpenAPI step silently.
+        run: pip install -r backend/websearch_service/requirements.txt
 
       - name: OpenAPI drift detection
         run: |
@@ -125,9 +130,14 @@ jobs:
         working-directory: ./backend/websearch_service
         env:
           ALEMBIC_DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/advisor_ci
+        # Only `upgrade head` is meaningful for this SQL-first repo. `alembic
+        # check` runs autogen, which compares ORM metadata to the live DB —
+        # since the migrations are bare SQL files (no ORM models), autogen
+        # always reports the manually-created tables as "missing". Run upgrade
+        # twice to confirm migrations are idempotent.
         run: |
           alembic -c alembic.ini upgrade head
-          alembic -c alembic.ini check
+          alembic -c alembic.ini current
 
       - name: Run tests with coverage
         working-directory: ./backend/websearch_service

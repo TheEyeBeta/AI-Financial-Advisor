@@ -11,12 +11,10 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 -- 1. ENUMS
 -- ============================================================
 
--- Experience level enum (reuse existing if exists)
-DO $$ BEGIN
-    CREATE TYPE experience_level_enum AS ENUM ('beginner', 'intermediate', 'advanced');
-EXCEPTION
-    WHEN duplicate_object THEN null;
-END $$;
+-- Experience level enum: reuse `core.experience_level_enum` defined in
+-- schema.sql so casts between core.users.experience_level and curriculum
+-- columns succeed (PostgreSQL treats same-named enums in different schemas
+-- as distinct, non-castable types).
 
 -- Content status enum
 DO $$ BEGIN
@@ -40,7 +38,7 @@ END $$;
 CREATE TABLE IF NOT EXISTS public.education_bank (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     module_code TEXT NOT NULL UNIQUE, -- e.g., 'B1', 'IA1', 'A1.1'
-    level experience_level_enum NOT NULL,
+    level core.experience_level_enum NOT NULL,
     track_or_pathway TEXT, -- e.g., 'IA', 'A1', NULL for beginner
     title TEXT NOT NULL,
     summary TEXT,
@@ -54,7 +52,7 @@ CREATE TABLE IF NOT EXISTS public.education_bank (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
 
-    CONSTRAINT valid_module_code CHECK (module_code ~ '^[A-Z][0-9]+(\.[0-9]+)?$'),
+    CONSTRAINT valid_module_code CHECK (module_code ~ '^[A-Z]+[0-9]+(\.[0-9]+)?$'),
     CONSTRAINT valid_display_order CHECK (display_order > 0),
     CONSTRAINT valid_estimated_minutes CHECK (estimated_minutes > 0)
 );
@@ -157,7 +155,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION get_personalized_learning_feed(p_user_id UUID)
 RETURNS TABLE (
     module_code TEXT,
-    level experience_level_enum,
+    level core.experience_level_enum,
     track_or_pathway TEXT,
     title TEXT,
     summary TEXT,
@@ -191,7 +189,7 @@ BEGIN
         eb.is_active = TRUE
         AND eb.status = 'published'
         AND (
-            eb.level = COALESCE(u.experience_level, 'beginner')::experience_level_enum
+            eb.level = COALESCE(u.experience_level, 'beginner')::core.experience_level_enum
             OR
             (u.experience_level IS NULL AND eb.level = 'beginner')
         )
@@ -282,7 +280,7 @@ CREATE OR REPLACE FUNCTION complete_assessment(
 )
 RETURNS TABLE (passed BOOLEAN, score_percent INTEGER, total_questions INTEGER, correct_answers INTEGER) AS $$
 DECLARE
-    v_level experience_level_enum;
+    v_level core.experience_level_enum;
     v_threshold INTEGER;
     v_total INTEGER;
     v_correct INTEGER;
@@ -369,8 +367,8 @@ ON public.education_bank FOR SELECT
 TO authenticated
 USING (
     level = COALESCE(
-        (SELECT experience_level FROM core.users WHERE auth_id = auth.uid())::experience_level_enum,
-        'beginner'::experience_level_enum
+        (SELECT experience_level FROM core.users WHERE auth_id = auth.uid())::core.experience_level_enum,
+        'beginner'::core.experience_level_enum
     )
     AND is_active = TRUE
     AND status = 'published'
@@ -397,8 +395,8 @@ USING (
     module_code IN (
         SELECT module_code FROM public.education_bank
         WHERE level = COALESCE(
-            (SELECT experience_level FROM core.users WHERE auth_id = auth.uid())::experience_level_enum,
-            'beginner'::experience_level_enum
+            (SELECT experience_level FROM core.users WHERE auth_id = auth.uid())::core.experience_level_enum,
+            'beginner'::core.experience_level_enum
         )
         AND is_active = TRUE
         AND status = 'published'
@@ -425,10 +423,17 @@ ON public.user_learning_progress FOR SELECT
 TO authenticated
 USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
+DROP POLICY IF EXISTS "Users can insert own progress" ON public.user_learning_progress;
+CREATE POLICY "Users can insert own progress"
+ON public.user_learning_progress FOR INSERT
+TO authenticated
+WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
+
 DROP POLICY IF EXISTS "Users can update own progress" ON public.user_learning_progress;
 CREATE POLICY "Users can update own progress"
-ON public.user_learning_progress FOR INSERT, UPDATE
+ON public.user_learning_progress FOR UPDATE
 TO authenticated
+USING (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()))
 WITH CHECK (user_id IN (SELECT id FROM core.users WHERE auth_id = auth.uid()));
 
 -- User Question Attempts Policies
