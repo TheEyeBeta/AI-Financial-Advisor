@@ -75,7 +75,7 @@ def test_is_cache_stale_returns_true_for_malformed_string():
 
 
 def test_is_cache_stale_returns_false_for_recent_string():
-    now = datetime.now(timezone.utc) - timedelta(hours=1)
+    now = datetime.now(timezone.utc) - timedelta(minutes=5)
     assert _is_cache_stale(now.isoformat()) is False
 
 

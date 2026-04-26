@@ -1893,6 +1893,32 @@ async def _fetch_fresh_portfolio(auth_id: str) -> str | None:
         return None
 
 
+# Tier-aware Meridian context fetch. INSTANT and FAST messages never run the
+# full 13-table rebuild — they read the cached row written by the background
+# refresher. The cap guarantees a slow Supabase response never blocks the
+# chat reply. BALANCED runs the same call inside the asyncio.gather block, so
+# this helper is only used for INSTANT/FAST.
+_TIER_MERIDIAN_TIMEOUT_S = {"INSTANT": 0.8, "FAST": 1.5}
+
+
+async def _fetch_meridian_for_tier(tier: str, user_id: Optional[str]) -> Optional[str]:
+    """Return cached Meridian context for a tier, capped by tier-specific timeout.
+
+    Returns ``None`` on timeout, missing user, or any error so the chat path
+    is never blocked by a slow / failing context fetch.
+    """
+    timeout = _TIER_MERIDIAN_TIMEOUT_S.get(tier)
+    if timeout is None:
+        return None
+    try:
+        return await asyncio.wait_for(
+            build_iris_context(user_id),
+            timeout=timeout,
+        )
+    except (asyncio.TimeoutError, Exception):
+        return None
+
+
 async def _classify_query(user_message: str) -> Dict[str, Any]:
     """Classify query complexity using a lightweight Responses model."""
     default_classification: Dict[str, Any] = {
@@ -2133,16 +2159,25 @@ async def chat_completion(
 
         # ── Steps 1 & 1b–1d: concurrent pipeline ───────────────────────────────
         # BALANCED  → run all four concurrently via asyncio.gather (saves wall time).
-        # FAST      → _classify_query with a hard 3 s timeout cap; skip Meridian.
-        # INSTANT   → skip both entirely; use safe defaults.
+        # FAST      → _classify_query with a hard 2 s timeout cap; serve cached Meridian.
+        # INSTANT   → skip the LLM-heavy classifiers but still serve cached Meridian
+        #             context with a tight timeout. The cache lookup is one Supabase
+        #             row, so the latency cost on a "hi" reply is sub-second and the
+        #             user gets a personalised greeting that knows their name, goals,
+        #             and portfolio.
         fresh_goals_data: Optional[str] = None
         fresh_portfolio_data: Optional[str] = None
         if message_tier == "INSTANT":
             logger.info("[TIER] INSTANT: skipped _classify_query")
             classification: Dict[str, Any] = _default_classification
             reasoning_effort = _default_reasoning_effort
-            meridian_context: Optional[str] = None
-            logger.info("[TIER] INSTANT: skipped Meridian context")
+            meridian_context: Optional[str] = await _fetch_meridian_for_tier(
+                "INSTANT", verified_user_id
+            )
+            logger.info(
+                "[TIER] INSTANT: meridian=%s",
+                "present" if meridian_context else "None",
+            )
 
         elif message_tier == "FAST":
             logger.info(
@@ -2168,15 +2203,7 @@ async def chat_completion(
             )
             reasoning_effort = _get_reasoning_effort(classification)
             # FAST tier — inject compact user context (core block only, no full rebuild)
-            fast_meridian = None
-            try:
-                fast_meridian = await asyncio.wait_for(
-                    build_iris_context(verified_user_id),
-                    timeout=1.5  # hard 1.5s cap — serve stale cache or skip
-                )
-            except (asyncio.TimeoutError, Exception):
-                fast_meridian = None  # never block the response
-            meridian_context = fast_meridian
+            meridian_context = await _fetch_meridian_for_tier("FAST", verified_user_id)
             logger.info("[TIER] FAST: meridian=%s", "present" if meridian_context else "None")
 
         else:  # BALANCED — run all four concurrently

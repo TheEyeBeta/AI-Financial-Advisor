@@ -19,10 +19,11 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services import iris_tools
+from app.services import iris_tools, meridian_context
 from app.services.iris_tools import execute_tool
 from app.services.meridian_context import (
     _format_context_block,
+    _is_cache_stale,
     _refresh_iris_context_cache_sync,
 )
 from tests.test_meridian_context_pipeline import (
@@ -31,6 +32,7 @@ from tests.test_meridian_context_pipeline import (
     _FakeSupabase,
     _default_store,
     _fresh_ts,
+    _ts,
 )
 
 
@@ -431,3 +433,125 @@ async def test_search_market_news_tool_blocked_without_api_key(monkeypatch):
     payload = json.loads(raw)
     assert "error" in payload
     assert payload["query"] == "AAPL"
+
+
+# ---------------------------------------------------------------------------
+# Cache freshness — defaults, env override, boundary behaviour
+# ---------------------------------------------------------------------------
+
+def test_cache_stale_default_threshold_is_thirty_minutes(monkeypatch):
+    """Default IRIS_CACHE_STALE_MINUTES is 30 — anything older is stale."""
+    monkeypatch.delenv("IRIS_CACHE_STALE_MINUTES", raising=False)
+    # 5 minutes old → fresh under the 30-minute default
+    assert _is_cache_stale(_ts(hours_ago=5 / 60)) is False
+    # 45 minutes old → stale under the 30-minute default
+    assert _is_cache_stale(_ts(hours_ago=45 / 60)) is True
+
+
+def test_cache_stale_threshold_is_env_configurable(monkeypatch):
+    """IRIS_CACHE_STALE_MINUTES tightens or loosens the threshold without restart."""
+    # Tighten to 5 minutes — a 10-minute-old row is now stale
+    monkeypatch.setenv("IRIS_CACHE_STALE_MINUTES", "5")
+    assert _is_cache_stale(_ts(hours_ago=10 / 60)) is True
+
+    # Loosen to 240 minutes — a 2-hour-old row is now fresh
+    monkeypatch.setenv("IRIS_CACHE_STALE_MINUTES", "240")
+    assert _is_cache_stale(_ts(hours_ago=2)) is False
+
+
+def test_cache_stale_invalid_env_falls_back_to_default(monkeypatch):
+    """A garbage IRIS_CACHE_STALE_MINUTES value does not crash; uses 30-minute default."""
+    monkeypatch.setenv("IRIS_CACHE_STALE_MINUTES", "not-a-number")
+    # 45 minutes old → stale under the 30-minute fallback
+    assert _is_cache_stale(_ts(hours_ago=45 / 60)) is True
+
+
+def test_cache_stale_zero_or_negative_env_falls_back_to_default(monkeypatch):
+    """Non-positive IRIS_CACHE_STALE_MINUTES falls back to the 30-minute default."""
+    monkeypatch.setenv("IRIS_CACHE_STALE_MINUTES", "0")
+    # 45 minutes old → stale under the 30-minute fallback
+    assert _is_cache_stale(_ts(hours_ago=45 / 60)) is True
+
+
+# ---------------------------------------------------------------------------
+# Tier gating — INSTANT and FAST must still serve cached user context
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_instant_tier_serves_cached_meridian_context(monkeypatch):
+    """INSTANT messages still get the cached Meridian block — only the
+    LLM-heavy classifiers (query / intent / market) are skipped."""
+    from app.routes.ai_proxy import _fetch_meridian_for_tier
+
+    captured = {}
+
+    async def _fake_build(uid):
+        captured["called_with"] = uid
+        return "MERIDIAN — Alice Tester block"
+
+    monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _fake_build)
+
+    result = await _fetch_meridian_for_tier("INSTANT", AUTH_ID)
+    assert result == "MERIDIAN — Alice Tester block"
+    assert captured["called_with"] == AUTH_ID
+
+
+@pytest.mark.asyncio
+async def test_fast_tier_serves_cached_meridian_context(monkeypatch):
+    """FAST tier also serves the cached Meridian block, with its own timeout."""
+    from app.routes.ai_proxy import _fetch_meridian_for_tier
+
+    async def _fake_build(_uid):
+        return "MERIDIAN block"
+
+    monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _fake_build)
+    assert await _fetch_meridian_for_tier("FAST", AUTH_ID) == "MERIDIAN block"
+
+
+@pytest.mark.asyncio
+async def test_balanced_tier_skips_helper_runs_in_gather(monkeypatch):
+    """BALANCED tier composes its Meridian fetch inside the asyncio.gather
+    block (parallel with classify/intent/market), so the per-tier helper
+    returns None for it to avoid a duplicate fetch."""
+    from app.routes.ai_proxy import _fetch_meridian_for_tier
+
+    async def _should_not_be_called(_uid):
+        raise AssertionError("BALANCED must not run the per-tier helper")
+
+    monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _should_not_be_called)
+    assert await _fetch_meridian_for_tier("BALANCED", AUTH_ID) is None
+
+
+@pytest.mark.asyncio
+async def test_instant_tier_does_not_block_on_slow_cache_fetch(monkeypatch):
+    """If the cache fetch exceeds the 0.8s INSTANT cap the helper returns
+    None instead of blocking the chat reply."""
+    import asyncio
+    import time
+    from app.routes.ai_proxy import _fetch_meridian_for_tier
+
+    async def _slow_build(_uid):
+        await asyncio.sleep(5.0)
+        return "would-block"
+
+    monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _slow_build)
+    t0 = time.perf_counter()
+    result = await _fetch_meridian_for_tier("INSTANT", AUTH_ID)
+    elapsed = time.perf_counter() - t0
+
+    assert result is None
+    # 0.8s cap with generous slack for scheduling
+    assert elapsed < 1.5, f"INSTANT helper blocked too long ({elapsed:.2f}s)"
+
+
+@pytest.mark.asyncio
+async def test_per_tier_helper_swallows_exceptions(monkeypatch):
+    """A failure inside build_iris_context never propagates to the chat path."""
+    from app.routes.ai_proxy import _fetch_meridian_for_tier
+
+    async def _broken_build(_uid):
+        raise RuntimeError("supabase down")
+
+    monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _broken_build)
+    assert await _fetch_meridian_for_tier("INSTANT", AUTH_ID) is None
+    assert await _fetch_meridian_for_tier("FAST", AUTH_ID) is None

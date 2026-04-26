@@ -44,11 +44,13 @@ def _ts(hours_ago: float = 0) -> str:
 
 
 def _fresh_ts() -> str:
-    return _ts(hours_ago=1)
+    # Well within the default 30-minute staleness threshold.
+    return _ts(hours_ago=0.1)  # ~6 minutes ago
 
 
 def _stale_ts() -> str:
-    return _ts(hours_ago=25)  # beyond the 24-hour threshold
+    # Comfortably beyond the default 30-minute staleness threshold.
+    return _ts(hours_ago=2)
 
 
 # ---------------------------------------------------------------------------

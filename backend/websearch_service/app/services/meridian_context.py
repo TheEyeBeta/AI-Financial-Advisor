@@ -148,12 +148,30 @@ def _build_minimal_context_sync(auth_id: str) -> str:
 
 
 # Cache staleness threshold. Beyond this age the cache is still served,
-# but a refresh is scheduled asynchronously in the background.
-_CACHE_STALE_AFTER = timedelta(hours=24)
+# but a refresh is scheduled asynchronously in the background. The frontend
+# triggers explicit refreshes after every relevant mutation, so this is the
+# safety net for cold sessions / missed triggers — not the primary refresh
+# path. Default 30 minutes balances freshness (a trade or completed lesson
+# surfaces within half an hour) against churn (chatty sessions don't trigger
+# a refresh on every turn). Override via IRIS_CACHE_STALE_MINUTES.
+def _stale_after_minutes() -> int:
+    raw = os.environ.get("IRIS_CACHE_STALE_MINUTES", "30")
+    try:
+        value = int(raw)
+        return value if value > 0 else 30
+    except (TypeError, ValueError):
+        return 30
+
+
+_CACHE_STALE_AFTER = timedelta(minutes=_stale_after_minutes())
 
 
 def _is_cache_stale(updated_at: Any) -> bool:
-    """Return True if the cache row's updated_at is older than _CACHE_STALE_AFTER."""
+    """Return True if the cache row's updated_at is older than the stale threshold.
+
+    Re-reads IRIS_CACHE_STALE_MINUTES on each call so deploys / tests can
+    change the threshold without restarting the process.
+    """
     if not updated_at:
         return True
     try:
@@ -163,7 +181,8 @@ def _is_cache_stale(updated_at: Any) -> bool:
             ts = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - ts) > _CACHE_STALE_AFTER
+        threshold = timedelta(minutes=_stale_after_minutes())
+        return (datetime.now(timezone.utc) - ts) > threshold
     except Exception:
         return True
 
