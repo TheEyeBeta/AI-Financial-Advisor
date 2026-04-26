@@ -8,6 +8,47 @@ from app.routes import ai_proxy
 from app.services.rate_limit import rate_limiter
 
 
+def test_build_openai_chat_stream_payload_disables_parallel_tool_calls():
+    payload = ai_proxy._build_openai_chat_stream_payload(
+        messages=[{"role": "user", "content": "What is the market doing today?"}],
+        max_output_tokens=800,
+        reasoning_effort="medium",
+        model="gpt-4o",
+        tools=[{"type": "function", "function": {"name": "search_market_news"}}],
+        tool_choice="auto",
+    )
+
+    assert payload["tool_choice"] == "auto"
+    assert payload["parallel_tool_calls"] is False
+
+
+def test_accumulate_tool_call_delta_stops_after_cap():
+    tool_calls_acc = {}
+
+    for idx in range(ai_proxy.MAX_STREAM_TOOL_CALLS):
+        capped = ai_proxy._accumulate_tool_call_delta(
+            tool_calls_acc,
+            {
+                "index": idx,
+                "id": f"call-{idx}",
+                "function": {"name": "search_market_news", "arguments": '{"query":"news"}'},
+            },
+        )
+        assert capped is False
+
+    capped = ai_proxy._accumulate_tool_call_delta(
+        tool_calls_acc,
+        {
+            "index": ai_proxy.MAX_STREAM_TOOL_CALLS,
+            "id": "call-overflow",
+            "function": {"name": "search_market_news", "arguments": '{"query":"overflow"}'},
+        },
+    )
+
+    assert capped is True
+    assert sorted(tool_calls_acc.keys()) == [0, 1, 2]
+
+
 @pytest.mark.asyncio
 async def test_chat_endpoint_success(client: TestClient):
     """Test successful chat completion."""

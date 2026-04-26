@@ -578,15 +578,15 @@ def test_deep_mode_triggers_on_stock_research_intent():
 
 
 def test_deep_mode_triggers_on_high_complexity_classification():
-    """A long multi-factor question with generic intent still escalates."""
+    """Classifier complexity alone must not force DEEP_MODEL routing."""
     from app.routes.ai_proxy import _is_deep_request
-    assert _is_deep_request("general", {"complexity": "high"}) is True
+    assert _is_deep_request("general", {"complexity": "high"}) is False
 
 
 def test_deep_mode_triggers_on_high_risk_decision_flag():
-    """Real allocation/execution decisions always get the deep model."""
+    """High-risk flags do not override the allowed DEEP_MODEL categories."""
     from app.routes.ai_proxy import _is_deep_request
-    assert _is_deep_request("general", {"high_risk_decision": True}) is True
+    assert _is_deep_request("general", {"high_risk_decision": True}) is False
 
 
 def test_deep_mode_does_not_trigger_on_education_intent():
@@ -604,6 +604,15 @@ def test_deep_mode_does_not_trigger_on_market_overview_intent():
     """market_overview is a survey, not deep analysis."""
     from app.routes.ai_proxy import _is_deep_request
     assert _is_deep_request("market_overview", {"complexity": "medium"}) is False
+
+
+def test_deep_mode_does_not_trigger_on_market_overview_even_if_classifier_flags_risk():
+    """market_overview must stay on BALANCED_MODEL despite classifier escalation flags."""
+    from app.routes.ai_proxy import _is_deep_request
+    assert _is_deep_request(
+        "market_overview",
+        {"complexity": "high", "high_risk_decision": True},
+    ) is False
 
 
 # ---------------------------------------------------------------------------
