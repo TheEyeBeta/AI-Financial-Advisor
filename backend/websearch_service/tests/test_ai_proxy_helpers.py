@@ -43,6 +43,38 @@ def test_estimate_tokens_custom_overhead():
     assert estimate_tokens("", system_overhead=42) == 42
 
 
+# ─── _is_admin_profile ──────────────────────────────────────────────────────
+
+class _FakeQuery:
+    def __init__(self, row):
+        self._row = row
+
+    def table(self, _name):
+        return self
+
+    def select(self, _columns):
+        return self
+
+    def eq(self, _column, _value):
+        return self
+
+    def maybe_single(self):
+        return self
+
+    def execute(self):
+        return type("Result", (), {"data": self._row})()
+
+
+def test_is_admin_profile_true(monkeypatch):
+    monkeypatch.setattr(ai_proxy, "get_schema", lambda _schema: _FakeQuery({"userType": "Admin"}))
+    assert ai_proxy._is_admin_profile("user-1") is True
+
+
+def test_is_admin_profile_false_on_non_admin(monkeypatch):
+    monkeypatch.setattr(ai_proxy, "get_schema", lambda _schema: _FakeQuery({"userType": "User"}))
+    assert ai_proxy._is_admin_profile("user-1") is False
+
+
 # ─── _session_type_injection ────────────────────────────────────────────────
 
 def test_session_type_injection_academy_tutor():

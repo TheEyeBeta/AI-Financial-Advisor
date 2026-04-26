@@ -19,6 +19,7 @@ class FakeSharedRedisBackend:
         estimated_tokens: int,
         now: float,
         request_id: str,
+        token_limit_exempt: bool = False,
     ):
         key = (identifier, endpoint)
         current_requests = self._request_counts[key]

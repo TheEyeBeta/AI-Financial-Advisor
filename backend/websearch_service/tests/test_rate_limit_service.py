@@ -150,6 +150,50 @@ def test_token_limit_exceeded_returns_descriptive_error():
     assert "Token limit exceeded" in error
 
 
+def test_token_limit_exempt_bypasses_token_quota_checks():
+    svc = RateLimitService()
+    svc._redis_backend = None
+    svc.clear_state()
+
+    config = RateLimitConfig(
+        requests_per_minute=100,
+        tokens_per_minute=10,
+        tokens_per_hour=20,
+        tokens_per_day=30,
+    )
+    req = _make_request()
+    allowed, error, _ = svc.check_rate_limit(
+        req,
+        "/api/chat",
+        estimated_tokens=1000,
+        token_limit_exempt=True,
+        config_override=config,
+    )
+    assert allowed is True
+    assert error is None
+
+
+def test_record_token_usage_noop_when_request_marked_token_exempt():
+    svc = RateLimitService()
+    svc._redis_backend = None
+    svc.clear_state()
+    req = _make_request()
+
+    allowed, _, _ = svc.check_rate_limit(
+        req,
+        "/api/chat",
+        estimated_tokens=5,
+        token_limit_exempt=True,
+    )
+    assert allowed is True
+
+    identifier = svc._get_identifier(req)
+    key = svc._state_key(identifier, "/api/chat")
+    state_before = svc._state[key].tokens_minute
+    svc.record_token_usage(req, tokens_used=500)
+    assert svc._state[key].tokens_minute == state_before
+
+
 def test_blocked_until_rejects_further_requests():
     svc = RateLimitService()
     svc._redis_backend = None
