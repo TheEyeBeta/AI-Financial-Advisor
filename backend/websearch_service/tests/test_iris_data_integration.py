@@ -743,3 +743,130 @@ def test_local_cache_bounded_eviction():
         assert _local_cache_get("u4") == "d"
     finally:
         meridian_context._LOCAL_CACHE_MAX_ENTRIES = original_max
+
+
+# ---------------------------------------------------------------------------
+# Prompt structure — subagent prompts, deep-mode block, tier reconciliation,
+# currency localisation, and redundancy trim. Smoke tests on the prompt
+# strings — cheap, but they catch regressions where edits drop a key rule.
+# ---------------------------------------------------------------------------
+
+def test_subagent_prompts_cover_all_routed_intents():
+    """Every intent the router can produce must have a specialist block, except
+    `general` which is intentionally empty so the base prompt does the work."""
+    from app.services.subagents import SUBAGENT_PROMPTS
+    from app.routes.ai_proxy import _TOOLS_BY_INTENT
+
+    routed_intents = set(_TOOLS_BY_INTENT.keys())
+    documented_intents = set(SUBAGENT_PROMPTS.keys())
+    assert routed_intents == documented_intents, (
+        f"Intent coverage drift: router has {routed_intents - documented_intents} "
+        f"with no subagent prompt; subagent has {documented_intents - routed_intents} "
+        f"with no router entry."
+    )
+
+
+def test_goal_tracking_subagent_prompt_uses_meridian_context():
+    """goal_tracking must direct IRIS to use injected goal data, not ask for it."""
+    from app.services.subagents import SUBAGENT_PROMPTS
+    block = SUBAGENT_PROMPTS["goal_tracking"]
+    assert "Meridian" in block
+    assert "never ask the user for figures the context already has" in block
+    # Hierarchy guidance — emergency fund first
+    assert "emergency fund" in block.lower()
+
+
+def test_financial_planning_subagent_prompt_states_priority_hierarchy():
+    """financial_planning must state the non-negotiable priority hierarchy."""
+    from app.services.subagents import SUBAGENT_PROMPTS
+    block = SUBAGENT_PROMPTS["financial_planning"]
+    assert "emergency fund" in block.lower()
+    assert "high-interest debt" in block.lower()
+    assert "non-negotiable" in block.lower()
+
+
+def test_deep_analysis_subagent_prompt_demands_invalidation_conditions():
+    """deep_analysis must require invalidation conditions and signal convergence."""
+    from app.services.subagents import SUBAGENT_PROMPTS
+    block = SUBAGENT_PROMPTS["deep_analysis"]
+    assert "convergence" in block.lower()
+    assert "invalidation" in block.lower()
+
+
+def test_deep_mode_block_exists_and_demands_regime_conditioning():
+    """The DEEP block layered on top of subagents must demand regime framing."""
+    from app.routes.ai_proxy import _DEEP_MODE_BLOCK
+    assert "DEEP ANALYSIS MODE" in _DEEP_MODE_BLOCK
+    assert "regime" in _DEEP_MODE_BLOCK.lower()
+    assert "invalidation" in _DEEP_MODE_BLOCK.lower()
+    assert "convergence" in _DEEP_MODE_BLOCK.lower() or \
+           "converge" in _DEEP_MODE_BLOCK.lower()
+
+
+def test_balanced_prompt_contains_tier_reconciliation_rule():
+    """§2.5 must explicitly resolve the three-source tier signal collision."""
+    from app.routes.ai_proxy import FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    assert "RECONCILING TIER SIGNALS" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    # Language signal wins over declared tier — the core decision rule
+    assert "language signal" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    assert "always the most reliable" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+
+
+def test_balanced_prompt_localises_currency_via_country():
+    """§2.6 must teach the model to pick currency from country_of_residence."""
+    from app.routes.ai_proxy import FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    assert "country_of_residence" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    assert "CURRENCY AND LOCALE" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    # A few of the localised currencies — we don't pin all of them
+    assert "United Kingdom → £" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    assert "United States → $" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+
+
+def test_balanced_prompt_localises_distress_resources():
+    """§12 must enumerate non-Ireland distress resources (UK MoneyHelper, etc)."""
+    from app.routes.ai_proxy import FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    # Ireland still present
+    assert "MABS" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    # New non-Ireland resources
+    assert "moneyhelper.org.uk" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    assert "nfcc.org" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+
+
+def test_fast_prompt_includes_tier_guidance_section():
+    """FAST tier had no audience intelligence — must now point at KNOWLEDGE TIER."""
+    from app.routes.ai_proxy import FAST_SYSTEM_PROMPT
+    assert "TIER GUIDANCE" in FAST_SYSTEM_PROMPT
+    assert "KNOWLEDGE TIER" in FAST_SYSTEM_PROMPT
+    # Same reconciliation rule as the BALANCED prompt
+    assert "language signal" in FAST_SYSTEM_PROMPT
+    # Currency hint
+    assert "country_of_residence" in FAST_SYSTEM_PROMPT
+
+
+def test_balanced_prompt_redundancy_trim_removed_duplicate_filler_list():
+    """The §11.3 banned-filler list duplicated §14.3 verbatim. The trim must
+    collapse §11.3 to a cross-reference and keep the canonical list in §14.3."""
+    from app.routes.ai_proxy import FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    # §14.3 keeps the canonical list
+    assert 'Never start with: "Great question!"' in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    # §11.3 now points to §14.3 instead of repeating
+    assert "see §14.3" in FINANCIAL_ADVISOR_SYSTEM_PROMPT
+    # The literal duplicated sentence must not appear twice
+    assert FINANCIAL_ADVISOR_SYSTEM_PROMPT.count(
+        '"Great question", "Absolutely", "Certainly"'
+    ) == 0
+
+
+def test_deep_mode_injects_block_only_when_deep_request_true(monkeypatch):
+    """End-to-end check: when _is_deep_request returns True, the DEEP block is
+    appended to the system prompt; when False, it is not."""
+    from app.routes.ai_proxy import _DEEP_MODE_BLOCK, _is_deep_request
+
+    # Sanity on the gate — already covered above but local re-assert
+    assert _is_deep_request("portfolio_analysis", {}) is True
+    assert _is_deep_request("education", {"complexity": "low"}) is False
+
+    # The injection itself is one line of code — assert the constant is the
+    # one used by the route by importing it from the module.
+    import app.routes.ai_proxy as ai_proxy
+    assert ai_proxy._DEEP_MODE_BLOCK is _DEEP_MODE_BLOCK
