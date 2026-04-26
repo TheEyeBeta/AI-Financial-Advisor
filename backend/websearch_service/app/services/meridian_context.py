@@ -30,6 +30,13 @@ from .supabase_client import supabase_client
 logger = logging.getLogger(__name__)
 
 
+_LEGACY_OPTIONAL_IRIS_CACHE_COLUMNS = {
+    "journal_summary",
+    "portfolio_stats",
+    "achievement_summary",
+}
+
+
 def _sanitise_for_prompt(value: str | None, max_length: int = 100) -> str:
     """
     Sanitises user-supplied strings before injecting into AI system prompt.
@@ -53,6 +60,26 @@ def _sanitise_for_prompt(value: str | None, max_length: int = 100) -> str:
     if len(value) > max_length:
         value = value[:max_length] + "..."
     return value.strip() or "not set"
+
+
+def _humanise_profile_label(value: Any) -> Optional[str]:
+    """Convert stored enum-like profile values into user-facing labels."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text.replace("_", " ").replace("-", " ").title()
+
+
+def _extract_missing_postgrest_column(exc: Exception) -> Optional[str]:
+    """Parse a PostgREST missing-column error into the missing column name."""
+    message = str(exc)
+    marker = "Could not find the '"
+    if marker not in message:
+        return None
+    remainder = message.split(marker, 1)[1]
+    return remainder.split("'", 1)[0] or None
 
 
 def _table(client, schema_name: str, table_name: str):
@@ -213,7 +240,7 @@ def _local_cache_get(user_id: str) -> Optional[str]:
     if not entry:
         return None
     written_at, value = entry
-    if (time.monotonic() - written_at) > _LOCAL_TTL_SECONDS:
+    if (time.monotonic() - written_at) >= _LOCAL_TTL_SECONDS:
         _local_cache.pop(user_id, None)
         return None
     return value
@@ -755,28 +782,41 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     try:
         fp_res = (
             _table(client, "meridian", "financial_plans")
-            .select("plan_name, target_amount, target_date, current_amount, status")
+            .select("*")
             .eq("user_id", user_id)
-            .eq("status", "active")
             .order("created_at", desc=True)
-            .limit(1)
+            .limit(20)
             .execute()
         )
         fp_rows = (fp_res and fp_res.data) or []
         if fp_rows:
-            p = fp_rows[0]
-            target_amount = float(p.get("target_amount") or 0)
-            current_amount = float(p.get("current_amount") or 0)
+            p = next((row for row in fp_rows if row.get("status") == "active"), None)
+            if p is None:
+                p = next((row for row in fp_rows if row.get("is_current") is True), fp_rows[0])
+
+            plan_data = p.get("plan_data")
+            plan_data = plan_data if isinstance(plan_data, dict) else {}
+            target_amount = float(
+                p.get("target_amount")
+                or plan_data.get("target_amount")
+                or 0
+            )
+            current_amount = float(
+                p.get("current_amount")
+                or plan_data.get("current_amount")
+                or plan_data.get("saved_amount")
+                or 0
+            )
             pct = (current_amount / target_amount * 100) if target_amount > 0 else 0.0
-            target_date = p.get("target_date")
+            target_date = p.get("target_date") or plan_data.get("target_date")
             if hasattr(target_date, "isoformat"):
                 target_date = target_date.isoformat()
             financial_plan = {
-                "plan_name": p.get("plan_name"),
+                "plan_name": p.get("plan_name") or plan_data.get("plan_name") or plan_data.get("name"),
                 "target_amount": target_amount,
                 "target_date": str(target_date) if target_date else None,
                 "current_amount": current_amount,
-                "status": p.get("status"),
+                "status": p.get("status") or ("active" if p.get("is_current") is True else None),
                 "progress_pct": round(pct, 2),
             }
     except Exception:
@@ -789,7 +829,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         if goal_ids:
             gp_res = (
                 _table(client, "meridian", "goal_progress")
-                .select("goal_id, period, actual_amount, target_amount, on_track")
+                .select("goal_id, on_track")
                 .in_("goal_id", goal_ids)
                 .execute()
             )
@@ -1315,9 +1355,11 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "experience_level": core_user_row.get("experience_level"),
         "risk_level": core_user_row.get("risk_level"),
         "investment_goal": core_user_row.get("investment_goal"),
-        "marital_status": core_user_row.get("marital_status"),
+        "marital_status": _humanise_profile_label(
+            core_user_row.get("marital_status") or profile.get("marital_status")
+        ),
         "country_of_residence": profile.get("country_of_residence"),
-        "employment_status": profile.get("employment_status"),
+        "employment_status": _humanise_profile_label(profile.get("employment_status")),
     }
 
     # 12. Format goals for context injection
@@ -1377,14 +1419,31 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "user_insights": user_insights,
     }
 
-    try:
-        _table(client, "ai", "iris_context_cache").upsert(
-            cache_data,
-            on_conflict="user_id",
-        ).execute()
-    except Exception:
-        logger.exception("DB query failed: ai.iris_context_cache UPSERT for user_id=%s", user_id)
-        raise
+    upsert_payload = dict(cache_data)
+    retryable_missing_columns = set(_LEGACY_OPTIONAL_IRIS_CACHE_COLUMNS)
+    while True:
+        try:
+            _table(client, "ai", "iris_context_cache").upsert(
+                upsert_payload,
+                on_conflict="user_id",
+            ).execute()
+            break
+        except Exception as exc:
+            missing_column = _extract_missing_postgrest_column(exc)
+            if (
+                missing_column in retryable_missing_columns
+                and missing_column in upsert_payload
+            ):
+                logger.warning(
+                    "Legacy ai.iris_context_cache schema missing column %s for user_id=%s; retrying without it",
+                    missing_column,
+                    user_id,
+                )
+                upsert_payload.pop(missing_column, None)
+                retryable_missing_columns.remove(missing_column)
+                continue
+            logger.exception("DB query failed: ai.iris_context_cache UPSERT for user_id=%s", user_id)
+            raise
 
     # The Supabase row is now fresh — invalidate the in-process layer so the
     # next chat turn picks up the new data instead of serving stale strings

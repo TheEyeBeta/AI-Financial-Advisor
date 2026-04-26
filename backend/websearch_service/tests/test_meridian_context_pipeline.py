@@ -325,6 +325,30 @@ class _FakeSupabase:
         return _FakeChain(table_name, self._store)
 
 
+class _LegacyIrisCacheChain(_FakeChain):
+    """Simulate a legacy iris_context_cache table missing newer text columns."""
+
+    def execute(self) -> _FakeResult:
+        if self._op == "upsert" and self._table == "iris_context_cache":
+            missing_once = self._store.setdefault("_missing_cache_columns_seen", set())
+            for column in ("achievement_summary", "journal_summary", "portfolio_stats"):
+                if column in (self._payload or {}) and column not in missing_once:
+                    missing_once.add(column)
+                    raise Exception(
+                        f"Could not find the '{column}' column of 'iris_context_cache' in the schema cache"
+                    )
+        return super().execute()
+
+
+class _LegacyIrisCacheSupabase(_FakeSupabase):
+    """Supabase double whose iris_context_cache lacks the newer text columns."""
+
+    def table(self, table_name: str) -> _FakeChain:
+        if table_name == "iris_context_cache":
+            return _LegacyIrisCacheChain(table_name, self._store)
+        return _FakeChain(table_name, self._store)
+
+
 # ---------------------------------------------------------------------------
 # Default store fixture
 # ---------------------------------------------------------------------------
@@ -545,6 +569,19 @@ def test_cache_upsert_achievement_summary_default():
     assert cached["achievement_summary"] == "None yet"
 
 
+def test_cache_upsert_retries_without_legacy_text_columns():
+    """Legacy iris_context_cache schemas still accept the refresh after retry pruning."""
+    store = _default_store()
+    mock_sb = _LegacyIrisCacheSupabase(store)
+    with patch("app.services.meridian_context.supabase_client", mock_sb):
+        result = _refresh_iris_context_cache_sync(AUTH_ID)
+    assert result is True
+    cached = store["iris_cache"][AUTH_ID]
+    assert "achievement_summary" not in cached
+    assert "journal_summary" not in cached
+    assert "portfolio_stats" not in cached
+
+
 # ---------------------------------------------------------------------------
 # 5. meridian.financial_plans scalar columns
 # ---------------------------------------------------------------------------
@@ -572,6 +609,43 @@ def test_financial_plan_missing_rows_gives_empty_dict():
     assert result is True
     cached = store["iris_cache"][AUTH_ID]
     assert cached.get("financial_plan") == {}
+
+
+def test_financial_plan_legacy_plan_data_supported():
+    """Legacy plan_data/is_current rows still hydrate financial_plan."""
+    store = _default_store()
+    store["financial_plans"] = [
+        {
+            "user_id": AUTH_ID,
+            "plan_data": {
+                "plan_name": "Legacy Plan",
+                "target_amount": 25000.0,
+                "current_amount": 5000.0,
+                "target_date": "2028-01-01",
+            },
+            "is_current": True,
+        }
+    ]
+    mock_sb = _FakeSupabase(store)
+    with patch("app.services.meridian_context.supabase_client", mock_sb):
+        _refresh_iris_context_cache_sync(AUTH_ID)
+    cached = store["iris_cache"][AUTH_ID]
+    fp = cached.get("financial_plan") or {}
+    assert fp.get("plan_name") == "Legacy Plan"
+    assert float(fp.get("target_amount")) == 25000.0
+    assert float(fp.get("current_amount")) == 5000.0
+    assert fp.get("status") == "active"
+
+
+def test_profile_summary_humanises_employment_and_marital_status():
+    """employment_status and marital_status are stored as user-facing labels."""
+    store = _default_store()
+    mock_sb = _FakeSupabase(store)
+    with patch("app.services.meridian_context.supabase_client", mock_sb):
+        _refresh_iris_context_cache_sync(AUTH_ID)
+    summary = store["iris_cache"][AUTH_ID]["profile_summary"]
+    assert summary["employment_status"] == "Employed"
+    assert summary["marital_status"] == "Single"
 
 
 # ---------------------------------------------------------------------------
