@@ -61,6 +61,8 @@ _DEEP_CATEGORIES: frozenset[str] = frozenset({
     "risk_assessment",
     "stock_research",
 })
+MAX_STREAM_TOOL_CALLS = 3
+DEFAULT_TOOL_CHOICE = "auto"
 try:
     OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
 except ValueError:
@@ -1632,6 +1634,7 @@ def _build_openai_chat_stream_payload(
     reasoning_effort: str,
     model: str = OPENAI_CHAT_MODEL,
     tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "model": model,
@@ -1644,7 +1647,8 @@ def _build_openai_chat_stream_payload(
         payload["reasoning_effort"] = reasoning_effort
     if tools:
         payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+        payload["tool_choice"] = tool_choice or DEFAULT_TOOL_CHOICE
+        payload["parallel_tool_calls"] = False
     return payload
 
 
@@ -1672,24 +1676,41 @@ def _tools_for_intent(category: str) -> List[Dict[str, Any]]:
 
 
 def _is_deep_request(subagent_category: str, classification: Dict[str, Any]) -> bool:
-    """Decide whether a BALANCED request warrants the DEEP_MODEL upgrade.
-
-    Triggered by either:
-      - explicit ``deep_analysis`` intent (multi-factor / comparative / "everything"),
-      - a category in ``_DEEP_CATEGORIES`` (portfolio_analysis, risk_assessment,
-        stock_research) — categories the team has marked as needing maximum
-        accuracy,
-      - or the classifier flagging ``complexity=high`` or
-        ``high_risk_decision=true`` even when the intent is generic.
-    """
+    """Decide whether a BALANCED request warrants the DEEP_MODEL upgrade."""
+    _ = classification
     if subagent_category == "deep_analysis":
         return True
     if subagent_category in _DEEP_CATEGORIES:
         return True
-    if classification.get("complexity") == "high":
+    return False
+
+
+def _accumulate_tool_call_delta(
+    tool_calls_acc: Dict[int, Dict[str, Any]],
+    tool_call_delta: Dict[str, Any],
+    *,
+    max_tool_calls: int = MAX_STREAM_TOOL_CALLS,
+) -> bool:
+    """Merge a streamed tool-call delta; return True when the hard cap is reached."""
+    idx = tool_call_delta.get("index", 0) or 0
+    if idx >= max_tool_calls:
         return True
-    if classification.get("high_risk_decision") is True:
-        return True
+
+    slot = tool_calls_acc.setdefault(
+        idx,
+        {
+            "id": "",
+            "type": "function",
+            "function": {"name": "", "arguments": ""},
+        },
+    )
+    if tool_call_delta.get("id"):
+        slot["id"] = tool_call_delta["id"]
+    func = tool_call_delta.get("function") or {}
+    if func.get("name"):
+        slot["function"]["name"] += func["name"]
+    if func.get("arguments"):
+        slot["function"]["arguments"] += func["arguments"]
     return False
 
 
@@ -1751,9 +1772,17 @@ async def _start_chat_completion_stream(
     temperature: float,
     model: str = OPENAI_CHAT_MODEL,
     tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Optional[str] = None,
 ) -> tuple[httpx.AsyncClient, httpx.Response]:
     perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
-    openai_payload = _build_openai_chat_stream_payload(messages, max_output_tokens, reasoning_effort, model, tools=tools)
+    openai_payload = _build_openai_chat_stream_payload(
+        messages,
+        max_output_tokens,
+        reasoning_effort,
+        model,
+        tools=tools,
+        tool_choice=tool_choice,
+    )
     perplexity_payload = _build_perplexity_chat_stream_payload(messages, max_output_tokens, temperature)
 
     try:
@@ -2604,6 +2633,7 @@ async def chat_completion(
                 temperature=request.temperature,
                 model=_chat_model,
                 tools=enabled_tools,
+                tool_choice=DEFAULT_TOOL_CHOICE if enabled_tools else None,
             )
 
             async def generate_stream():
@@ -2612,6 +2642,7 @@ async def chat_completion(
                 usage_entries: List[Dict[str, Any]] = []
                 # Accumulates streamed tool-call deltas indexed by `index` position.
                 tool_calls_acc: Dict[int, Dict[str, Any]] = {}
+                tool_call_cap_reached = False
 
                 async def _consume_stream(
                     response: httpx.Response,
@@ -2619,6 +2650,7 @@ async def chat_completion(
                     accumulate_tool_calls: bool,
                 ):
                     """Drain an SSE stream; emit content deltas, optionally accumulate tool_calls."""
+                    nonlocal tool_call_cap_reached
                     async for line in response.aiter_lines():
                         if not line or not line.startswith("data:"):
                             continue
@@ -2654,22 +2686,15 @@ async def chat_completion(
                                 for tc in tc_deltas:
                                     if not isinstance(tc, dict):
                                         continue
-                                    idx = tc.get("index", 0) or 0
-                                    slot = tool_calls_acc.setdefault(
-                                        idx,
-                                        {
-                                            "id": "",
-                                            "type": "function",
-                                            "function": {"name": "", "arguments": ""},
-                                        },
-                                    )
-                                    if tc.get("id"):
-                                        slot["id"] = tc["id"]
-                                    func = tc.get("function") or {}
-                                    if func.get("name"):
-                                        slot["function"]["name"] += func["name"]
-                                    if func.get("arguments"):
-                                        slot["function"]["arguments"] += func["arguments"]
+                                    if _accumulate_tool_call_delta(tool_calls_acc, tc):
+                                        logger.warning(
+                                            "[TOOLS] tool call cap reached (%d); truncating additional tool calls",
+                                            MAX_STREAM_TOOL_CALLS,
+                                        )
+                                        tool_call_cap_reached = True
+                                        break
+                                if tool_call_cap_reached:
+                                    break
 
                 try:
                     assert upstream_response is not None
@@ -2701,6 +2726,11 @@ async def chat_completion(
                             len(ordered_calls),
                             [c["function"]["name"] for c in ordered_calls],
                         )
+                        if tool_call_cap_reached:
+                            logger.info(
+                                "[TOOLS] proceeding with capped tool execution (%d max)",
+                                MAX_STREAM_TOOL_CALLS,
+                            )
 
                         tool_result_messages: List[Dict[str, Any]] = []
                         for call in ordered_calls:
