@@ -1893,14 +1893,23 @@ async def _fetch_fresh_portfolio(auth_id: str) -> str | None:
         return None
 
 
-# Tier-aware Meridian context fetch. INSTANT and FAST messages never run the
-# full 13-table rebuild — they read the cached row written by the background
-# refresher, fronted by an in-process LRU so warm-path hits are sub-ms.
-# Caps protect cold-path latency: INSTANT 300 ms (typical Supabase row read
-# is 50–100 ms; the cap kicks in only on infrastructure trouble), FAST 1.5 s.
-# BALANCED runs the same call inside the asyncio.gather block, so this helper
+# Tier-aware Meridian context fetch.
+#
+# INSTANT messages are pure conversational atoms ("hi", "thanks", "ok thanks",
+# "continue") that the INSTANT system prompt explicitly forbids from triggering
+# financial analysis — knowing the user's portfolio does not change the reply
+# to "thanks". So INSTANT skips the fetch entirely and stays genuinely instant.
+#
+# FAST messages are short, non-financial questions (under 200 chars, no finance
+# keywords). They benefit from name + tier + risk profile so IRIS can adjust
+# tone, but do not need the full 13-table rebuild. The fetch reads the cached
+# row written by the background refresher, fronted by an in-process LRU so
+# warm-path hits are sub-millisecond. The 1.5 s cap protects cold-path latency
+# only on infrastructure trouble.
+#
+# BALANCED runs the same fetch inside the asyncio.gather block, so this helper
 # returns None for it to avoid duplicate fetches.
-_TIER_MERIDIAN_TIMEOUT_S = {"INSTANT": 0.3, "FAST": 1.5}
+_TIER_MERIDIAN_TIMEOUT_S = {"FAST": 1.5}
 
 
 async def _fetch_meridian_for_tier(tier: str, user_id: Optional[str]) -> Optional[str]:
@@ -2162,24 +2171,18 @@ async def chat_completion(
         # ── Steps 1 & 1b–1d: concurrent pipeline ───────────────────────────────
         # BALANCED  → run all four concurrently via asyncio.gather (saves wall time).
         # FAST      → _classify_query with a hard 2 s timeout cap; serve cached Meridian.
-        # INSTANT   → skip the LLM-heavy classifiers but still serve cached Meridian
-        #             context with a tight timeout. The cache lookup is one Supabase
-        #             row, so the latency cost on a "hi" reply is sub-second and the
-        #             user gets a personalised greeting that knows their name, goals,
-        #             and portfolio.
+        # INSTANT   → pure conversational atoms ("hi", "thanks", "continue"); the
+        #             INSTANT system prompt forbids financial analysis, so user
+        #             context would not change the reply. Skip everything and keep
+        #             the response genuinely instant.
         fresh_goals_data: Optional[str] = None
         fresh_portfolio_data: Optional[str] = None
         if message_tier == "INSTANT":
             logger.info("[TIER] INSTANT: skipped _classify_query")
             classification: Dict[str, Any] = _default_classification
             reasoning_effort = _default_reasoning_effort
-            meridian_context: Optional[str] = await _fetch_meridian_for_tier(
-                "INSTANT", verified_user_id
-            )
-            logger.info(
-                "[TIER] INSTANT: meridian=%s",
-                "present" if meridian_context else "None",
-            )
+            meridian_context: Optional[str] = None
+            logger.info("[TIER] INSTANT: skipped Meridian context")
 
         elif message_tier == "FAST":
             logger.info(

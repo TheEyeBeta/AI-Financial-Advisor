@@ -474,31 +474,27 @@ def test_cache_stale_zero_or_negative_env_falls_back_to_default(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Tier gating — INSTANT and FAST must still serve cached user context
+# Tier gating — INSTANT skips context entirely, FAST/BALANCED feed it
 # ---------------------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_instant_tier_serves_cached_meridian_context(monkeypatch):
-    """INSTANT messages still get the cached Meridian block — only the
-    LLM-heavy classifiers (query / intent / market) are skipped."""
+async def test_instant_tier_skips_meridian_fetch(monkeypatch):
+    """INSTANT messages are pure conversational atoms (hi/thanks/continue);
+    the INSTANT system prompt forbids financial analysis, so the helper
+    must not pay any Supabase round-trip on this path."""
     from app.routes.ai_proxy import _fetch_meridian_for_tier
 
-    captured = {}
+    async def _should_not_be_called(_uid):
+        raise AssertionError("INSTANT must not fetch Meridian context")
 
-    async def _fake_build(uid):
-        captured["called_with"] = uid
-        return "MERIDIAN — Alice Tester block"
-
-    monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _fake_build)
-
-    result = await _fetch_meridian_for_tier("INSTANT", AUTH_ID)
-    assert result == "MERIDIAN — Alice Tester block"
-    assert captured["called_with"] == AUTH_ID
+    monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _should_not_be_called)
+    assert await _fetch_meridian_for_tier("INSTANT", AUTH_ID) is None
 
 
 @pytest.mark.asyncio
 async def test_fast_tier_serves_cached_meridian_context(monkeypatch):
-    """FAST tier also serves the cached Meridian block, with its own timeout."""
+    """FAST tier serves the cached Meridian block (name, tier, risk profile)
+    so IRIS can adjust tone for short non-financial questions."""
     from app.routes.ai_proxy import _fetch_meridian_for_tier
 
     async def _fake_build(_uid):
@@ -523,8 +519,8 @@ async def test_balanced_tier_skips_helper_runs_in_gather(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_instant_tier_does_not_block_on_slow_cache_fetch(monkeypatch):
-    """If the cache fetch exceeds the INSTANT cap (300ms) the helper returns
+async def test_fast_tier_does_not_block_on_slow_cache_fetch(monkeypatch):
+    """If the cache fetch exceeds the FAST cap (1.5s) the helper returns
     None instead of blocking the chat reply."""
     import asyncio
     import time
@@ -536,16 +532,16 @@ async def test_instant_tier_does_not_block_on_slow_cache_fetch(monkeypatch):
 
     monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _slow_build)
     t0 = time.perf_counter()
-    result = await _fetch_meridian_for_tier("INSTANT", AUTH_ID)
+    result = await _fetch_meridian_for_tier("FAST", AUTH_ID)
     elapsed = time.perf_counter() - t0
 
     assert result is None
-    # 300ms cap plus generous slack for asyncio scheduling on busy CI
-    assert elapsed < 1.0, f"INSTANT helper blocked too long ({elapsed:.2f}s)"
+    # 1.5s cap plus generous slack for asyncio scheduling on busy CI
+    assert elapsed < 2.5, f"FAST helper blocked too long ({elapsed:.2f}s)"
 
 
 @pytest.mark.asyncio
-async def test_per_tier_helper_swallows_exceptions(monkeypatch):
+async def test_fast_helper_swallows_exceptions(monkeypatch):
     """A failure inside build_iris_context never propagates to the chat path."""
     from app.routes.ai_proxy import _fetch_meridian_for_tier
 
@@ -553,7 +549,6 @@ async def test_per_tier_helper_swallows_exceptions(monkeypatch):
         raise RuntimeError("supabase down")
 
     monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _broken_build)
-    assert await _fetch_meridian_for_tier("INSTANT", AUTH_ID) is None
     assert await _fetch_meridian_for_tier("FAST", AUTH_ID) is None
 
 
