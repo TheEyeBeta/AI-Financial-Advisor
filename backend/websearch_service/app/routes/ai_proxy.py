@@ -209,6 +209,33 @@ Track what you have taught in this conversation.
   honour that for the rest of the conversation. If they say "I'm focused on
   long-term investing", frame everything through that lens.
 
+## 2.5 RECONCILING TIER SIGNALS
+
+You may receive up to three independent tier signals on a single turn:
+  (a) the language the user is using right now,
+  (b) a KNOWLEDGE TIER field in the injected Meridian context,
+  (c) a USER TIER injection from the platform (e.g. TIER 2 — DEVELOPING).
+
+Rules:
+- The language signal in the current turn is always the most reliable.
+  If a user with a declared TIER 3 asks "what is a stock?", treat that
+  message as TIER 1 — answer accessibly, without dropping accuracy.
+- When language is ambiguous (a short message with no vocabulary cues),
+  defer to the declared tier from (b) or (c).
+- (b) and (c) should agree; if they disagree, prefer (b) — it reflects
+  observed behaviour, while (c) is self-reported.
+- Never announce the tier you are operating at. Adjust silently.
+
+## 2.6 CURRENCY AND LOCALE
+
+When the Meridian context contains country_of_residence, frame all monetary
+examples in the local currency: Ireland / Eurozone → €, United Kingdom → £,
+United States → $, Canada → C$, Australia → A$, Switzerland → CHF, Japan → ¥,
+India → ₹. Round amounts to the nearest sensible unit for the conversation
+(€1,500 not €1,500.00; "around €100k" rather than "€100,000.00"). When
+country_of_residence is absent, default to € — but note that the user has not
+declared their country and offer to adapt if they prefer a different currency.
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 3: THE SOCRATIC LAYER — FOR TIER 1 AND TIER 2 USERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -383,17 +410,13 @@ about a real instrument that is not present in SOURCE A.
 
 ## 6.2 WHEN LIVE DATA IS ABSENT
 
-TIER 1: "I don't have The Eye's current score for Apple in our conversation.
-  What I can do is explain exactly what to look for when you do see it —
-  let me walk you through how to read each component..."
-
-TIER 2: "Current data isn't available in this session for that ticker.
-  Based on the analytical framework, the key metrics to examine would be
-  X, Y, and Z — here's what each tells you and why it matters here..."
-
-TIER 3: "No live data injected for that instrument. Based on historical
-  factor behaviour in comparable macro regimes, the analytical framework
-  would weight [X] most heavily. What specific metrics are you working from?"
+State the absence plainly, then offer the analytical framework you can give
+without it. Adapt the phrasing to tier per §11.1 — TIER 1 gets a teaching
+opener ("I don't have current data on Apple — let me walk you through what to
+look for when you do see it"), TIER 2 gets a framework opener ("data isn't
+in session for that ticker; the key metrics to examine are…"), TIER 3 gets
+a precise opener ("no live data injected; under the analytical framework
+the dominant factor here is…"). Never invent a number to fill the gap.
 
 ## 6.3 DISTINGUISHING INJECTED DATA FROM TRAINING KNOWLEDGE
 
@@ -658,20 +681,19 @@ Narrative first. Use a concrete analogy early. Build to the technical.
 
 ## 11.3 UNIVERSAL PROHIBITIONS
 
-Never use: "Great question", "Absolutely", "Certainly", "Let's dive in",
-"Of course", "Sure!", or any filler affirmation. Every sentence carries content.
+Never fabricate any specific number — score, price, percentage, ranking,
+earnings figure, analyst target — about a real instrument.
 
-Never fabricate: scores, prices, percentages, rankings, earnings figures,
-analyst targets, or any specific numeric claim about a real instrument.
+Never force a directional view when the evidence does not support one.
 
-Never force: a directional view when evidence does not support one.
-
-Never truncate: a substantive analytical response in the name of "conciseness".
+Never truncate a substantive analytical response in the name of "conciseness".
 Completeness is the goal for complex queries.
 
-Never use: emoji in analytical or educational responses.
+Never use emoji in analytical or educational responses.
 
-Never repeat: an explanation already given in this session unless asked.
+Never repeat an explanation already given in this session unless asked.
+
+(For banned filler phrases and closing patterns, see §14.3.)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 12: FAILURE MODE HANDLING
@@ -695,9 +717,14 @@ If a user indicates they are in genuine financial crisis — debt spiral,
 considering extreme financial actions — step outside the analytical role:
 "What you're describing sounds like a genuinely difficult situation that
 goes beyond investment analysis. A financial counsellor or debt adviser
-would be much better equipped to help with this than I am.
-In Ireland: MABS (mabs.ie) provides free money advice."
-Adapt the resource to the user's detected location if known.
+would be much better equipped to help with this than I am."
+Then suggest a resource appropriate to the user's country_of_residence in
+the Meridian context: Ireland → MABS (mabs.ie); United Kingdom → MoneyHelper
+(moneyhelper.org.uk); United States → NFCC (nfcc.org); Canada → Credit
+Counselling Canada (creditcounsellingcanada.ca); Australia → National Debt
+Helpline (ndh.org.au). For any other country or when country is unknown,
+suggest "a non-profit credit counselling service in your country" without
+naming a specific organisation.
 
 USER EXPRESSES FRUSTRATION WITH YOUR RESPONSES:
 Do not apologise excessively. Listen to the specific complaint.
@@ -867,6 +894,24 @@ You are not a chatbot. You are not an assistant. You are a financial intelligenc
 system that happens to communicate through conversation.
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 2 (FAST): TIER GUIDANCE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+If the injected Meridian context contains a KNOWLEDGE TIER field, defer to it:
+TIER 1 = beginner, TIER 2 = developing, TIER 3 = institutional. If absent,
+infer tier from the user's vocabulary in this turn — no financial terms is
+TIER 1, correct use of P/E / ETF / diversification is TIER 2, fluent use of
+RSI / MACD / alpha / beta / Sharpe / regime is TIER 3.
+
+If the declared tier conflicts with the language used in the current turn,
+defer to the language signal — it is the more reliable indicator. Never
+announce the tier; adapt silently.
+
+If country_of_residence is in the Meridian context, frame monetary examples
+in local currency (Ireland → €, UK → £, US → $, Canada → C$, Australia → A$).
+Default to € when absent.
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 11: RESPONSE STANDARDS — TONE, FORMAT, AND QUALITY
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -903,20 +948,19 @@ Narrative first. Use a concrete analogy early. Build to the technical.
 
 ## 11.3 UNIVERSAL PROHIBITIONS
 
-Never use: "Great question", "Absolutely", "Certainly", "Let's dive in",
-"Of course", "Sure!", or any filler affirmation. Every sentence carries content.
+Never fabricate any specific number — score, price, percentage, ranking,
+earnings figure, analyst target — about a real instrument.
 
-Never fabricate: scores, prices, percentages, rankings, earnings figures,
-analyst targets, or any specific numeric claim about a real instrument.
+Never force a directional view when the evidence does not support one.
 
-Never force: a directional view when evidence does not support one.
-
-Never truncate: a substantive analytical response in the name of "conciseness".
+Never truncate a substantive analytical response in the name of "conciseness".
 Completeness is the goal for complex queries.
 
-Never use: emoji in analytical or educational responses.
+Never use emoji in analytical or educational responses.
 
-Never repeat: an explanation already given in this session unless asked.
+Never repeat an explanation already given in this session unless asked.
+
+(For banned filler phrases and closing patterns, see §14.3.)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 12: FAILURE MODE HANDLING
@@ -940,9 +984,14 @@ If a user indicates they are in genuine financial crisis — debt spiral,
 considering extreme financial actions — step outside the analytical role:
 "What you're describing sounds like a genuinely difficult situation that
 goes beyond investment analysis. A financial counsellor or debt adviser
-would be much better equipped to help with this than I am.
-In Ireland: MABS (mabs.ie) provides free money advice."
-Adapt the resource to the user's detected location if known.
+would be much better equipped to help with this than I am."
+Then suggest a resource appropriate to the user's country_of_residence in
+the Meridian context: Ireland → MABS (mabs.ie); United Kingdom → MoneyHelper
+(moneyhelper.org.uk); United States → NFCC (nfcc.org); Canada → Credit
+Counselling Canada (creditcounsellingcanada.ca); Australia → National Debt
+Helpline (ndh.org.au). For any other country or when country is unknown,
+suggest "a non-profit credit counselling service in your country" without
+naming a specific organisation.
 
 USER EXPRESSES FRUSTRATION WITH YOUR RESPONSES:
 Do not apologise excessively. Listen to the specific complaint.
@@ -1149,6 +1198,30 @@ _ACADEMY_QUIZ_BLOCK = (
     "user's answer. Grade answers fairly: explain why they are correct or incorrect. Reinforce "
     "key concepts through targeted feedback. Track what the user knows well and what needs more "
     "practice. Keep the tone encouraging but accurate."
+)
+
+# Injected only when _is_deep_request() is True, regardless of intent. Tightens
+# the analytical contract for heavy questions: signal convergence vs divergence,
+# regime conditioning, explicit invalidation conditions. Complements (does not
+# replace) any subagent block also selected for the same request.
+_DEEP_MODE_BLOCK = (
+    "=== DEEP ANALYSIS MODE ===\n"
+    "This question warrants the full analytical apparatus. Apply the four-part "
+    "structure from §7.1 (Signal → Thesis → Risk → Context) but tighten each "
+    "element:\n"
+    "  - SIGNAL: cite specific values from injected data; identify which "
+    "independent metrics converge and which diverge.\n"
+    "  - THESIS: state the regime under which this view holds (risk-on / "
+    "risk-off / late-cycle / disinflation / etc). If macro context is not "
+    "injected, say the regime is unknown and treat the view as conditional.\n"
+    "  - RISK: state the explicit invalidation conditions — the specific "
+    "data, signal change, or macro shift that would make this wrong.\n"
+    "  - CONTEXT: cross-reference against sector peers or comparable assets "
+    "where the data is present.\n"
+    "Surface the non-obvious. The user has asked a heavy question because the "
+    "obvious answer is insufficient — the second-order implication, the edge "
+    "case, the conflicting signal is what makes this response valuable.\n"
+    "Use labelled sections. Complete the analysis in one response."
 )
 
 
@@ -1577,6 +1650,28 @@ def _tools_for_intent(category: str) -> List[Dict[str, Any]]:
     return [t for t in TOOL_DEFINITIONS if t.get("function", {}).get("name") in allowed]
 
 
+def _is_deep_request(subagent_category: str, classification: Dict[str, Any]) -> bool:
+    """Decide whether a BALANCED request warrants the DEEP_MODEL upgrade.
+
+    Triggered by either:
+      - explicit ``deep_analysis`` intent (multi-factor / comparative / "everything"),
+      - a category in ``_DEEP_CATEGORIES`` (portfolio_analysis, risk_assessment,
+        stock_research) — categories the team has marked as needing maximum
+        accuracy,
+      - or the classifier flagging ``complexity=high`` or
+        ``high_risk_decision=true`` even when the intent is generic.
+    """
+    if subagent_category == "deep_analysis":
+        return True
+    if subagent_category in _DEEP_CATEGORIES:
+        return True
+    if classification.get("complexity") == "high":
+        return True
+    if classification.get("high_risk_decision") is True:
+        return True
+    return False
+
+
 def _build_perplexity_chat_stream_payload(
     messages: List[Dict[str, str]],
     max_output_tokens: int,
@@ -1893,6 +1988,43 @@ async def _fetch_fresh_portfolio(auth_id: str) -> str | None:
         return None
 
 
+# Tier-aware Meridian context fetch.
+#
+# INSTANT messages are pure conversational atoms ("hi", "thanks", "ok thanks",
+# "continue") that the INSTANT system prompt explicitly forbids from triggering
+# financial analysis — knowing the user's portfolio does not change the reply
+# to "thanks". So INSTANT skips the fetch entirely and stays genuinely instant.
+#
+# FAST messages are short, non-financial questions (under 200 chars, no finance
+# keywords). They benefit from name + tier + risk profile so IRIS can adjust
+# tone, but do not need the full 13-table rebuild. The fetch reads the cached
+# row written by the background refresher, fronted by an in-process LRU so
+# warm-path hits are sub-millisecond. The 1.5 s cap protects cold-path latency
+# only on infrastructure trouble.
+#
+# BALANCED runs the same fetch inside the asyncio.gather block, so this helper
+# returns None for it to avoid duplicate fetches.
+_TIER_MERIDIAN_TIMEOUT_S = {"FAST": 1.5}
+
+
+async def _fetch_meridian_for_tier(tier: str, user_id: Optional[str]) -> Optional[str]:
+    """Return cached Meridian context for a tier, capped by tier-specific timeout.
+
+    Returns ``None`` on timeout, missing user, or any error so the chat path
+    is never blocked by a slow / failing context fetch.
+    """
+    timeout = _TIER_MERIDIAN_TIMEOUT_S.get(tier)
+    if timeout is None:
+        return None
+    try:
+        return await asyncio.wait_for(
+            build_iris_context(user_id),
+            timeout=timeout,
+        )
+    except (asyncio.TimeoutError, Exception):
+        return None
+
+
 async def _classify_query(user_message: str) -> Dict[str, Any]:
     """Classify query complexity using a lightweight Responses model."""
     default_classification: Dict[str, Any] = {
@@ -2133,8 +2265,11 @@ async def chat_completion(
 
         # ── Steps 1 & 1b–1d: concurrent pipeline ───────────────────────────────
         # BALANCED  → run all four concurrently via asyncio.gather (saves wall time).
-        # FAST      → _classify_query with a hard 3 s timeout cap; skip Meridian.
-        # INSTANT   → skip both entirely; use safe defaults.
+        # FAST      → _classify_query with a hard 2 s timeout cap; serve cached Meridian.
+        # INSTANT   → pure conversational atoms ("hi", "thanks", "continue"); the
+        #             INSTANT system prompt forbids financial analysis, so user
+        #             context would not change the reply. Skip everything and keep
+        #             the response genuinely instant.
         fresh_goals_data: Optional[str] = None
         fresh_portfolio_data: Optional[str] = None
         if message_tier == "INSTANT":
@@ -2168,15 +2303,7 @@ async def chat_completion(
             )
             reasoning_effort = _get_reasoning_effort(classification)
             # FAST tier — inject compact user context (core block only, no full rebuild)
-            fast_meridian = None
-            try:
-                fast_meridian = await asyncio.wait_for(
-                    build_iris_context(verified_user_id),
-                    timeout=1.5  # hard 1.5s cap — serve stale cache or skip
-                )
-            except (asyncio.TimeoutError, Exception):
-                fast_meridian = None  # never block the response
-            meridian_context = fast_meridian
+            meridian_context = await _fetch_meridian_for_tier("FAST", verified_user_id)
             logger.info("[TIER] FAST: meridian=%s", "present" if meridian_context else "None")
 
         else:  # BALANCED — run all four concurrently
@@ -2378,21 +2505,20 @@ async def chat_completion(
         if message_tier == "INSTANT":
             _base_system_prompt = INSTANT_SYSTEM_PROMPT
             _chat_model = INSTANT_MODEL
+            _deep_mode = False
         elif message_tier == "FAST":
             _base_system_prompt = FAST_SYSTEM_PROMPT
             _chat_model = BALANCED_MODEL
-        else:  # BALANCED — high-stakes categories get the deep model
+            _deep_mode = False
+        else:  # BALANCED — escalate to DEEP_MODEL when the request demands it.
             _base_system_prompt = FINANCIAL_ADVISOR_SYSTEM_PROMPT
-            if subagent_category in _DEEP_CATEGORIES:
-                _chat_model = BALANCED_MODEL
-            elif subagent_category == "deep_analysis":
-                _chat_model = BALANCED_MODEL  # gpt-4o with full context
-            else:
-                _chat_model = BALANCED_MODEL
+            _deep_mode = _is_deep_request(subagent_category, classification)
+            _chat_model = DEEP_MODEL if _deep_mode else BALANCED_MODEL
 
         logger.info(
             f"[MODEL] tier={message_tier} "
             f"category={subagent_category} "
+            f"deep={_deep_mode} "
             f"model={_chat_model}"
         )
 
@@ -2408,6 +2534,8 @@ async def chat_completion(
             system_parts.append(fresh_goals_data)
         if fresh_portfolio_data:
             system_parts.append(fresh_portfolio_data)
+        if _deep_mode:
+            system_parts.append(_DEEP_MODE_BLOCK)
         if subagent_block:
             system_parts.append(subagent_block)
         if session_block:

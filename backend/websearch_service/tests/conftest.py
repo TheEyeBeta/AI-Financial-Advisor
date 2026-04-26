@@ -86,3 +86,14 @@ def mock_audit_log_path(tmp_path, monkeypatch):
     log_path = tmp_path / "audit.jsonl"
     monkeypatch.setenv("AI_AUDIT_LOG_PATH", str(log_path))
     return log_path
+
+
+@pytest.fixture(autouse=True)
+def _clear_iris_local_cache():
+    """The IRIS context layer keeps an in-process LRU keyed by user_id;
+    clear it between tests so seeded supabase doubles aren't bypassed by a
+    stale formatted block left over from a previous test."""
+    from app.services import meridian_context
+    meridian_context._local_cache.clear()
+    yield
+    meridian_context._local_cache.clear()
