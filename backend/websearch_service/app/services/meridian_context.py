@@ -21,8 +21,9 @@ import asyncio
 import json
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .supabase_client import supabase_client
 
@@ -196,12 +197,50 @@ def _schedule_background_refresh(user_id: str) -> None:
     loop.create_task(refresh_iris_context_cache(user_id))
 
 
+# ── In-process cache for the formatted context block ─────────────────────────
+# The Supabase row in ai.iris_context_cache is the durable cache; this is an
+# extra layer in front of it so a chat session bursting messages does not pay
+# the 50–100ms Supabase round-trip on every turn. Sub-millisecond hits make
+# personalised context viable on INSTANT messages without measurable latency.
+# Eviction: explicit refresh writes always invalidate the matching key.
+_LOCAL_TTL_SECONDS = float(os.environ.get("IRIS_LOCAL_CACHE_TTL_SECONDS", "60"))
+_LOCAL_CACHE_MAX_ENTRIES = 1024  # bounded so a runaway worker can't OOM
+_local_cache: Dict[str, Tuple[float, str]] = {}
+
+
+def _local_cache_get(user_id: str) -> Optional[str]:
+    entry = _local_cache.get(user_id)
+    if not entry:
+        return None
+    written_at, value = entry
+    if (time.monotonic() - written_at) > _LOCAL_TTL_SECONDS:
+        _local_cache.pop(user_id, None)
+        return None
+    return value
+
+
+def _local_cache_set(user_id: str, value: str) -> None:
+    if len(_local_cache) >= _LOCAL_CACHE_MAX_ENTRIES:
+        # Evict the oldest entry — simple O(n) sweep, fine at this size.
+        oldest = min(_local_cache.items(), key=lambda kv: kv[1][0])[0]
+        _local_cache.pop(oldest, None)
+    _local_cache[user_id] = (time.monotonic(), value)
+
+
+def _local_cache_evict(user_id: str) -> None:
+    _local_cache.pop(user_id, None)
+
+
 async def build_iris_context(user_id: Optional[str]) -> str:
     """
     Fetches user's Meridian context from ai.iris_context_cache.
     Returns a formatted string prepended to FINANCIAL_ADVISOR_SYSTEM_PROMPT.
 
-    Non-blocking policy:
+    Two-layer cache:
+      1. In-process (60s TTL by default) — sub-ms hits across a chat burst.
+      2. Supabase ai.iris_context_cache — durable across processes / replicas.
+
+    Non-blocking policy on layer 2:
       - Fresh cache hit  → serve it.
       - Stale cache hit  → serve it, schedule async refresh.
       - Cache miss       → serve minimal context from core.users, schedule async refresh.
@@ -212,6 +251,10 @@ async def build_iris_context(user_id: Optional[str]) -> str:
     if not user_id:
         return ""
 
+    cached = _local_cache_get(user_id)
+    if cached is not None:
+        return cached
+
     try:
         data = await asyncio.to_thread(_fetch_iris_cache_sync, user_id)
 
@@ -219,7 +262,9 @@ async def build_iris_context(user_id: Optional[str]) -> str:
             if _is_cache_stale(data.get("updated_at")):
                 logger.info("IRIS cache stale for user %s — scheduling async refresh", user_id)
                 _schedule_background_refresh(user_id)
-            return _format_context_block(data)
+            block = _format_context_block(data)
+            _local_cache_set(user_id, block)
+            return block
 
         # Cache miss — never block the chat. Build a minimal context from
         # core.users (name + tier) so IRIS still greets the user personally,
@@ -228,7 +273,10 @@ async def build_iris_context(user_id: Optional[str]) -> str:
         _schedule_background_refresh(user_id)
 
         minimal = await asyncio.to_thread(_build_minimal_context_sync, user_id)
-        return minimal or ""
+        result = minimal or ""
+        if result:
+            _local_cache_set(user_id, result)
+        return result
     except Exception as exc:
         logger.debug("Meridian context unavailable for user %s: %s", user_id, exc)
         return ""
@@ -1338,19 +1386,26 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         logger.exception("DB query failed: ai.iris_context_cache UPSERT for user_id=%s", user_id)
         raise
 
+    # The Supabase row is now fresh — invalidate the in-process layer so the
+    # next chat turn picks up the new data instead of serving stale strings
+    # from the local TTL window.
+    _local_cache_evict(user_id)
     return True
 
 
 async def refresh_iris_context_cache(user_id: str) -> None:
     """
     Reads core.user_profiles + meridian.user_goals + meridian.risk_alerts,
-    computes enriched context, upserts ai.iris_context_cache.
+    computes enriched context, upserts ai.iris_context_cache, and evicts
+    the in-process cache so the next chat turn re-reads the fresh row.
+
     Logs success at INFO, failure at ERROR. Never raises.
     """
     if not user_id:
         return
     try:
         await asyncio.to_thread(_refresh_iris_context_cache_sync, user_id)
+        _local_cache_evict(user_id)
         logger.info("Refreshed ai.iris_context_cache for user_id=%s", user_id)
     except Exception as exc:
         logger.error("Failed to refresh ai.iris_context_cache for user_id=%s: %s", user_id, exc)

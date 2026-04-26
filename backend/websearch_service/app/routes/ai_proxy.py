@@ -1895,10 +1895,12 @@ async def _fetch_fresh_portfolio(auth_id: str) -> str | None:
 
 # Tier-aware Meridian context fetch. INSTANT and FAST messages never run the
 # full 13-table rebuild — they read the cached row written by the background
-# refresher. The cap guarantees a slow Supabase response never blocks the
-# chat reply. BALANCED runs the same call inside the asyncio.gather block, so
-# this helper is only used for INSTANT/FAST.
-_TIER_MERIDIAN_TIMEOUT_S = {"INSTANT": 0.8, "FAST": 1.5}
+# refresher, fronted by an in-process LRU so warm-path hits are sub-ms.
+# Caps protect cold-path latency: INSTANT 300 ms (typical Supabase row read
+# is 50–100 ms; the cap kicks in only on infrastructure trouble), FAST 1.5 s.
+# BALANCED runs the same call inside the asyncio.gather block, so this helper
+# returns None for it to avoid duplicate fetches.
+_TIER_MERIDIAN_TIMEOUT_S = {"INSTANT": 0.3, "FAST": 1.5}
 
 
 async def _fetch_meridian_for_tier(tier: str, user_id: Optional[str]) -> Optional[str]:

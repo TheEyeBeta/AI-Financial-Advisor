@@ -524,7 +524,7 @@ async def test_balanced_tier_skips_helper_runs_in_gather(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_instant_tier_does_not_block_on_slow_cache_fetch(monkeypatch):
-    """If the cache fetch exceeds the 0.8s INSTANT cap the helper returns
+    """If the cache fetch exceeds the INSTANT cap (300ms) the helper returns
     None instead of blocking the chat reply."""
     import asyncio
     import time
@@ -540,8 +540,8 @@ async def test_instant_tier_does_not_block_on_slow_cache_fetch(monkeypatch):
     elapsed = time.perf_counter() - t0
 
     assert result is None
-    # 0.8s cap with generous slack for scheduling
-    assert elapsed < 1.5, f"INSTANT helper blocked too long ({elapsed:.2f}s)"
+    # 300ms cap plus generous slack for asyncio scheduling on busy CI
+    assert elapsed < 1.0, f"INSTANT helper blocked too long ({elapsed:.2f}s)"
 
 
 @pytest.mark.asyncio
@@ -555,3 +555,142 @@ async def test_per_tier_helper_swallows_exceptions(monkeypatch):
     monkeypatch.setattr("app.routes.ai_proxy.build_iris_context", _broken_build)
     assert await _fetch_meridian_for_tier("INSTANT", AUTH_ID) is None
     assert await _fetch_meridian_for_tier("FAST", AUTH_ID) is None
+
+
+# ---------------------------------------------------------------------------
+# In-process cache — hit/miss/eviction
+# (autouse cache-clearing fixture lives in tests/conftest.py)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_local_cache_first_hit_reads_supabase_then_caches(monkeypatch):
+    """First call goes to Supabase; subsequent calls within TTL are sub-ms hits."""
+    from app.services.meridian_context import build_iris_context
+
+    calls = {"count": 0}
+
+    def _fake_fetch(uid):
+        calls["count"] += 1
+        return {
+            "user_id": uid,
+            "updated_at": _ts(hours_ago=0.05),  # 3 minutes — fresh
+            "profile_summary": {"first_name": "Alice", "risk_profile": "moderate"},
+            "active_goals": [],
+            "active_alerts": [],
+            "knowledge_tier": 2,
+            "financial_plan": {},
+            "goal_progress_summary": {},
+            "intelligence_digest": {},
+            "life_events": [],
+            "user_positions": [],
+            "trading_positions": [],
+            "closed_trades": [],
+            "journal_summary": "",
+            "portfolio_stats": "",
+            "achievement_summary": "",
+            "academy_progress": {},
+            "recent_chat_summaries": [],
+            "user_insights": [],
+        }
+
+    monkeypatch.setattr(meridian_context, "_fetch_iris_cache_sync", _fake_fetch)
+
+    first = await build_iris_context(AUTH_ID)
+    second = await build_iris_context(AUTH_ID)
+    third = await build_iris_context(AUTH_ID)
+
+    assert "Alice" in first
+    assert first == second == third
+    assert calls["count"] == 1, "Supabase was hit more than once for the same user"
+
+
+@pytest.mark.asyncio
+async def test_local_cache_evicted_after_explicit_refresh(monkeypatch):
+    """A frontend-triggered refresh must invalidate the in-process layer so the
+    user sees fresh data on the next chat turn instead of a stale 60s window."""
+    from app.services.meridian_context import build_iris_context
+
+    profile_name = {"value": "Alice"}
+
+    def _fake_fetch(uid):
+        return {
+            "user_id": uid,
+            "updated_at": _ts(hours_ago=0.05),
+            "profile_summary": {"first_name": profile_name["value"], "risk_profile": "moderate"},
+            "active_goals": [],
+            "active_alerts": [],
+            "knowledge_tier": 2,
+            "financial_plan": {},
+            "goal_progress_summary": {},
+            "intelligence_digest": {},
+            "life_events": [],
+            "user_positions": [],
+            "trading_positions": [],
+            "closed_trades": [],
+            "journal_summary": "",
+            "portfolio_stats": "",
+            "achievement_summary": "",
+            "academy_progress": {},
+            "recent_chat_summaries": [],
+            "user_insights": [],
+        }
+
+    monkeypatch.setattr(meridian_context, "_fetch_iris_cache_sync", _fake_fetch)
+
+    first = await build_iris_context(AUTH_ID)
+    assert "Alice" in first
+
+    # Simulate the user updating their profile — Supabase row is now different
+    profile_name["value"] = "Alicia"
+    # Without eviction the local cache would still serve "Alice" for up to 60s.
+    meridian_context._local_cache_evict(AUTH_ID)
+
+    refreshed = await build_iris_context(AUTH_ID)
+    assert "Alicia" in refreshed
+    assert "Alice" not in refreshed.replace("Alicia", "")
+
+
+def test_local_cache_evicted_by_sync_refresh(monkeypatch):
+    """_refresh_iris_context_cache_sync must invalidate the in-process layer."""
+    from app.services.meridian_context import _local_cache_set, _local_cache_get
+
+    _local_cache_set(AUTH_ID, "stale-string")
+    assert _local_cache_get(AUTH_ID) == "stale-string"
+
+    store = _default_store()
+    mock_sb = _FakeSupabase(store)
+    with patch("app.services.meridian_context.supabase_client", mock_sb):
+        _refresh_iris_context_cache_sync(AUTH_ID)
+
+    assert _local_cache_get(AUTH_ID) is None, \
+        "sync refresh did not evict the in-process cache"
+
+
+def test_local_cache_ttl_expiry(monkeypatch):
+    """Entries older than the TTL are dropped on next read."""
+    from app.services.meridian_context import _local_cache_set, _local_cache_get
+
+    _local_cache_set(AUTH_ID, "value")
+    assert _local_cache_get(AUTH_ID) == "value"
+
+    # Tighten TTL to 0 — every subsequent read counts as expired
+    monkeypatch.setattr(meridian_context, "_LOCAL_TTL_SECONDS", 0.0)
+    assert _local_cache_get(AUTH_ID) is None
+
+
+def test_local_cache_bounded_eviction():
+    """When the cache reaches its max size the oldest entry is evicted."""
+    from app.services.meridian_context import _local_cache_set, _local_cache_get
+
+    # Force a tiny cap for the test
+    original_max = meridian_context._LOCAL_CACHE_MAX_ENTRIES
+    meridian_context._LOCAL_CACHE_MAX_ENTRIES = 3
+    try:
+        _local_cache_set("u1", "a")
+        _local_cache_set("u2", "b")
+        _local_cache_set("u3", "c")
+        _local_cache_set("u4", "d")  # triggers eviction of u1
+        assert _local_cache_get("u1") is None
+        assert _local_cache_get("u4") == "d"
+    finally:
+        meridian_context._LOCAL_CACHE_MAX_ENTRIES = original_max
