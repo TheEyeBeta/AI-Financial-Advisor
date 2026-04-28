@@ -273,6 +273,41 @@ async def dataapi_query(
     return result
 
 
+@router.delete("/api/admin/users/{auth_id}")
+async def delete_user(auth_id: str, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Permanently delete a user from Supabase Auth and all downstream tables.
+
+    Deletes the auth.users record via the Supabase Admin API.  The ON DELETE
+    CASCADE constraints on core.users (and its children) handle the rest, so
+    the email is fully released and can be reused for a new account.
+    """
+    supabase_url, service_role_key = _get_supabase_rest_config()
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.delete(
+                f"{supabase_url}/auth/v1/admin/users/{auth_id}",
+                headers={
+                    "apikey": service_role_key,
+                    "Authorization": f"Bearer {service_role_key}",
+                },
+            )
+    except httpx.HTTPError as exc:
+        logger.error("Supabase auth user deletion failed for %s: %s", auth_id, exc)
+        raise HTTPException(status_code=502, detail=f"Failed to reach Supabase: {exc}") from exc
+
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="Auth user not found")
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Supabase returned HTTP {resp.status_code}: {resp.text}",
+        )
+
+    logger.info("Admin %s deleted auth user %s", admin, auth_id)
+    return {"status": "deleted", "auth_id": auth_id}
+
+
 @router.post("/api/admin/trigger-ranking")
 async def trigger_ranking(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger a ranking cycle in the background and return immediately."""

@@ -43,6 +43,7 @@ import { adminApi, type SchedulerJob } from "@/services/api";
 
 interface User {
   id: string;
+  auth_id: string;
   email: string | null;
   first_name: string | null;
   last_name: string | null;
@@ -311,7 +312,7 @@ export default function Admin() {
       const { data, error } = await supabase
         .schema("core")
         .from("users")
-        .select("id, email, first_name, last_name, userType, is_verified, experience_level, risk_level, created_at")
+        .select("id, auth_id, email, first_name, last_name, userType, is_verified, experience_level, risk_level, created_at")
         .order("created_at", { ascending: false });
 
       if (error) throw error;
@@ -422,26 +423,40 @@ export default function Admin() {
     }
   };
 
-  const deleteUser = async (userId: string) => {
+  const deleteUser = async (userId: string, authId: string) => {
     try {
-      // Delete chats first; ON DELETE CASCADE on the DB also handles this,
-      // but explicit deletion guards against FK violations if CASCADE is not
-      // yet active on older deployments.
-      const { error: chatsError } = await supabase
-        .schema("ai")
-        .from("chats")
-        .delete()
-        .eq("user_id", userId);
+      if (BACKEND_URL && authId) {
+        // Delete via the Auth Admin API so the email is fully released.
+        // ON DELETE CASCADE propagates the deletion to core.users and all
+        // child tables (ai.chats, trading.*, etc.).
+        const headers = await getAuthHeaders();
+        const resp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}`, {
+          method: "DELETE",
+          headers,
+        });
+        if (!resp.ok) {
+          const body = await resp.text();
+          throw new Error(body || `HTTP ${resp.status}`);
+        }
+      } else {
+        // Fallback when backend is not configured: direct Supabase deletion.
+        // This removes app data but does NOT release the email in Supabase Auth.
+        const { error: chatsError } = await supabase
+          .schema("ai")
+          .from("chats")
+          .delete()
+          .eq("user_id", userId);
 
-      if (chatsError) throw chatsError;
+        if (chatsError) throw chatsError;
 
-      const { error } = await supabase
-        .schema("core")
-        .from("users")
-        .delete()
-        .eq("id", userId);
+        const { error } = await supabase
+          .schema("core")
+          .from("users")
+          .delete()
+          .eq("id", userId);
 
-      if (error) throw error;
+        if (error) throw error;
+      }
 
       toast({
         title: "User Deleted",
@@ -857,7 +872,7 @@ export default function Admin() {
                                                 </AlertDialogHeader>
                                                 <AlertDialogFooter>
                                                   <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                  <AlertDialogAction onClick={() => deleteUser(user.id)}>
+                                                  <AlertDialogAction onClick={() => deleteUser(user.id, user.auth_id)}>
                                                     Delete
                                                   </AlertDialogAction>
                                                 </AlertDialogFooter>
