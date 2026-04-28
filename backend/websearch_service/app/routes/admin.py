@@ -308,6 +308,97 @@ async def delete_user(auth_id: str, admin: str = Depends(_require_admin)) -> dic
     return {"status": "deleted", "auth_id": auth_id}
 
 
+@router.post("/api/admin/purge-orphaned-auth-users")
+async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Delete auth.users records that have no matching core.users row.
+
+    Left over from the previous deleteUser implementation which removed
+    core.users but skipped auth.users, permanently blocking those email
+    addresses.  This endpoint finds the orphans and removes them so the
+    emails can be reused.
+    """
+    supabase_url, service_role_key = _get_supabase_rest_config()
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+    }
+
+    # Collect every auth_id that still has a core.users row.
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            resp = await http.get(
+                f"{supabase_url}/rest/v1/users",
+                params={"select": "auth_id"},
+                headers={**headers, "Accept-Profile": "core"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch core users: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"core.users query failed: HTTP {resp.status_code}")
+
+    live_auth_ids: set[str] = {row["auth_id"] for row in resp.json() if row.get("auth_id")}
+
+    # Page through all auth users and collect orphans.
+    orphan_ids: list[str] = []
+    page = 1
+    per_page = 1000
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            while True:
+                resp = await http.get(
+                    f"{supabase_url}/auth/v1/admin/users",
+                    params={"page": page, "per_page": per_page},
+                    headers=headers,
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"auth.users list failed: HTTP {resp.status_code}",
+                    )
+                data = resp.json()
+                auth_users = data.get("users", [])
+                if not auth_users:
+                    break
+
+                for user in auth_users:
+                    if user.get("id") not in live_auth_ids:
+                        orphan_ids.append(user["id"])
+
+                if len(auth_users) < per_page:
+                    break
+                page += 1
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to list auth users: {exc}") from exc
+
+    # Delete each orphan.
+    deleted: list[str] = []
+    failed: list[str] = []
+
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        for auth_id in orphan_ids:
+            try:
+                del_resp = await http.delete(
+                    f"{supabase_url}/auth/v1/admin/users/{auth_id}",
+                    headers=headers,
+                )
+                if del_resp.status_code in (200, 204):
+                    deleted.append(auth_id)
+                else:
+                    failed.append(auth_id)
+            except httpx.HTTPError:
+                failed.append(auth_id)
+
+    logger.info(
+        "Admin %s purged orphaned auth users: %d deleted, %d failed",
+        admin,
+        len(deleted),
+        len(failed),
+    )
+    return {"deleted": len(deleted), "failed": len(failed)}
+
+
 @router.post("/api/admin/trigger-ranking")
 async def trigger_ranking(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger a ranking cycle in the background and return immediately."""
