@@ -424,6 +424,17 @@ export default function Admin() {
 
   const deleteUser = async (userId: string) => {
     try {
+      // Delete chats first; ON DELETE CASCADE on the DB also handles this,
+      // but explicit deletion guards against FK violations if CASCADE is not
+      // yet active on older deployments.
+      const { error: chatsError } = await supabase
+        .schema("ai")
+        .from("chats")
+        .delete()
+        .eq("user_id", userId);
+
+      if (chatsError) throw chatsError;
+
       const { error } = await supabase
         .schema("core")
         .from("users")
