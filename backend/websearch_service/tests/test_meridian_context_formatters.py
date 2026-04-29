@@ -183,9 +183,10 @@ def test_format_portfolio_stats_handles_no_trades():
 
 def test_format_portfolio_stats_includes_profit_factor_when_available():
     rows = [{"value": 11000}, {"value": 10000}]
-    out = _format_portfolio_stats(rows, 5, 2, 60.0, 1500.0, 400.0, 200.0, 2.0)
+    out = _format_portfolio_stats(rows, 5, 2, 60.0, 1500.0, 400.0, 200.0, 2.0, 7.5)
     assert "30-day change" in out
     assert "Win rate: 60.0%" in out
+    assert "Avg return: +7.5%" in out
     assert "Profit factor: 2.00x" in out
 
 
@@ -200,9 +201,21 @@ def test_format_academy_progress_empty_returns_beginner_copy():
 
 
 def test_format_academy_progress_includes_recent_lessons():
-    progress = {"completed": 5, "total": 20, "recent_lessons": [{"title": "Intro", "tier_name": "Tier 1"}]}
+    progress = {
+        "completed": 5,
+        "total": 20,
+        "current_module": "Tier 1",
+        "current_lesson": "Risk Basics",
+        "avg_quiz_score": 82,
+        "financial_literacy_level": "Developing",
+        "recent_lessons": [{"title": "Intro", "tier_name": "Tier 1"}],
+    }
     out = _format_academy_progress(progress)
-    assert "Completed 5 of 20" in out
+    assert "5/20 lessons complete" in out
+    assert "current module: Tier 1" in out
+    assert "avg quiz score: 82%" in out
+    assert "financial literacy level: Developing" in out
+    assert "Current lesson: Risk Basics" in out
     assert "Intro" in out
     assert "Tier 1" in out
 

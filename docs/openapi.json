@@ -975,6 +975,75 @@
         }
       }
     },
+    "/api/admin/users/{auth_id}": {
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Delete User",
+        "description": "Permanently delete a user from Supabase Auth and all downstream tables.\n\nDeletes the auth.users record via the Supabase Admin API.  The ON DELETE\nCASCADE constraints on core.users (and its children) handle the rest, so\nthe email is fully released and can be reused for a new account.",
+        "operationId": "delete_user_api_admin_users__auth_id__delete",
+        "parameters": [
+          {
+            "name": "auth_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Auth Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Delete User Api Admin Users  Auth Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/purge-orphaned-auth-users": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Purge Orphaned Auth Users",
+        "description": "Delete auth.users records that have no matching core.users row.\n\nLeft over from the previous deleteUser implementation which removed\ncore.users but skipped auth.users, permanently blocking those email\naddresses.  This endpoint finds the orphans and removes them so the\nemails can be reused.",
+        "operationId": "purge_orphaned_auth_users_api_admin_purge_orphaned_auth_users_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Purge Orphaned Auth Users Api Admin Purge Orphaned Auth Users Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/trigger-ranking": {
       "post": {
         "tags": [
