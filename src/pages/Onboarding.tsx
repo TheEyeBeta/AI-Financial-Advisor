@@ -187,13 +187,14 @@ const RISK_QUESTIONS = [
 ];
 
 const GOAL_PRESETS = [
-  "Retirement",
-  "House deposit",
-  "Emergency fund",
-  "Education",
-  "Wealth building",
-  "Other",
-];
+  { label: "Retirement", value: "retirement" },
+  { label: "House deposit", value: "house_deposit" },
+  { label: "Emergency fund", value: "emergency_fund" },
+  { label: "Education", value: "education" },
+  { label: "Wealth building", value: "wealth_building" },
+  { label: "Car purchase", value: "car_purchase" },
+  { label: "Other", value: "other" },
+] as const;
 
 const HORIZON_OPTIONS: { value: InvestmentHorizon; label: string; description: string }[] = [
   {
@@ -379,7 +380,7 @@ const Onboarding = () => {
         return horizon !== "";
       case 5:
         return goals.length >= 1 && goals.every((g) => {
-          const name = g.goal_name === "Other" ? g.custom_name.trim() : g.goal_name;
+          const name = g.goal_name === "other" ? g.custom_name.trim() : g.goal_name;
           return name !== "" && g.target_amount !== "" && parseFloat(g.target_amount) > 0;
         });
       default:
@@ -453,7 +454,7 @@ const Onboarding = () => {
       // WRITE 2 — meridian.user_goals (insert, one per goal)
       const goalRows = goals.map((g) => ({
         user_id: authUserId,
-        goal_name: g.goal_name === "Other" ? g.custom_name.trim() : g.goal_name,
+        goal_name: g.goal_name === "other" ? g.custom_name.trim() : g.goal_name,
         target_amount: parseFloat(g.target_amount),
         current_amount: 0,
         target_date: g.target_date || null,
@@ -476,9 +477,9 @@ const Onboarding = () => {
         .update({
           onboarding_complete: true,
           risk_level: riskProfile === "conservative" ? "low" : riskProfile === "moderate" ? "mid" : "high",
-          investment_goal: goals[0]?.goal_name === "Other"
+          investment_goal: goals[0]?.goal_name === "other"
             ? "other"
-            : goals[0]?.goal_name?.toLowerCase().replace(" ", "_") || "other",
+            : goals[0]?.goal_name || "other",
           updated_at: new Date().toISOString(),
         })
         .eq("auth_id", authUserId);
@@ -871,20 +872,20 @@ const Onboarding = () => {
                     <div className="flex flex-wrap gap-2">
                       {GOAL_PRESETS.map((preset) => (
                         <Button
-                          key={preset}
+                          key={preset.value}
                           type="button"
                           size="sm"
-                          variant={goal.goal_name === preset ? "default" : "outline"}
-                          onClick={() => updateGoal(goal.id, "goal_name", preset)}
+                          variant={goal.goal_name === preset.value ? "default" : "outline"}
+                          onClick={() => updateGoal(goal.id, "goal_name", preset.value)}
                         >
-                          {preset}
+                          {preset.label}
                         </Button>
                       ))}
                     </div>
                   </div>
 
                   {/* Custom name if Other */}
-                  {goal.goal_name === "Other" && (
+                  {goal.goal_name === "other" && (
                     <div className="space-y-2">
                       <Label htmlFor={`custom-${goal.id}`}>Goal name</Label>
                       <Input
