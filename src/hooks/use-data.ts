@@ -213,15 +213,16 @@ export function useSendChatMessage() {
     }) => {
       if (!userId) throw new Error('Not authenticated');
 
-      // Save user message
-      await chatApi.addMessage(userId, chatId, 'user', message);
-
-      // Fetch conversation history for context
+      // Fetch conversation history for context before saving the current message
+      // so the current message appears exactly once (passed explicitly below).
       const history = await chatApi.getMessages(chatId);
       const chatHistory = history.map(msg => ({
         role: msg.role as 'user' | 'assistant',
         content: msg.content
       }));
+
+      // Save user message
+      await chatApi.addMessage(userId, chatId, 'user', message);
 
       // Fetch market data context using the user's preferred data source
       const src = sourceParam(dataSource);
