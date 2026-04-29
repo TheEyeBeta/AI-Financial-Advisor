@@ -286,10 +286,33 @@ class _FakeChain:
             ]
             return _FakeResult(data=rows)
 
-        if tbl in ("user_lesson_progress", "lessons", "tiers"):
-            rows = store.get(tbl, [])
+        if tbl == "user_lesson_progress":
+            rows = [
+                r for r in store.get("user_lesson_progress", [])
+                if (filters.get("user_id") is None or r.get("user_id") == filters.get("user_id"))
+                and (filters.get("status") is None or r.get("status") == filters.get("status"))
+            ]
+            in_col, in_vals = next(iter(self._in_filters), (None, []))
+            if in_col:
+                rows = [r for r in rows if r.get(in_col) in in_vals]
             if self._count == "exact":
                 return _FakeResult(data=rows, count=len(rows))
+            return _FakeResult(data=rows)
+
+        if tbl in ("lessons", "tiers"):
+            rows = store.get(tbl, [])
+            in_col, in_vals = next(iter(self._in_filters), (None, []))
+            if in_col:
+                rows = [r for r in rows if r.get(in_col) in in_vals]
+            if self._count == "exact":
+                return _FakeResult(data=rows, count=len(rows))
+            return _FakeResult(data=rows)
+
+        if tbl == "quiz_attempts":
+            rows = [
+                r for r in store.get("quiz_attempts", [])
+                if filters.get("user_id") is None or r.get("user_id") == filters.get("user_id")
+            ]
             return _FakeResult(data=rows)
 
         if tbl == "chats":
@@ -370,6 +393,9 @@ def _default_store() -> Dict[str, Any]:
                 "emergency_fund_months": 4.0,
                 "age_range": "30-39",
                 "income_range": "40k-60k",
+                "monthly_expenses": 2200.0,
+                "total_debt": 7500.0,
+                "dependants": 1,
                 "knowledge_tier": 2,
                 "country_of_residence": "Ireland",
                 "employment_status": "employed",
@@ -426,6 +452,7 @@ def _default_store() -> Dict[str, Any]:
         "user_lesson_progress": [],
         "lessons": [],
         "tiers": [],
+        "quiz_attempts": [],
         "chats": [],
         "chat_messages": [],
         "iris_cache": {},
