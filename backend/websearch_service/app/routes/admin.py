@@ -372,16 +372,29 @@ async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dic
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to list auth users: {exc}") from exc
 
-    # Clear core.user_profiles first (no CASCADE from auth.users to that table).
+    # Delete from all tables that reference auth.users without ON DELETE CASCADE.
+    id_list = ",".join(orphan_ids)
+    no_cascade_tables = [
+        ("core",     "user_profiles"),
+        ("meridian", "user_goals"),
+        ("meridian", "financial_plans"),
+        ("meridian", "user_positions"),
+        ("meridian", "risk_alerts"),
+        ("meridian", "life_events"),
+        ("meridian", "intelligence_digests"),
+        ("meridian", "meridian_events"),
+        ("ai",       "iris_context_cache"),
+    ]
     try:
         async with httpx.AsyncClient(timeout=30.0) as http:
-            resp = await http.delete(
-                f"{supabase_url}/rest/v1/user_profiles",
-                params={"user_id": f"in.({','.join(orphan_ids)})"},
-                headers={**headers, "Accept-Profile": "core"},
-            )
+            for schema, table in no_cascade_tables:
+                await http.delete(
+                    f"{supabase_url}/rest/v1/{table}",
+                    params={"user_id": f"in.({id_list})"},
+                    headers={**headers, "Accept-Profile": schema},
+                )
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to clear user_profiles: {exc}") from exc
+        raise HTTPException(status_code=502, detail=f"Failed to clear child tables: {exc}") from exc
 
     # Delete each orphan from auth.users.
     deleted: list[str] = []
