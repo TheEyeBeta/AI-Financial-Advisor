@@ -31,6 +31,7 @@ from ..services.auth import (
 )
 from ..services.dataapi_client import get_dataapi_client
 from ..services.intelligence_engine import run_intelligence_cycle
+from ..services.job_logger import log_job_run
 from ..services.memory_agent import run_history_scan, run_memory_extraction_cycle
 from ..services.meridian_context import refresh_all_users_context
 from ..services.ranking_engine import run_ranking_cycle
@@ -399,10 +400,73 @@ async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dic
     return {"deleted": len(deleted), "failed": len(failed)}
 
 
+async def _run_ranking_logged() -> None:
+    started_at = datetime.now(timezone.utc)
+    try:
+        summary = await run_ranking_cycle()
+        skipped = summary.get("skipped", False)
+        await log_job_run(
+            job_name="ranking_engine",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("tickers_scored", 0),
+            raw_output=summary,
+        )
+    except Exception as exc:
+        await log_job_run(
+            job_name="ranking_engine",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
+
+
+async def _run_intelligence_logged() -> None:
+    started_at = datetime.now(timezone.utc)
+    try:
+        summary = await run_intelligence_cycle()
+        skipped = summary.get("skipped", False)
+        await log_job_run(
+            job_name="intelligence_engine",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("users_processed", 0),
+            raw_output=summary,
+        )
+    except Exception as exc:
+        await log_job_run(
+            job_name="intelligence_engine",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
+
+
+async def _run_memory_extraction_logged() -> None:
+    started_at = datetime.now(timezone.utc)
+    try:
+        summary = await run_memory_extraction_cycle()
+        skipped = summary.get("skipped", False)
+        await log_job_run(
+            job_name="memory_extraction",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("chats_processed", 0),
+            raw_output=summary,
+        )
+    except Exception as exc:
+        await log_job_run(
+            job_name="memory_extraction",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
+
+
 @router.post("/api/admin/trigger-ranking")
 async def trigger_ranking(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger a ranking cycle in the background and return immediately."""
-    asyncio.create_task(run_ranking_cycle())
+    asyncio.create_task(_run_ranking_logged())
     logger.info("Admin %s triggered ranking cycle in background", admin)
     return {"status": "started"}
 
@@ -418,7 +482,7 @@ async def trigger_memory_scan(admin: str = Depends(_require_admin)) -> dict[str,
 @router.post("/api/admin/trigger-intelligence")
 async def trigger_intelligence(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger an intelligence cycle in the background and return immediately."""
-    asyncio.create_task(run_intelligence_cycle())
+    asyncio.create_task(_run_intelligence_logged())
     logger.info("Admin %s triggered intelligence cycle in background", admin)
     return {"status": "started"}
 
@@ -426,7 +490,7 @@ async def trigger_intelligence(admin: str = Depends(_require_admin)) -> dict[str
 @router.post("/api/admin/trigger-memory-extraction")
 async def trigger_memory_extraction(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger a live memory extraction cycle in the background and return immediately."""
-    asyncio.create_task(run_memory_extraction_cycle())
+    asyncio.create_task(_run_memory_extraction_logged())
     logger.info("Admin %s triggered memory extraction cycle in background", admin)
     return {"status": "started"}
 
@@ -437,6 +501,40 @@ async def trigger_meridian_refresh(admin: str = Depends(_require_admin)) -> dict
     asyncio.create_task(refresh_all_users_context())
     logger.info("Admin %s triggered Meridian context refresh in background", admin)
     return {"status": "started"}
+
+
+@router.get("/api/admin/job-run-logs")
+async def job_run_logs(
+    job_name: str = Query(min_length=1, max_length=100),
+    limit: int = Query(default=10, ge=1, le=100),
+    admin: str = Depends(_require_admin),
+) -> dict[str, Any]:
+    """Return the last N run records for the given job from core.job_run_logs."""
+    base_url, service_role_key = _get_supabase_rest_config()
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.get(
+                f"{base_url}/rest/v1/job_run_logs",
+                params={
+                    "select": "id,job_name,started_at,finished_at,status,records_processed,summary,error,created_at",
+                    "job_name": f"eq.{job_name}",
+                    "order": "started_at.desc",
+                    "limit": str(limit),
+                },
+                headers={
+                    "apikey": service_role_key,
+                    "Authorization": f"Bearer {service_role_key}",
+                    "Accept-Profile": "core",
+                },
+            )
+        if resp.status_code >= 400:
+            logger.warning("job-run-logs query returned HTTP %s", resp.status_code)
+            return {"logs": []}
+        return {"logs": resp.json()}
+    except Exception as exc:
+        logger.warning("job-run-logs query failed: %s", exc)
+        return {"logs": []}
 
 
 @router.get("/api/admin/scheduler-status")

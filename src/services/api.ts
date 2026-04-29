@@ -1117,6 +1117,18 @@ export interface SchedulerJob {
   status: string;
 }
 
+export interface JobRunLog {
+  id: string;
+  job_name: string;
+  started_at: string;
+  finished_at: string | null;
+  status: "success" | "error" | "skipped";
+  records_processed: number | null;
+  summary: string | null;
+  error: string | null;
+  created_at: string;
+}
+
 async function _getAdminAuthHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
@@ -1161,5 +1173,13 @@ export const adminApi = {
     const resp = await fetch(`${getPythonApiUrl()}/api/admin/scheduler-status`, { headers });
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
     return resp.json() as Promise<{ jobs: SchedulerJob[] }>;
+  },
+
+  async getJobRunLogs(jobName: string, limit = 10): Promise<{ logs: JobRunLog[] }> {
+    const headers = await _getAdminAuthHeaders();
+    const url = `${getPythonApiUrl()}/api/admin/job-run-logs?job_name=${encodeURIComponent(jobName)}&limit=${limit}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    return resp.json() as Promise<{ logs: JobRunLog[] }>;
   },
 };
