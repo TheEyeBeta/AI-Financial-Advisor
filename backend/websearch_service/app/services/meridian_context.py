@@ -337,6 +337,18 @@ def _format_context_block(ctx: dict) -> str:
     age_value = profile.get("age")
     age_str = str(age_value) if age_value not in (None, "") else "not set"
 
+    _optional_profile = ""
+    for _field, _label in [
+        ("monthly_expenses",     "Monthly expenses"),
+        ("total_debt",           "Total debt"),
+        ("dependants",           "Dependants"),
+        ("country_of_residence", "Country of residence"),
+        ("employment_status",    "Employment status"),
+    ]:
+        _val = profile.get(_field)
+        if _val not in (None, ""):
+            _optional_profile += f"- {_label}: {_sanitise_for_prompt(str(_val), max_length=60)}\n"
+
     parts.append(
         "\n"
         "################################################################################\n"
@@ -355,6 +367,7 @@ def _format_context_block(ctx: dict) -> str:
         f"- Investment goal: {_sanitise_for_prompt(profile.get('investment_goal'), max_length=40)}\n"
         f"- Income range: {profile.get('income_range', 'not set')}\n"
         f"- Emergency fund status: {profile.get('emergency_fund_status', 'not set')}\n"
+        f"{_optional_profile}"
         "\n"
         f"KNOWLEDGE TIER: {tier}\n"
         "Adapt communication depth and vocabulary accordingly.\n"

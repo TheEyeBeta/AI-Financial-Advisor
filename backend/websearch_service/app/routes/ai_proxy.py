@@ -1642,6 +1642,7 @@ def _build_openai_chat_stream_payload(
         "stream": True,
         "stream_options": {"include_usage": True},
         **_max_completion_field(model, max_output_tokens),
+        **_temperature_field(model, 0.35),
     }
     if _is_reasoning_model(model):
         payload["reasoning_effort"] = reasoning_effort
