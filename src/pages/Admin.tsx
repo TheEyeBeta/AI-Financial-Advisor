@@ -10,7 +10,8 @@ import {
   Users, Shield, Database, MessageSquare, TrendingUp,
   Activity, Search, Download, Trash2, RefreshCw,
   BarChart3, UserCheck, UserX, Clock, Heart, Server,
-  Wifi, WifiOff, Loader2, Play, Terminal, ArrowUpRight, Sparkles, ShieldCheck, AlertTriangle
+  Wifi, WifiOff, Loader2, Play, Terminal, ArrowUpRight, Sparkles, ShieldCheck, AlertTriangle,
+  CheckCircle2, XCircle, MinusCircle, FileText
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { getPythonApiUrl } from "@/lib/env";
@@ -39,7 +40,13 @@ import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { SupabaseConnectionTest } from "@/utils/test-connection";
 import { format } from "date-fns";
-import { adminApi, type SchedulerJob } from "@/services/api";
+import { adminApi, type SchedulerJob, type JobRunLog } from "@/services/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface User {
   id: string;
@@ -197,6 +204,9 @@ export default function Admin() {
   const [activeTab, setActiveTab] = useState("users");
   const [jobStatuses, setJobStatuses] = useState<Record<string, "idle" | "running" | "success" | "error">>({});
   const [jobMessages, setJobMessages] = useState<Record<string, string>>({});
+  const [jobRunLogs, setJobRunLogs] = useState<Record<string, JobRunLog[]>>({});
+  const [jobLogsLoading, setJobLogsLoading] = useState<Record<string, boolean>>({});
+  const [logsModalJobId, setLogsModalJobId] = useState<string | null>(null);
 
   const [purgeLoading, setPurgeLoading] = useState(false);
   const [purgeResult, setPurgeResult] = useState<{ deleted: number; failed: number } | null>(null);
@@ -565,6 +575,42 @@ export default function Admin() {
       const msg = err instanceof Error ? err.message : "Unknown error";
       setJobStatuses((prev) => ({ ...prev, [jobId]: "error" }));
       setJobMessages((prev) => ({ ...prev, [jobId]: `Failed: ${msg}` }));
+    }
+  };
+
+  const JOB_ID_TO_NAME: Record<string, string> = {
+    ranking: "ranking_engine",
+    memory_extraction: "memory_extraction",
+    intelligence: "intelligence_engine",
+    meridian_refresh: "meridian_refresh",
+  };
+
+  const openJobLogs = async (jobId: string) => {
+    setLogsModalJobId(jobId);
+    if (jobRunLogs[jobId]) return; // already loaded
+    setJobLogsLoading((prev) => ({ ...prev, [jobId]: true }));
+    try {
+      const jobName = JOB_ID_TO_NAME[jobId] ?? jobId;
+      const data = await adminApi.getJobRunLogs(jobName, 10);
+      setJobRunLogs((prev) => ({ ...prev, [jobId]: data.logs ?? [] }));
+    } catch (err) {
+      console.error(`Failed to fetch logs for ${jobId}:`, err);
+      setJobRunLogs((prev) => ({ ...prev, [jobId]: [] }));
+    } finally {
+      setJobLogsLoading((prev) => ({ ...prev, [jobId]: false }));
+    }
+  };
+
+  const refreshJobLogs = async (jobId: string) => {
+    setJobLogsLoading((prev) => ({ ...prev, [jobId]: true }));
+    try {
+      const jobName = JOB_ID_TO_NAME[jobId] ?? jobId;
+      const data = await adminApi.getJobRunLogs(jobName, 10);
+      setJobRunLogs((prev) => ({ ...prev, [jobId]: data.logs ?? [] }));
+    } catch (err) {
+      console.error(`Failed to refresh logs for ${jobId}:`, err);
+    } finally {
+      setJobLogsLoading((prev) => ({ ...prev, [jobId]: false }));
     }
   };
 
@@ -1099,6 +1145,8 @@ export default function Admin() {
                 const jobStatus = jobStatuses[def.id] ?? "idle";
                 const jobMessage = jobMessages[def.id] ?? "";
                 const health = getJobHealth(lastRun, def.overdueSeconds);
+                const lastLog = (jobRunLogs[def.id] ?? [])[0] ?? null;
+                const lastLogStatus = lastLog?.status ?? null;
 
                 return (
                   <Card key={def.id} className="rounded-3xl border-border/60 shadow-sm">
@@ -1107,15 +1155,26 @@ export default function Admin() {
                         <CardTitle className="text-base">{def.name}</CardTitle>
                         <CardDescription>{def.schedule}</CardDescription>
                       </div>
-                      <div
-                        className={`mt-1 h-3 w-3 rounded-full ${
-                          health === "healthy"
-                            ? "bg-emerald-500"
-                            : health === "warning"
-                            ? "bg-amber-500"
-                            : "bg-slate-400"
-                        }`}
-                      />
+                      <div className="flex items-center gap-2">
+                        {lastLogStatus === "success" && (
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        )}
+                        {lastLogStatus === "error" && (
+                          <XCircle className="h-4 w-4 text-red-500" />
+                        )}
+                        {lastLogStatus === "skipped" && (
+                          <MinusCircle className="h-4 w-4 text-amber-400" />
+                        )}
+                        <div
+                          className={`mt-0.5 h-3 w-3 rounded-full ${
+                            health === "healthy"
+                              ? "bg-emerald-500"
+                              : health === "warning"
+                              ? "bg-amber-500"
+                              : "bg-slate-400"
+                          }`}
+                        />
+                      </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="flex items-center gap-2 text-sm">
@@ -1129,10 +1188,15 @@ export default function Admin() {
                           {schedulerLoading ? "Loading…" : formatRelativeTime(lastRun)}
                         </span>
                       </div>
-                      <div>
+                      {lastLog?.summary && (
+                        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                          {lastLog.summary}
+                        </p>
+                      )}
+                      <div className="flex gap-2">
                         <Button
                           size="sm"
-                          className="w-full gap-2 rounded-xl"
+                          className="flex-1 gap-2 rounded-xl"
                           variant="outline"
                           disabled={jobStatus === "running"}
                           onClick={() => { void triggerJob(def.id); }}
@@ -1149,25 +1213,138 @@ export default function Admin() {
                             </>
                           )}
                         </Button>
-                        {jobStatus !== "idle" && (
-                          <p
-                            className={`mt-1.5 text-xs ${
-                              jobStatus === "running"
-                                ? "text-muted-foreground"
-                                : jobStatus === "success"
-                                ? "text-emerald-600 dark:text-emerald-400"
-                                : "text-red-600 dark:text-red-400"
-                            }`}
-                          >
-                            {jobStatus === "running" ? "Running..." : jobMessage}
-                          </p>
-                        )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-2 rounded-xl"
+                          onClick={() => { void openJobLogs(def.id); }}
+                        >
+                          <FileText className="h-4 w-4" />
+                          View Logs
+                        </Button>
                       </div>
+                      {jobStatus !== "idle" && (
+                        <p
+                          className={`text-xs ${
+                            jobStatus === "running"
+                              ? "text-muted-foreground"
+                              : jobStatus === "success"
+                              ? "text-emerald-600 dark:text-emerald-400"
+                              : "text-red-600 dark:text-red-400"
+                          }`}
+                        >
+                          {jobStatus === "running" ? "Running..." : jobMessage}
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                 );
               })}
             </div>
+
+            {/* Job run logs modal */}
+            <Dialog open={logsModalJobId !== null} onOpenChange={(open) => { if (!open) setLogsModalJobId(null); }}>
+              <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center justify-between gap-3">
+                    <span>
+                      {logsModalJobId
+                        ? (SCHEDULED_JOB_DEFS.find((d) => d.id === logsModalJobId)?.name ?? logsModalJobId)
+                        : ""}{" "}
+                      — Last 10 Runs
+                    </span>
+                    {logsModalJobId && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="gap-2 rounded-xl"
+                        disabled={jobLogsLoading[logsModalJobId] ?? false}
+                        onClick={() => { if (logsModalJobId) void refreshJobLogs(logsModalJobId); }}
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${(jobLogsLoading[logsModalJobId] ?? false) ? "animate-spin" : ""}`} />
+                        Refresh
+                      </Button>
+                    )}
+                  </DialogTitle>
+                </DialogHeader>
+                {logsModalJobId && (jobLogsLoading[logsModalJobId] ?? false) && (
+                  <div className="flex items-center justify-center py-10 text-muted-foreground">
+                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                    Loading logs…
+                  </div>
+                )}
+                {logsModalJobId && !(jobLogsLoading[logsModalJobId] ?? false) && (
+                  (() => {
+                    const logs = jobRunLogs[logsModalJobId] ?? [];
+                    if (logs.length === 0) {
+                      return (
+                        <p className="py-8 text-center text-sm text-muted-foreground">
+                          No run records yet. Logs appear after the first job execution.
+                        </p>
+                      );
+                    }
+                    return (
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Started</TableHead>
+                            <TableHead>Duration</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Records</TableHead>
+                            <TableHead>Summary</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {logs.map((log) => {
+                            const durationMs = log.finished_at
+                              ? new Date(log.finished_at).getTime() - new Date(log.started_at).getTime()
+                              : null;
+                            const durationLabel = durationMs !== null
+                              ? durationMs < 1000
+                                ? `${durationMs}ms`
+                                : `${(durationMs / 1000).toFixed(1)}s`
+                              : "—";
+                            return (
+                              <TableRow key={log.id}>
+                                <TableCell className="text-xs whitespace-nowrap">
+                                  {safeFormatDate(log.started_at, "MMM d, HH:mm:ss")}
+                                </TableCell>
+                                <TableCell className="text-xs">{durationLabel}</TableCell>
+                                <TableCell>
+                                  {log.status === "success" && (
+                                    <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20 rounded-full text-xs">
+                                      success
+                                    </Badge>
+                                  )}
+                                  {log.status === "error" && (
+                                    <Badge className="bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20 rounded-full text-xs">
+                                      error
+                                    </Badge>
+                                  )}
+                                  {log.status === "skipped" && (
+                                    <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20 rounded-full text-xs">
+                                      skipped
+                                    </Badge>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {log.records_processed ?? "—"}
+                                </TableCell>
+                                <TableCell className="text-xs text-muted-foreground max-w-xs">
+                                  {log.error
+                                    ? <span className="text-red-600 dark:text-red-400">{log.error}</span>
+                                    : (log.summary ?? "—")}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    );
+                  })()
+                )}
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
           <TabsContent value="system-health" className="space-y-4">
