@@ -372,7 +372,18 @@ async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dic
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to list auth users: {exc}") from exc
 
-    # Delete each orphan.
+    # Clear core.user_profiles first (no CASCADE from auth.users to that table).
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            resp = await http.delete(
+                f"{supabase_url}/rest/v1/user_profiles",
+                params={"user_id": f"in.({','.join(orphan_ids)})"},
+                headers={**headers, "Accept-Profile": "core"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to clear user_profiles: {exc}") from exc
+
+    # Delete each orphan from auth.users.
     deleted: list[str] = []
     failed: list[str] = []
 
