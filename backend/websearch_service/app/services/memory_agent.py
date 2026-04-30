@@ -207,7 +207,7 @@ def _upsert_insight_sync(
             .maybe_single()
             .execute()
         )
-        if existing_res.data:
+        if existing_res is not None and existing_res.data:
             existing_confidence = float(existing_res.data.get("confidence") or 0)
             if existing_confidence > new_confidence:
                 # Preserve the higher-confidence insight — never downgrade.
