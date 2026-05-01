@@ -233,7 +233,7 @@ def _upsert_insight_sync(
             key,
             uid_tail,
         )
-        return False
+        raise
 
 
 def _count_user_insights_sync() -> int:
@@ -412,11 +412,7 @@ async def extract_insights_from_chat(chat_id: str, user_id: str) -> dict[str, An
                 insights_written += 1
         except Exception:
             failed += 1
-            logger.error(
-                "memory_agent: unexpected error writing insight for chat_id=%s user=...%s",
-                chat_id,
-                uid_tail,
-            )
+            # traceback already logged with key context by _upsert_insight_sync
 
     logger.info(
         "memory_agent: chat_id=%s user=...%s extracted=%d written=%d failed=%d",
@@ -477,6 +473,7 @@ async def run_memory_extraction_cycle() -> dict[str, Any]:
 
         chats_processed = 0
         total_insights = 0
+        total_failed_upserts = 0
         errors: list[str] = []
 
         # B. Process each chat; one failure must not stop the cycle
@@ -491,6 +488,7 @@ async def run_memory_extraction_cycle() -> dict[str, Any]:
                 result = await extract_insights_from_chat(chat_id, user_id)
                 chats_processed += 1
                 total_insights += result.get("insights_extracted", 0)
+                total_failed_upserts += result.get("failed", 0)
             except Exception:
                 errors.append(chat_id)
                 logger.error(
@@ -501,9 +499,10 @@ async def run_memory_extraction_cycle() -> dict[str, Any]:
             await asyncio.sleep(1)
 
         logger.info(
-            "memory_agent: extraction cycle complete — chats=%d insights=%d errors=%d",
+            "memory_agent: extraction cycle complete — chats=%d insights=%d upsert_failures=%d errors=%d",
             chats_processed,
             total_insights,
+            total_failed_upserts,
             len(errors),
         )
 
@@ -511,6 +510,7 @@ async def run_memory_extraction_cycle() -> dict[str, Any]:
         return {
             "chats_processed": chats_processed,
             "total_insights_extracted": total_insights,
+            "total_failed_upserts": total_failed_upserts,
             "errors": errors,
         }
 
@@ -544,6 +544,7 @@ async def run_history_scan(limit: int = 100) -> dict[str, Any]:
 
     chats_processed = 0
     total_insights = 0
+    total_failed_upserts = 0
     errors: list[str] = []
 
     for i, chat in enumerate(chats, start=1):
@@ -557,6 +558,7 @@ async def run_history_scan(limit: int = 100) -> dict[str, Any]:
             result = await extract_insights_from_chat(chat_id, user_id)
             chats_processed += 1
             total_insights += result.get("insights_extracted", 0)
+            total_failed_upserts += result.get("failed", 0)
         except Exception:
             errors.append(chat_id)
             logger.error(
@@ -572,14 +574,16 @@ async def run_history_scan(limit: int = 100) -> dict[str, Any]:
         await asyncio.sleep(1)
 
     logger.info(
-        "memory_agent: history scan complete — chats=%d insights=%d errors=%d",
+        "memory_agent: history scan complete — chats=%d insights=%d upsert_failures=%d errors=%d",
         chats_processed,
         total_insights,
+        total_failed_upserts,
         len(errors),
     )
 
     return {
         "chats_processed": chats_processed,
         "total_insights_extracted": total_insights,
+        "total_failed_upserts": total_failed_upserts,
         "errors": errors,
     }
