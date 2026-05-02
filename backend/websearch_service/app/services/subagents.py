@@ -17,8 +17,13 @@ _OPENAI_ENDPOINT = "https://api.openai.com/v1/chat/completions"
 # Configurable via OPENAI_CLASSIFIER_MODEL env var; defaults to gpt-4o-mini.
 # Keep this model lightweight — the call must complete within _CLASSIFIER_TIMEOUT seconds.
 _CLASSIFIER_MODEL: str = os.getenv("OPENAI_CLASSIFIER_MODEL", "gpt-4o-mini")
-_CLASSIFIER_TIMEOUT = 3.0  # seconds — must return before this or fall back to "general"
-_FAST_TIER_TIMEOUT = 2.0   # seconds — tighter cap for non-financial short messages
+# BALANCED tier serves the bulk of financial queries; its classifier feeds intent
+# routing (portfolio_analysis, deep_analysis, etc.) that materially shapes the
+# downstream context, so we accept a longer cap here to reduce silent fallbacks
+# to "general" under elevated OpenAI latency. Both values are env-overridable so
+# operators can retune without a redeploy.
+_CLASSIFIER_TIMEOUT = float(os.getenv("CLASSIFIER_BALANCED_TIMEOUT", "5.0"))
+_FAST_TIER_TIMEOUT = float(os.getenv("CLASSIFIER_FAST_TIMEOUT", "2.0"))
 
 VALID_CATEGORIES = frozenset({
     "portfolio_analysis",
@@ -357,8 +362,8 @@ def classify_tier(message: str) -> str:
 
     Decision logic (first match wins):
     - INSTANT: short trivial social phrase → skip the API call entirely.
-    - FAST:    short, non-financial message → use a 2-second API timeout cap.
-    - BALANCED: everything else → full 3-second timeout, normal routing.
+    - FAST:    short, non-financial message → use the FAST timeout cap (default 2s).
+    - BALANCED: everything else → use the BALANCED timeout cap (default 5s).
     """
     stripped = message.strip()
 
@@ -385,8 +390,9 @@ async def classify_intent(last_user_message: str, tier: str = "BALANCED") -> str
     or time-cap the OpenAI call:
 
     - ``INSTANT``: returns ``"general"`` immediately without any API call.
-    - ``FAST``:    calls the API with a hard 2-second asyncio-level timeout cap.
-    - ``BALANCED``: uses the normal 3-second timeout (``_CLASSIFIER_TIMEOUT``).
+    - ``FAST``:    calls the API with a hard ``_FAST_TIER_TIMEOUT`` cap.
+    - ``BALANCED``: uses ``_CLASSIFIER_TIMEOUT`` (longer; the BALANCED tier
+      handles the most context-sensitive financial queries).
 
     Always returns a member of VALID_CATEGORIES; falls back to ``"general"`` on
     any error, unexpected value, or timeout.

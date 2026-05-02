@@ -2438,12 +2438,16 @@ async def chat_completion(
                     if _ci_result in {"portfolio_analysis", "deep_analysis"}
                     else asyncio.sleep(0)
                 )
+                # BALANCED tier runs alongside the full context build, so the
+                # fresh goals/portfolio fetches share the BALANCED budget rather
+                # than the tighter FAST cap. 4s leaves enough headroom for cold
+                # PostgREST connections without blocking the streaming start.
                 _cq_result, _mc_result, _mkt_result, _fresh_goals_result, _fresh_portfolio_result = await asyncio.gather(
                     _classify_query(last_user_text),
                     build_iris_context(verified_user_id),
                     build_market_context(ticker=detected_ticker),
-                    asyncio.wait_for(fresh_goals_task, timeout=2.0),
-                    asyncio.wait_for(fresh_portfolio_task, timeout=2.0),
+                    asyncio.wait_for(fresh_goals_task, timeout=4.0),
+                    asyncio.wait_for(fresh_portfolio_task, timeout=4.0),
                     return_exceptions=True,
                 )
             else:
