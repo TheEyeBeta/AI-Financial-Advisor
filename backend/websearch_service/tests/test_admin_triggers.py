@@ -56,8 +56,11 @@ def _consume(coro):
 def test_trigger_ranking_dispatches_background_task(monkeypatch, service_role_jwt):
     client = _service_role_app_and_client(monkeypatch)
 
-    ranking_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "run_ranking_cycle", new=ranking_mock), \
+    # The route schedules `_run_ranking_logged()` on the loop; `_consume` closes
+    # the coroutine without running it, so we assert on the wrapper itself
+    # rather than the underlying `run_ranking_cycle` it would have awaited.
+    wrapper_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
+    with patch.object(admin_route, "_run_ranking_logged", new=wrapper_mock), \
          patch.object(admin_route.asyncio, "create_task", side_effect=_consume) as ct_mock:
         resp = client.post(
             "/api/admin/trigger-ranking", headers=_service_role_headers(service_role_jwt),
@@ -65,7 +68,7 @@ def test_trigger_ranking_dispatches_background_task(monkeypatch, service_role_jw
 
     assert resp.status_code == 200
     assert resp.json() == {"status": "started"}
-    ranking_mock.assert_called_once()
+    wrapper_mock.assert_called_once()
     ct_mock.assert_called_once()
 
 
@@ -87,22 +90,22 @@ def test_trigger_memory_scan_uses_200_limit(monkeypatch, service_role_jwt):
 def test_trigger_intelligence_dispatches_task(monkeypatch, service_role_jwt):
     client = _service_role_app_and_client(monkeypatch)
 
-    cycle_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "run_intelligence_cycle", new=cycle_mock), \
+    wrapper_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
+    with patch.object(admin_route, "_run_intelligence_logged", new=wrapper_mock), \
          patch.object(admin_route.asyncio, "create_task", side_effect=_consume):
         resp = client.post(
             "/api/admin/trigger-intelligence", headers=_service_role_headers(service_role_jwt),
         )
 
     assert resp.status_code == 200
-    cycle_mock.assert_called_once()
+    wrapper_mock.assert_called_once()
 
 
 def test_trigger_memory_extraction_dispatches_task(monkeypatch, service_role_jwt):
     client = _service_role_app_and_client(monkeypatch)
 
-    cycle_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "run_memory_extraction_cycle", new=cycle_mock), \
+    wrapper_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
+    with patch.object(admin_route, "_run_memory_extraction_logged", new=wrapper_mock), \
          patch.object(admin_route.asyncio, "create_task", side_effect=_consume):
         resp = client.post(
             "/api/admin/trigger-memory-extraction",
@@ -110,7 +113,7 @@ def test_trigger_memory_extraction_dispatches_task(monkeypatch, service_role_jwt
         )
 
     assert resp.status_code == 200
-    cycle_mock.assert_called_once()
+    wrapper_mock.assert_called_once()
 
 
 def test_trigger_meridian_refresh_dispatches_task(monkeypatch, service_role_jwt):

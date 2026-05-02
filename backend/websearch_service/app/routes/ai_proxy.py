@@ -62,6 +62,11 @@ _DEEP_CATEGORIES: frozenset[str] = frozenset({
     "stock_research",
 })
 MAX_STREAM_TOOL_CALLS = 3
+# Total wall-clock budget for the per-stream tool fan-out. Caps the worst case
+# when multiple tool calls run (e.g., 3× search_market_news at 8s each
+# sequentially) so we never blow past STREAM_TIMEOUT_SECONDS before the model
+# can resume streaming. Independent of the per-tool timeouts in iris_tools.
+TOOL_EXECUTION_BUDGET_SECONDS = 12.0
 DEFAULT_TOOL_CHOICE = "auto"
 try:
     OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
@@ -2797,8 +2802,11 @@ async def chat_completion(
                                 MAX_STREAM_TOOL_CALLS,
                             )
 
-                        tool_result_messages: List[Dict[str, Any]] = []
-                        for call in ordered_calls:
+                        # Run tool calls concurrently and cap the combined wall
+                        # time. Tool calls are independent (each appends its
+                        # own result), so gather() is safe and avoids a 3×
+                        # blow-up when multiple calls hit Tavily's 8s timeout.
+                        async def _run_single_tool(call: Dict[str, Any]) -> Dict[str, Any]:
                             name = call["function"]["name"] or ""
                             args_raw = call["function"]["arguments"] or "{}"
                             try:
@@ -2812,11 +2820,35 @@ async def chat_completion(
                             except Exception as tool_exc:
                                 logger.exception("Tool execution crashed for %s", name)
                                 result_json = json.dumps({"error": f"Tool execution failed: {tool_exc}"})
-                            tool_result_messages.append({
+                            return {
                                 "role": "tool",
                                 "tool_call_id": call.get("id") or "",
                                 "content": result_json,
-                            })
+                            }
+
+                        try:
+                            tool_result_messages = list(
+                                await asyncio.wait_for(
+                                    asyncio.gather(*(_run_single_tool(c) for c in ordered_calls)),
+                                    timeout=TOOL_EXECUTION_BUDGET_SECONDS,
+                                )
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[TOOLS] combined tool fan-out exceeded %.1fs budget; substituting timeout payload",
+                                TOOL_EXECUTION_BUDGET_SECONDS,
+                            )
+                            tool_result_messages = [
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call.get("id") or "",
+                                    "content": json.dumps({
+                                        "error": "Tool execution exceeded time budget",
+                                        "tool": call["function"]["name"] or "",
+                                    }),
+                                }
+                                for call in ordered_calls
+                            ]
 
                         assistant_tool_call_message: Dict[str, Any] = {
                             "role": "assistant",
