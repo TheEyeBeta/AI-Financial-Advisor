@@ -74,7 +74,11 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
     return !!answers[q.id];
   });
 
-  const AI_GRADER_TIMEOUT_MS = 15_000;
+  // Grading routes through the BALANCED chat pipeline (classifier + tools); 15s
+  // was too tight when OpenAI latency spiked, causing whole-quiz submissions to
+  // fail since one timeout aborts the Promise.all batch. 25s keeps the worst
+  // case under the BALANCED stream cap (90s) while giving real headroom.
+  const AI_GRADER_TIMEOUT_MS = 25_000;
 
   async function callAIGrader(question: QuizQuestion, answer: string): Promise<{ score: number; rationale: string } | null> {
     try {

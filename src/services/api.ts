@@ -360,10 +360,18 @@ async function readErrorMessage(response: Response): Promise<string> {
   }
 }
 
+// Absolute ceiling on a single stream — independent of the per-chunk idle
+// timeout in chat-api.ts. Protects against an upstream that keeps the
+// connection alive with a steady drip of whitespace tokens or a model loop.
+// Set above the longest tier cap (120s) so it only fires on genuinely stuck
+// streams, not on legitimately long deep-analysis responses.
+export const STREAM_WALL_CLOCK_TIMEOUT_MS = 180_000;
+
 export async function consumeChatStream(
   response: Response,
   onChunk?: (chunk: string) => void,
   onChunkReceived?: () => void,
+  wallClockTimeoutMs: number = STREAM_WALL_CLOCK_TIMEOUT_MS,
 ): Promise<string> {
   const contentType = response.headers.get('content-type') ?? '';
 
@@ -385,6 +393,24 @@ export async function consumeChatStream(
   if (!reader) {
     throw new Error('Streaming response body is unavailable.');
   }
+
+  // Hard deadline that fires even if chunks keep arriving. We resolve a
+  // sentinel promise on expiry and Promise.race it against each read.
+  let wallClockExpired = false;
+  let wallClockReject: ((err: Error) => void) | null = null;
+  const wallClockPromise = new Promise<never>((_, reject) => {
+    wallClockReject = reject;
+  });
+  const wallClockId =
+    wallClockTimeoutMs > 0
+      ? setTimeout(() => {
+          wallClockExpired = true;
+          void reader.cancel().catch(() => {
+            /* reader may already be released */
+          });
+          wallClockReject?.(new Error('Stream exceeded maximum duration. Please try again.'));
+        }, wallClockTimeoutMs)
+      : null;
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -440,7 +466,7 @@ export async function consumeChatStream(
 
   try {
     while (true) {
-      const { value, done } = await reader.read();
+      const { value, done } = await Promise.race([reader.read(), wallClockPromise]);
       if (done) {
         buffer = normalizeStreamBuffer(buffer + decoder.decode());
         break;
@@ -459,7 +485,14 @@ export async function consumeChatStream(
       return assembled;
     }
   } finally {
+    if (wallClockId !== null) {
+      clearTimeout(wallClockId);
+    }
     reader.releaseLock();
+  }
+
+  if (wallClockExpired) {
+    throw new Error('Stream exceeded maximum duration. Please try again.');
   }
 
   if (assembled.length > 0) {
