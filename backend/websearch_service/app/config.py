@@ -47,7 +47,7 @@ def get_app_settings() -> AppSettings:
         app_version=os.getenv("APP_VERSION", "0.1.0"),
         cors_origins=parse_csv_env(os.getenv("CORS_ORIGINS")),
         trusted_hosts=parse_csv_env(os.getenv("TRUSTED_HOSTS")),
-        enable_debug_routes=is_truthy(os.getenv("ENABLE_DEBUG_ROUTES")) or environment != "production",
+        enable_debug_routes=is_truthy(os.getenv("ENABLE_DEBUG_ROUTES")),
     )
 
 

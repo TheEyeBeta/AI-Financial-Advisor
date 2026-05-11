@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -331,29 +332,36 @@ def _schedule_background_refresh(user_id: str) -> None:
 _LOCAL_TTL_SECONDS = float(os.environ.get("IRIS_LOCAL_CACHE_TTL_SECONDS", "60"))
 _LOCAL_CACHE_MAX_ENTRIES = 1024  # bounded so a runaway worker can't OOM
 _local_cache: Dict[str, Tuple[float, str]] = {}
+# Protects _local_cache against concurrent access from asyncio.to_thread workers
+# and the event loop. Threading lock (not asyncio.Lock) because callers are a mix
+# of sync threads (_refresh_iris_context_cache_sync) and sync calls from async code.
+_local_cache_lock = threading.Lock()
 
 
 def _local_cache_get(user_id: str) -> Optional[str]:
-    entry = _local_cache.get(user_id)
-    if not entry:
-        return None
-    written_at, value = entry
-    if (time.monotonic() - written_at) >= _LOCAL_TTL_SECONDS:
-        _local_cache.pop(user_id, None)
-        return None
-    return value
+    with _local_cache_lock:
+        entry = _local_cache.get(user_id)
+        if not entry:
+            return None
+        written_at, value = entry
+        if (time.monotonic() - written_at) >= _LOCAL_TTL_SECONDS:
+            _local_cache.pop(user_id, None)
+            return None
+        return value
 
 
 def _local_cache_set(user_id: str, value: str) -> None:
-    if len(_local_cache) >= _LOCAL_CACHE_MAX_ENTRIES:
-        # Evict the oldest entry — simple O(n) sweep, fine at this size.
-        oldest = min(_local_cache.items(), key=lambda kv: kv[1][0])[0]
-        _local_cache.pop(oldest, None)
-    _local_cache[user_id] = (time.monotonic(), value)
+    with _local_cache_lock:
+        if len(_local_cache) >= _LOCAL_CACHE_MAX_ENTRIES:
+            # Evict the oldest entry — simple O(n) sweep, fine at this size.
+            oldest = min(_local_cache.items(), key=lambda kv: kv[1][0])[0]
+            _local_cache.pop(oldest, None)
+        _local_cache[user_id] = (time.monotonic(), value)
 
 
 def _local_cache_evict(user_id: str) -> None:
-    _local_cache.pop(user_id, None)
+    with _local_cache_lock:
+        _local_cache.pop(user_id, None)
 
 
 async def build_iris_context(user_id: Optional[str]) -> str:

@@ -1197,6 +1197,16 @@ Never use the word "boundaries."
 """)
 logger.debug(f"FAST_SYSTEM_PROMPT chars: {len(FAST_SYSTEM_PROMPT)}")
 
+# ── Background task helpers ────────────────────────────────────────────────────
+
+async def _safe_background(coro, *, label: str) -> None:
+    """Wrap a fire-and-forget coroutine so failures are logged, not silently dropped."""
+    try:
+        await coro
+    except Exception as exc:
+        logger.warning("Background task '%s' failed: %s", label, exc)
+
+
 # ── Token estimation ───────────────────────────────────────────────────────────
 
 def estimate_tokens(text: str, system_overhead: int = 100) -> int:
@@ -1827,7 +1837,8 @@ async def _open_provider_stream(
         raise HTTPException(status_code=504, detail=f"{provider_name} request timed out") from exc
     except httpx.RequestError as exc:
         await _close_stream_resources(client, None)
-        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+        logger.warning("Model provider unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable.") from exc
 
 
 async def _start_chat_completion_stream(
@@ -1938,7 +1949,7 @@ async def _call_perplexity(payload: Dict[str, Any]) -> Dict[str, Any]:
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to reach Perplexity provider: {exc}",
+            detail="AI service temporarily unavailable.",
         ) from exc
 
     if response.status_code != 200:
@@ -1962,7 +1973,8 @@ async def _call_openai(payload: Dict[str, Any]) -> Dict[str, Any]:
         if perplexity_key:
             await audit_log("openai_fallback_perplexity", {"reason": "network_error", "error": str(exc)})
             return await _call_perplexity(payload)
-        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+        logger.warning("Model provider unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable.") from exc
 
     if response.status_code == 429:
         perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
@@ -2015,7 +2027,8 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
         if perplexity_key:
             await audit_log("openai_fallback_perplexity", {"reason": "network_error", "error": str(exc)})
             return await _call_perplexity(_perplexity_fallback_payload())
-        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+        logger.warning("Model provider unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable.") from exc
     finally:
         aclose = getattr(client, "aclose", None)
         if callable(aclose):
@@ -2185,9 +2198,10 @@ async def meridian_onboard(
     verified_user_id = auth_user.auth_id
     try:
         await run_meridian_onboard(verified_user_id, body.model_dump())
-        asyncio.create_task(
-            asyncio.to_thread(_refresh_iris_context_cache_sync, verified_user_id)
-        )
+        asyncio.create_task(_safe_background(
+            asyncio.to_thread(_refresh_iris_context_cache_sync, verified_user_id),
+            label="iris_context_cache_refresh",
+        ))
         return {"status": "ok", "message": "Meridian profile created"}
     except Exception as exc:
         logger.exception("Meridian onboarding failed for user_id=%s: %s", verified_user_id, exc)
@@ -2940,7 +2954,10 @@ async def chat_completion(
                         logger.warning("Failed to write chat_response audit log: %s", audit_exc)
 
                     if tier_from_classifier and verified_user_id:
-                        asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
+                        asyncio.ensure_future(_safe_background(
+                            update_knowledge_tier(verified_user_id, tier_from_classifier),
+                            label="knowledge_tier_update",
+                        ))
 
                     yield _sse_event({"done": True})
                 except Exception as stream_exc:
@@ -3059,7 +3076,10 @@ async def chat_completion(
             (classification.get("user_level") or "").lower()
         )
         if tier_from_classifier and verified_user_id:
-            asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
+            asyncio.ensure_future(_safe_background(
+                update_knowledge_tier(verified_user_id, tier_from_classifier),
+                label="knowledge_tier_update",
+            ))
 
         return {"response": final_answer}
     except HTTPException as exc:

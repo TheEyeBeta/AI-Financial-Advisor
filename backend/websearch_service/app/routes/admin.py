@@ -249,7 +249,8 @@ async def dataapi_query(
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"DataAPI auth error: {exc}") from exc
+        logger.warning("Admin DataAPI auth error: %s", exc)
+        raise HTTPException(status_code=502, detail="DataAPI authentication failed.") from exc
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as http:
@@ -263,7 +264,8 @@ async def dataapi_query(
                 raise HTTPException(status_code=resp.status_code, detail=f"DataAPI query error: {error_body}")
             result = resp.json()
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"DataAPI request failed: {exc}") from exc
+        logger.warning("Admin DataAPI request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="DataAPI request failed.") from exc
 
     logger.info(
         "admin_dataapi_query admin=%s query=%r timestamp=%s",
@@ -295,7 +297,7 @@ async def delete_user(auth_id: str, admin: str = Depends(_require_admin)) -> dic
             )
     except httpx.HTTPError as exc:
         logger.error("Supabase auth user deletion failed for %s: %s", auth_id, exc)
-        raise HTTPException(status_code=502, detail=f"Failed to reach Supabase: {exc}") from exc
+        raise HTTPException(status_code=502, detail="Failed to reach authentication service.") from exc
 
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail="Auth user not found")
@@ -333,7 +335,8 @@ async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dic
                 headers={**headers, "Accept-Profile": "core"},
             )
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch core users: {exc}") from exc
+        logger.warning("Failed to fetch core users: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to reach database service.") from exc
 
     if resp.status_code != 200:
         raise HTTPException(status_code=502, detail=f"core.users query failed: HTTP {resp.status_code}")
@@ -371,7 +374,8 @@ async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dic
                     break
                 page += 1
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to list auth users: {exc}") from exc
+        logger.warning("Failed to list auth users: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to reach authentication service.") from exc
 
     # Delete each orphan.
     deleted: list[str] = []

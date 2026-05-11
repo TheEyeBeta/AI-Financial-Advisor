@@ -820,7 +820,7 @@ export const tradeEngineApi = {
       const data = await response.json();
       // If backend returns empty items with a message, it's a stub
       if (data.items && data.items.length === 0 && data.message) {
-        console.log('Backend news endpoint is a stub, using Supabase instead');
+        // stub response — UI will fall back to Supabase
       }
       return data;
     } catch (error) {
@@ -893,14 +893,10 @@ export const tradeEngineApi = {
 
       const response = await fetch(`${this.baseUrl}/api/v1/ai/context?${params}`);
       if (!response.ok) {
-        // Trade Engine not available - return null for graceful fallback
-        console.log('[TradeEngine] AI context endpoint not available, using Supabase fallback');
         return null;
       }
       return response.json();
-    } catch (error) {
-      // Network error or Trade Engine offline - return null for graceful fallback
-      console.log('[TradeEngine] AI context fetch failed, using Supabase fallback:', error);
+    } catch {
       return null;
     }
   },
@@ -919,12 +915,10 @@ export const tradeEngineApi = {
 
       const response = await fetch(`${this.baseUrl}/api/v1/ai/signals?${params}`);
       if (!response.ok) {
-        console.log('[TradeEngine] Signals endpoint not available');
         return [];
       }
       return response.json();
-    } catch (error) {
-      console.log('[TradeEngine] Signals fetch failed:', error);
+    } catch {
       return [];
     }
   },
