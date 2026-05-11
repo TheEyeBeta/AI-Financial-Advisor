@@ -678,10 +678,7 @@ export default function AcademyLesson() {
               {blocks.length === 0 ? (
                 <div className="rounded-lg border border-border/30 bg-muted/10 p-8 text-center">
                   <BookOpen className="h-10 w-10 mx-auto mb-3 text-muted-foreground/20" />
-                  <p className="text-sm text-muted-foreground/60">Content coming soon.</p>
-                  <p className="text-xs text-muted-foreground/40 mt-1">
-                    Check back later for the full lesson.
-                  </p>
+                  <p className="text-sm text-muted-foreground/60">No content available for this lesson.</p>
                 </div>
               ) : (
                 blocks.map((block) => <LessonBlockRenderer key={block.id} block={block} />)

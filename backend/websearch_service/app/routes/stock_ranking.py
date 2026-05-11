@@ -143,10 +143,8 @@ async def get_stock_ranking(
             result = query.execute()
             rows = result.data or []
         except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to read trending stocks: {exc}",
-            ) from exc
+            logger.warning("Trending stocks query failed: %s", exc)
+            raise HTTPException(status_code=502, detail="Market data temporarily unavailable.") from exc
 
         # Compute data age from the most recent ranked_at
         last_ranked_at: Optional[str] = None
@@ -293,10 +291,8 @@ async def get_stock_detail(
             )
             snap_rows = snap_result.data or []
         except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to read stock snapshot: {exc}",
-            ) from exc
+            logger.warning("Stock snapshot query failed for %s: %s", ticker_upper, exc)
+            raise HTTPException(status_code=502, detail="Market data temporarily unavailable.") from exc
 
         if not snap_rows:
             raise HTTPException(

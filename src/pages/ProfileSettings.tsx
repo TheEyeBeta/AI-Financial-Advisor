@@ -469,8 +469,7 @@ const ProfileSettings = () => {
     const load = async () => {
       try {
         const [profileResult, goalsResult] = await Promise.all([
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (coreDb.from("user_profiles") as any)
+          coreDb.from("user_profiles")
             .select("*")
             .eq("user_id", authUserId)
             .maybeSingle(),
@@ -525,8 +524,7 @@ const ProfileSettings = () => {
     if (!authUserId) return;
     setSavingS1(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (coreDb.from("user_profiles") as any).upsert(
+      const { error } = await coreDb.from("user_profiles").upsert(
         {
           user_id: authUserId,
           age_range: ageRange || null,
@@ -556,8 +554,7 @@ const ProfileSettings = () => {
     if (!authUserId) return;
     setSavingS2(true);
     try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const { error } = await (coreDb.from("user_profiles") as any).upsert(
+      const { error } = await coreDb.from("user_profiles").upsert(
         {
           user_id: authUserId,
           risk_profile: riskProfile || null,

@@ -36,7 +36,6 @@ export function createStockCache<T extends CacheableStockSnapshot>() {
     getTicker(ticker: string): T | null {
       const entry = this.tickers.get(ticker.toUpperCase());
       if (entry && !this.isExpired(entry.timestamp)) {
-        console.log('[Cache] Hit for ticker:', ticker);
         return entry.data;
       }
       return null;
@@ -49,7 +48,6 @@ export function createStockCache<T extends CacheableStockSnapshot>() {
     getCompanyName(name: string): T | null | undefined {
       const entry = this.companyNames.get(name.toLowerCase());
       if (entry && !this.isExpired(entry.timestamp)) {
-        console.log('[Cache] Hit for company name:', name);
         return entry.data;
       }
       return undefined;
@@ -61,7 +59,6 @@ export function createStockCache<T extends CacheableStockSnapshot>() {
 
     getMainList(): T[] | null {
       if (this.mainList && !this.isExpired(this.mainList.timestamp)) {
-        console.log('[Cache] Hit for main stock list');
         return this.mainList.data;
       }
       return null;
@@ -78,7 +75,6 @@ export function createStockCache<T extends CacheableStockSnapshot>() {
         }
       });
 
-      console.log('[Cache] Stored', data.length, 'stocks in cache');
     },
 
     clear(): void {
@@ -86,7 +82,6 @@ export function createStockCache<T extends CacheableStockSnapshot>() {
       this.companyNames.clear();
       this.mainList = null;
       this.initialized = false;
-      console.log('[Cache] Cleared');
     },
 
     getStats(): { tickers: number; companyNames: number; hasMainList: boolean; initialized: boolean } {
@@ -106,11 +101,8 @@ export function createStockSnapshotsApi(queryFactory: () => StockSnapshotQuery) 
   return {
     async initializeCache(): Promise<void> {
       if (stockCache.initialized && stockCache.mainList && !stockCache.isExpired(stockCache.mainList.timestamp)) {
-        console.log('[Cache] Already initialized and valid');
         return;
       }
-
-      console.log('[Cache] Initializing - loading first', stockCache.PRELOAD_COUNT, 'stocks...');
 
       const { data, error } = await queryFactory()
         .select('*')
@@ -124,7 +116,6 @@ export function createStockSnapshotsApi(queryFactory: () => StockSnapshotQuery) 
 
       stockCache.setMainList(data || []);
       stockCache.initialized = true;
-      console.log('[Cache] Initialization complete -', data?.length || 0, 'stocks cached');
     },
 
     getCacheStats() {
@@ -141,7 +132,6 @@ export function createStockSnapshotsApi(queryFactory: () => StockSnapshotQuery) 
         return limit ? cached.slice(0, limit) : cached;
       }
 
-      console.log('[Cache] Miss for main list - fetching from database');
       const fetchLimit = Math.max(limit || 0, stockCache.PRELOAD_COUNT);
 
       const { data, error } = await queryFactory()
@@ -163,7 +153,6 @@ export function createStockSnapshotsApi(queryFactory: () => StockSnapshotQuery) 
         return cached;
       }
 
-      console.log('[Cache] Miss for ticker:', ticker, '- fetching from database');
       const { data, error } = await queryFactory()
         .select('*')
         .eq('ticker', ticker.toUpperCase())
@@ -186,7 +175,6 @@ export function createStockSnapshotsApi(queryFactory: () => StockSnapshotQuery) 
         return cached;
       }
 
-      console.log('[Cache] Miss for company name:', companyName, '- fetching from database');
       const { data, error } = await queryFactory()
         .select('*')
         .ilike('company_name', `%${companyName}%`)
@@ -220,11 +208,8 @@ export function createStockSnapshotsApi(queryFactory: () => StockSnapshotQuery) 
       }
 
       if (tickersToFetch.length === 0) {
-        console.log('[Cache] All', tickers.length, 'tickers found in cache');
         return results;
       }
-
-      console.log('[Cache] Fetching', tickersToFetch.length, 'missing tickers from database');
       const { data, error } = await queryFactory()
         .select('*')
         .in('ticker', tickersToFetch)

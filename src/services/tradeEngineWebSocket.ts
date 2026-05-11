@@ -130,7 +130,6 @@ class TradeEngineWebSocket {
           this.ws = new WebSocket(`${this.baseUrl}/ws/live${tokenQuery}`);
 
           this.ws.onopen = () => {
-            console.log('[TradeEngine WS] Connected');
             this.reconnectAttempts = 0;
             this.setConnectionState('connected');
             this.startPingInterval();
@@ -141,7 +140,6 @@ class TradeEngineWebSocket {
           };
 
           this.ws.onclose = (event) => {
-            console.log(`[TradeEngine WS] Disconnected (code: ${event.code})`);
             this.stopPingInterval();
             this._connectionId = null;
 
@@ -154,10 +152,6 @@ class TradeEngineWebSocket {
               const capped = Math.min(exponential, this.maxReconnectDelay);
               const jitter = capped * (0.8 + Math.random() * 0.4);
               const delay = Math.round(jitter);
-              console.log(
-                `[TradeEngine WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`
-              );
-
               setTimeout(() => {
                 this.reconnectAttempts += 1;
                 this.connect();
