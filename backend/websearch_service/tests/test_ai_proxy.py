@@ -205,6 +205,48 @@ def test_chat_endpoint_with_messages(client: TestClient):
         assert response.status_code == 200
 
 
+def test_academy_chat_skips_advisor_context_pipeline(client: TestClient):
+    """Academy tutor/grader calls should avoid advisor-only routing and context I/O."""
+    rate_limiter.clear_state()
+
+    fa_text = (
+        '{"needs_clarification": false, "clarification_questions": [], '
+        '"assumptions": [], "analysis_summary": "", '
+        '"final_answer": "Academy response", "confidence": 0.8}'
+    )
+    mock_response_data = {
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": fa_text}]}],
+        "usage": {},
+    }
+
+    mock_client = AsyncMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.text = ""
+    mock_client.post = AsyncMock(return_value=mock_response)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("app.routes.ai_proxy._classify_query", new=AsyncMock(side_effect=AssertionError("_classify_query should not run"))), \
+         patch("app.routes.ai_proxy.classify_intent", new=AsyncMock(side_effect=AssertionError("classify_intent should not run"))), \
+         patch("app.routes.ai_proxy.build_iris_context", new=AsyncMock(side_effect=AssertionError("build_iris_context should not run"))), \
+         patch("app.routes.ai_proxy.build_market_context", new=AsyncMock(side_effect=AssertionError("build_market_context should not run"))), \
+         patch("httpx.AsyncClient", return_value=mock_client):
+        response = client.post(
+            "/api/chat",
+            json={
+                "messages": [{"role": "user", "content": "Student question: explain this lesson."}],
+                "session_type": "academy_tutor",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["response"] == "Academy response"
+    payload = mock_client.post.await_args.kwargs["json"]
+    assert "TUTOR MODE" in payload["input"][0]["content"]
+
+
 def test_chat_endpoint_message_too_long(client: TestClient):
     """Test chat endpoint with message that's too long."""
     long_message = "a" * 10001

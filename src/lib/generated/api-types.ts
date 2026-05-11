@@ -1017,16 +1017,24 @@ export interface components {
             change_percent?: number | null;
             /** Composite Score */
             composite_score: number;
-            /** Trend Score */
-            trend_score?: number | null;
             /** Momentum Score */
             momentum_score?: number | null;
+            /** Stability Score */
+            stability_score?: number | null;
+            /** Trend Score */
+            trend_score?: number | null;
             /** Volume Score */
             volume_score?: number | null;
             /** Range Score */
             range_score?: number | null;
             /** Adx Score */
             adx_score?: number | null;
+            /** Momentum 20D Pct */
+            momentum_20d_pct?: number | null;
+            /** Volatility 20D */
+            volatility_20d?: number | null;
+            /** Hard Filter Passed */
+            hard_filter_passed?: boolean | null;
             /** Technical Score */
             technical_score?: number | null;
             /** Fundamental Score */

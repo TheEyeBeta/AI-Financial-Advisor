@@ -1,42 +1,46 @@
 # backend/websearch_service/app/services/ranking_engine.py
 """Stock Ranking Engine — scheduled batch scorer.
 
-Runs daily at 01:00 UTC (via APScheduler) to score all tickers using the
-composite formula derived from market.stock_snapshots indicators, biased
-toward 6-month price performance.  Writes the top 50 to market.trending_stocks.
+Runs daily at 01:00 UTC (via APScheduler) to score all tickers using a
+six-dimension composite derived from market.stock_snapshots indicators
+and market.stock_returns_mv pre-computed returns.  Writes the top 50 to
+market.trending_stocks.
 
 Data sources (both in the market schema, zero N+1 queries):
   market.stock_snapshots  — latest indicator snapshot per ticker
   market.stock_returns_mv — pre-computed multi-horizon price returns
 
-Eligibility requirements (applied before scoring):
-  1. Complete data  — every scoring field must be non-null
-  2. 6-month history — ticker must have ≥ 126 trading days (has_6m_history = True)
+Hard filters (applied before scoring — eliminate spike/penny/illiquid bias):
+  1. Complete data       — every scoring field must be non-null
+  2. has_6m_history      — ≥ 126 trading days (covers "listed < 90 days")
+  3. last_price          ≥ MIN_PRICE_USD ($5)
+  4. market_cap          ≥ MIN_MARKET_CAP_USD ($500M)
+  5. avg_volume_10d      ≥ MIN_AVG_VOLUME_SHARES (500k shares/day)
+  6. adx                 ≥ 20 (sideways / ranging market filter retained)
 
-Hard filters (applied after completeness check):
-  - is_overbought == True          → excluded
-  - is_oversold  == True           → excluded
-  - adx < 20                       → excluded (ranging/sideways market)
-  - volume / avg_volume_10d < 0.8  → excluded (thin volume; stored volume_ratio
-                                     ignored due to pipeline bug, recalculated here)
+Scoring formula (weights — stability promoted to #2 to remove spike bias):
+  momentum_score   30%  multi-horizon return blend (1M/3M/6M/12M)
+                          — academically validated; rewards sustained,
+                          time-normalised price performance, never 1-day spikes.
+  stability_score  25%  inverted Bollinger band width (low-volatility = high
+                          score).  This is the single change that disqualifies
+                          short-squeezes and overnight-spike movers from the
+                          top of the list.
+  trend_score      20%  normalise(price_vs_sma_50)
+  quality_score    15%  eps_growth * 0.50 + revenue_growth * 0.30 +
+                          earnings_yield (1/pe_ratio) * 0.20
+  volume_score      5%  normalise(volume / avg_volume_10d) — capped via
+                          winsorisation so spike volume cannot dominate
+  adx_score         5%  normalise(adx) if is_bullish else neutral 50.0
 
-Scoring formula (weights):
-  momentum_score  40%  multi-horizon return blend:
-                         normalise(return_1m)  * 0.20
-                         normalise(return_3m)  * 0.35
-                         normalise(return_6m)  * 0.30
-                         normalise(return_12m) * 0.15
-                       (rsi_14 and macd_histogram removed from momentum;
-                        MACD effect retained via trend score)
-  trend_score     25%  normalise(price_vs_sma_50)
-  quality_score   15%  eps_growth * 0.50 + revenue_growth * 0.30
-                         + earnings_yield (1/pe_ratio) * 0.20
-                       null fields default to 50.0 (neutral) — quality data
-                       is optional; winsorization handles PE outliers
-  volume_score    10%  normalise(volume / avg_volume_10d)
-  adx_score       10%  normalise(adx) if is_bullish else neutral 50.0
+  composite = 0.30*momentum + 0.25*stability + 0.20*trend +
+              0.15*quality  + 0.05*volume    + 0.05*adx
 
-  composite = 0.40*momentum + 0.25*trend + 0.15*quality + 0.10*volume + 0.10*adx
+  Stability is computed from Bollinger band width because it is a true
+  20-period (one trading month) volatility measure already available in
+  stock_snapshots.  A future improvement is to replace it with a direct
+  20-day rolling stdev of daily returns when the upstream pipeline begins
+  exporting it.
 
   Deliberately excluded (require > 6 months of history):
     price_vs_sma_200  — SMA-200 needs 200 days (~10 months)
@@ -65,6 +69,15 @@ logger = logging.getLogger(__name__)
 
 # ── Run lock ──────────────────────────────────────────────────────────────────
 _cycle_running: bool = False
+
+
+# ── Quality hard-filter thresholds ────────────────────────────────────────────
+# Anything below these is excluded before scoring.  These cut penny stocks,
+# micro-caps, and illiquid names that would otherwise win the ranking via
+# overnight spikes on tiny share counts.
+MIN_PRICE_USD: float = 5.0
+MIN_MARKET_CAP_USD: float = 500_000_000.0
+MIN_AVG_VOLUME_SHARES: float = 500_000.0
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -134,10 +147,11 @@ def _fetch_indicators_snapshot() -> dict[str, dict]:
         _tbl("market", "stock_snapshots")
         .select(
             "ticker, company_name, price_change_pct, "
-            "last_price, volume, avg_volume_10d, "
+            "last_price, volume, avg_volume_10d, market_cap, "
             "rsi_14, macd_histogram, "
             "adx, is_bullish, "
             "price_vs_sma_50, "
+            "bollinger_upper, bollinger_middle, bollinger_lower, "
             "is_overbought, is_oversold, "
             "eps_growth, revenue_growth, pe_ratio"
         )
@@ -175,6 +189,26 @@ def _fetch_stock_returns() -> dict[str, dict]:
     by_ticker = {row["ticker"]: row for row in rows if row.get("ticker")}
     logger.info("_fetch_stock_returns: %d tickers", len(by_ticker))
     return by_ticker
+
+
+# ── Stability proxy ───────────────────────────────────────────────────────────
+
+
+def _bollinger_band_width(snap: dict) -> Optional[float]:
+    """Return the 20-period Bollinger band width relative to the middle band.
+
+    Width = (upper − lower) / middle.  Lower width = lower volatility = more
+    stable.  Returns None when any of the three bands or the middle band is
+    missing/zero — caller treats None as "no stability signal".
+    """
+    upper = _f(snap.get("bollinger_upper"))
+    middle = _f(snap.get("bollinger_middle"))
+    lower = _f(snap.get("bollinger_lower"))
+    if upper is None or middle is None or lower is None:
+        return None
+    if middle == 0:
+        return None
+    return (upper - lower) / abs(middle)
 
 
 # ── Completeness check ────────────────────────────────────────────────────────
@@ -264,11 +298,15 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     # ── Step 2: Completeness filter + hard filters ────────────────────────────
     #
     # Completeness: all scoring fields non-null AND has_6m_history = True.
-    # Hard filters: is_overbought, is_oversold, adx < 20, thin volume.
-    # Volume ratio is recalculated from raw columns (stored value has a bug).
+    # Hard filters (eliminate penny / micro-cap / illiquid spike bias):
+    #   - last_price        ≥ MIN_PRICE_USD
+    #   - market_cap        ≥ MIN_MARKET_CAP_USD
+    #   - avg_volume_10d    ≥ MIN_AVG_VOLUME_SHARES
+    #   - adx               ≥ 20 (sideways-market filter, retained)
     filtered: dict[str, dict] = {}   # snap merged with returns row
     skipped_incomplete = 0
     skipped_hard_filter = 0
+    skipped_quality_gate = 0
 
     for ticker, snap in snapshots.items():
         ret_row = returns.get(ticker)
@@ -278,51 +316,62 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             skipped_incomplete += 1
             continue
 
-        # Overbought/oversold removed as hard filters — RSI is
-        # already a market signal and extreme readings often
-        # accompany the strongest momentum stocks.
-        # The scoring algorithm handles this via momentum components.
+        # Quality gates — disqualify spike-prone, illiquid, or penny names
+        # before they can win on a single noisy day.
+        last_price = _f(snap.get("last_price"))
+        market_cap = _f(snap.get("market_cap"))
+        avg_vol = _f(snap.get("avg_volume_10d"))
+
+        if last_price is not None and last_price < MIN_PRICE_USD:
+            skipped_quality_gate += 1
+            continue
+        if market_cap is not None and market_cap < MIN_MARKET_CAP_USD:
+            skipped_quality_gate += 1
+            continue
+        if avg_vol is not None and avg_vol < MIN_AVG_VOLUME_SHARES:
+            skipped_quality_gate += 1
+            continue
 
         # Hard filter: ranging market (ADX < 20)
         adx = _f(snap.get("adx"))
-        if adx < 20:  # type: ignore[operator]  # non-null guaranteed by completeness check
+        if adx is not None and adx < 20:
             skipped_hard_filter += 1
             continue
 
-        # Volume hard filter removed — avg_volume_10d and volume
-        # are stored in different units in stock_snapshots, making
-        # ratio comparison unreliable. Volume is already a scoring
-        # factor at 15% weight which handles liquidity ranking.
-        # TODO: restore filter once upstream unit mismatch is fixed.
-        avg_vol = _f(snap.get("avg_volume_10d"))
+        # Recompute volume ratio defensively; the stored value has had unit
+        # mismatches historically.
         if avg_vol and avg_vol > 0:
             recalc_ratio = (_f(snap.get("volume")) or 0) / avg_vol
         else:
             recalc_ratio = None
 
-        # Merge returns into the snap dict for convenience
+        # Merge returns + derived stability proxy into the snap dict.
         merged = dict(snap)
         merged["_recalc_volume_ratio"] = recalc_ratio
         merged["_return_6m"]           = _f(ret_row["return_6m"])   # type: ignore[index]
         merged["_return_1m"]           = _f(ret_row.get("return_1m"))
         merged["_return_3m"]           = _f(ret_row.get("return_3m"))
         merged["_return_12m"]          = _f(ret_row.get("return_12m"))
+        merged["_band_width"]          = _bollinger_band_width(snap)
         filtered[ticker] = merged
 
     logger.info(
-        "After filters: %d eligible | %d incomplete | %d failed hard filters",
-        len(filtered), skipped_incomplete, skipped_hard_filter,
+        "After filters: %d eligible | %d incomplete | %d quality-gated | %d failed hard filters",
+        len(filtered), skipped_incomplete, skipped_quality_gate, skipped_hard_filter,
     )
 
     if not filtered:
         logger.warning("No tickers passed all filters — ranking cycle produced no results")
         elapsed = round(_time.monotonic() - start_ts, 2)
         return {
-            "tickers_scored": 0,
-            "tickers_failed": 0,
-            "top_50_written": 0,
+            "tickers_scored":         0,
+            "tickers_failed":         0,
+            "top_50_written":         0,
+            "skipped_incomplete":     skipped_incomplete,
+            "skipped_quality_gate":   skipped_quality_gate,
+            "skipped_hard_filter":    skipped_hard_filter,
             "cycle_duration_seconds": elapsed,
-            "ranked_at": cycle_start.isoformat(),
+            "ranked_at":              cycle_start.isoformat(),
         }
 
     # ── Step 3: Component normalisation across the eligible universe ──────────
@@ -408,6 +457,22 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
         for ticker in filtered
     }
 
+    # ── Stability (inverted Bollinger band width) ────────────────────────────
+    # Lower band width = lower realised volatility = more stable.  Invert
+    # the normalised score so the lowest-volatility ticker maps to ~100.
+    # Tickers with missing band data receive a neutral 50.0 — they are not
+    # penalised, but they cannot win on stability alone.
+    raw_band_width: dict[str, float] = {
+        ticker: snap["_band_width"]
+        for ticker, snap in filtered.items()
+        if snap.get("_band_width") is not None
+    }
+    band_width_norm = _minmax_normalize(raw_band_width)
+    stability_scores: dict[str, float] = {
+        ticker: round(100.0 - band_width_norm.get(ticker, 50.0), 2)
+        for ticker in filtered
+    }
+
     # ── ADX (bullish-only) ────────────────────────────────────────────────────
     # Normalisation pool is restricted to is_bullish tickers so their ADX
     # values are ranked relative to each other.  Non-bullish → score = 0.
@@ -438,18 +503,19 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             v_score = volume_norm.get(ticker, 50.0)
             a_score = adx_scores.get(ticker, 50.0)
             q_score = quality_scores.get(ticker, 50.0)
+            s_score = stability_scores.get(ticker, 50.0)
 
-            # Composite weights: momentum 40%, trend 25%,
-            # quality 15%, volume 10%, ADX 10%
-            # ADX restored 2026-04-15 — upstream Wilder
-            # smoothing fix confirmed, avg ADX = 43.85,
-            # zero tickers pinned at 100.
+            # Composite weights — stability promoted to a 25% dimension
+            # to eliminate the overnight-spike bias.  The remaining
+            # 75% spreads across momentum (30), trend (20), quality (15),
+            # volume (5), adx (5).  Weights sum to 1.00.
             composite = round(
-                0.40 * m_score
-                + 0.25 * t_score
+                0.30 * m_score
+                + 0.25 * s_score
+                + 0.20 * t_score
                 + 0.15 * q_score
-                + 0.10 * v_score
-                + 0.10 * a_score,
+                + 0.05 * v_score
+                + 0.05 * a_score,
                 2,
             )
 
@@ -458,6 +524,11 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
             r1m  = snap.get("_return_1m")
             r3m  = snap.get("_return_3m")
             r12m = snap.get("_return_12m")
+            band_width = snap.get("_band_width")
+            # 1-month return ≈ 20 trading days, which is the spec's "20d %"
+            # headline.  Stored separately so the UI can render it without
+            # repurposing the dimension breakdown's 1M cell.
+            momentum_20d_pct = round(r1m * 100, 2) if r1m is not None else None
 
             scored_results.append({
                 "ticker":            ticker,
@@ -466,19 +537,24 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
                 "change_percent":    _f(snap.get("price_change_pct")),
                 "composite_score":   composite,
                 "momentum_score":    round(m_score, 2),
+                "stability_score":   round(s_score, 2),
                 "trend_score":       round(t_score, 2),
                 "volume_score":      round(v_score, 2),
                 "quality_score":     round(q_score, 2),
                 "range_score":       None,   # removed — requires 52-week data (> 6-month gate)
                 "adx_score":         round(a_score, 2),
-                # Legacy dimension fields
+                # Legacy dimension fields (kept for backwards compatibility)
                 "technical_score":   round(t_score, 2),   # trend = technical
                 "fundamental_score": round(q_score, 2),   # quality = fundamental
                 "signal_score":      round(m_score, 2),   # momentum = signal
-                "consistency_score": round(v_score, 2),   # volume = consistency
+                "consistency_score": round(s_score, 2),   # stability replaces volume here
+                # Headline metrics for the redesigned TopStocks card
+                "momentum_20d_pct":  momentum_20d_pct,
+                "volatility_20d":    round(band_width, 6) if band_width is not None else None,
+                "hard_filter_passed": True,  # all rows here passed every gate
                 # 6m return stored in momentum_6m for API consumers
                 "momentum_6m":       round(r6m * 100, 2) if r6m is not None else None,
-                "momentum_1m":       round(r1m * 100, 2) if r1m is not None else None,
+                "momentum_1m":       momentum_20d_pct,
                 "momentum_3m":       round(r3m * 100, 2) if r3m is not None else None,
                 "momentum_12m":      round(r12m * 100, 2) if r12m is not None else None,
                 "fundamental_trend": None,
@@ -512,29 +588,33 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
     if top_50:
         upsert_rows = [
             {
-                "ticker":            r["ticker"],
-                "symbol":            r["symbol"],
-                "name":              r["name"],
-                "change_percent":    r["change_percent"],
-                "composite_score":   r["composite_score"],
-                "momentum_score":    r["momentum_score"],
-                "trend_score":       r["trend_score"],
-                "volume_score":      r["volume_score"],
-                "range_score":       r["range_score"],
-                "adx_score":         r["adx_score"],
-                "technical_score":   r["technical_score"],
-                "fundamental_score": r["fundamental_score"],
-                "consistency_score": r["consistency_score"],
-                "signal_score":      r["signal_score"],
-                "momentum_1m":       r["momentum_1m"],
-                "momentum_3m":       r["momentum_3m"],
-                "momentum_6m":       r["momentum_6m"],
-                "momentum_12m":      r["momentum_12m"],
-                "fundamental_trend": r["fundamental_trend"],
-                "rank_tier":         r["rank_tier"],
-                "conviction":        r["conviction"],
-                "ranked_at":         r["ranked_at"],
-                "updated_at":        r["updated_at"],
+                "ticker":              r["ticker"],
+                "symbol":              r["symbol"],
+                "name":                r["name"],
+                "change_percent":      r["change_percent"],
+                "composite_score":     r["composite_score"],
+                "momentum_score":      r["momentum_score"],
+                "stability_score":     r["stability_score"],
+                "trend_score":         r["trend_score"],
+                "volume_score":        r["volume_score"],
+                "range_score":         r["range_score"],
+                "adx_score":           r["adx_score"],
+                "technical_score":     r["technical_score"],
+                "fundamental_score":   r["fundamental_score"],
+                "consistency_score":   r["consistency_score"],
+                "signal_score":        r["signal_score"],
+                "momentum_20d_pct":    r["momentum_20d_pct"],
+                "volatility_20d":      r["volatility_20d"],
+                "hard_filter_passed":  r["hard_filter_passed"],
+                "momentum_1m":         r["momentum_1m"],
+                "momentum_3m":         r["momentum_3m"],
+                "momentum_6m":         r["momentum_6m"],
+                "momentum_12m":        r["momentum_12m"],
+                "fundamental_trend":   r["fundamental_trend"],
+                "rank_tier":           r["rank_tier"],
+                "conviction":          r["conviction"],
+                "ranked_at":           r["ranked_at"],
+                "updated_at":          r["updated_at"],
             }
             for r in top_50
         ]
@@ -564,6 +644,7 @@ def _run_ranking_cycle_sync(cycle_start: datetime) -> dict:
         "tickers_failed":         tickers_failed,
         "top_50_written":         len(top_50),
         "skipped_incomplete":     skipped_incomplete,
+        "skipped_quality_gate":   skipped_quality_gate,
         "skipped_hard_filter":    skipped_hard_filter,
         "cycle_duration_seconds": elapsed,
         "ranked_at":              now_iso,
@@ -600,11 +681,12 @@ def _persist_ranking_history(
             "horizon":         "balanced",
             "scored_at":       now_iso,
             "dimension_scores": {
-                "momentum_score": r["momentum_score"],
-                "trend_score":    r["trend_score"],
-                "volume_score":   r["volume_score"],
-                "adx_score":      r.get("adx_score", 50.0),
-                "quality_score":  r.get("quality_score", 50.0),
+                "momentum_score":  r["momentum_score"],
+                "stability_score": r.get("stability_score", 50.0),
+                "trend_score":     r["trend_score"],
+                "volume_score":    r["volume_score"],
+                "adx_score":       r.get("adx_score", 50.0),
+                "quality_score":   r.get("quality_score", 50.0),
             },
         }
         for r in scored_results

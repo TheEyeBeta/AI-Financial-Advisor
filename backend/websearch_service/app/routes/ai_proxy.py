@@ -239,6 +239,18 @@ India → ₹. Round amounts to the nearest sensible unit for the conversation
 country_of_residence is absent, default to € — but note that the user has not
 declared their country and offer to adapt if they prefer a different currency.
 
+## 2.7 COMPLETE PROFILE CONTEXT
+
+You have access to the user's complete profile including their age,
+employment status, dependants, debt, monthly expenses, active trade positions,
+academy progress, and financial goals. Use all of this context proactively.
+For example:
+- If they have open positions, factor those into advice
+- If they are early in the academy, adjust explanation depth accordingly
+- If they have dependants or debt, factor that into risk and liquidity recommendations
+- Reference their age when discussing time horizons
+Never ask the user for information you already have in their profile.
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 3: THE SOCRATIC LAYER — FOR TIER 1 AND TIER 2 USERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -913,6 +925,16 @@ announce the tier; adapt silently.
 If country_of_residence is in the Meridian context, frame monetary examples
 in local currency (Ireland → €, UK → £, US → $, Canada → C$, Australia → A$).
 Default to € when absent.
+
+You have access to the user's complete profile including their age,
+employment status, dependants, debt, monthly expenses, active trade positions,
+academy progress, and financial goals. Use all of this context proactively.
+For example:
+- If they have open positions, factor those into advice
+- If they are early in the academy, adjust explanation depth accordingly
+- If they have dependants or debt, factor that into risk and liquidity recommendations
+- Reference their age when discussing time horizons
+Never ask the user for information you already have in their profile.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 11: RESPONSE STANDARDS — TONE, FORMAT, AND QUALITY
@@ -2249,6 +2271,7 @@ async def chat_completion(
         # Identify the last user message for classification
         user_messages = [m for m in messages if m.get("role") == "user"]
         last_user_text = user_messages[-1]["content"] if user_messages else ""
+        academy_session = request.session_type in {"academy_tutor", "academy_quiz"}
 
         # Prompt injection guard — fires before any I/O or tier classification.
         if _contains_injection(last_user_text):
@@ -2267,6 +2290,10 @@ async def chat_completion(
 
         # Tier detection — zero I/O, drives all subsequent gating decisions.
         message_tier = classify_tier(last_user_text)
+        if academy_session:
+            # Academy tutor/grader calls already carry bounded lesson context and
+            # should not pay the full advisor routing/context cost on every turn.
+            message_tier = "FAST"
         logger.info(
             "[TIER] tier=%s msg_len=%d msg='%s'",
             message_tier,
@@ -2285,14 +2312,14 @@ async def chat_completion(
 
         # Ticker detection is pure (no I/O) — extract once here so it is available
         # to the BALANCED gather and to the FAST/INSTANT skip path.
-        detected_ticker = _extract_ticker(last_user_text)
+        detected_ticker = None if academy_session else _extract_ticker(last_user_text)
 
         # ── Non-finance rejection gate ──────────────────────────────────────────
         # Fires before any I/O for FAST/BALANCED messages that clearly match a
         # non-finance pattern and contain no finance allowlist override.
         # INSTANT messages (trivial social phrases) bypass this check entirely
         # because they are already handled by their own fast-path below.
-        if message_tier != "INSTANT" and _is_nonfin_message(last_user_text):
+        if not academy_session and message_tier != "INSTANT" and _is_nonfin_message(last_user_text):
             logger.info(
                 "[NONFIN_GATE] rejected non-financial message | msg='%s'",
                 last_user_text[:50],
@@ -2324,7 +2351,15 @@ async def chat_completion(
         #             the response genuinely instant.
         fresh_goals_data: Optional[str] = None
         fresh_portfolio_data: Optional[str] = None
-        if message_tier == "INSTANT":
+        if academy_session:
+            logger.info("[ACADEMY] skipped advisor classifiers and Meridian/market context")
+            classification = _default_classification
+            reasoning_effort = _default_reasoning_effort
+            meridian_context = None
+            market_context = None
+            subagent_category = "general"
+
+        elif message_tier == "INSTANT":
             logger.info("[TIER] INSTANT: skipped _classify_query")
             classification: Dict[str, Any] = _default_classification
             reasoning_effort = _default_reasoning_effort
@@ -2494,7 +2529,10 @@ async def chat_completion(
         # INSTANT: skip API call entirely, default to "general".
         # FAST: classify sequentially with tier-aware timeout inside classify_intent().
         # BALANCED: already completed inside the concurrent gather above.
-        if message_tier == "INSTANT":
+        if academy_session:
+            subagent_category = "general"
+            logger.info("[ACADEMY] intent=general (academy mode)")
+        elif message_tier == "INSTANT":
             subagent_category = "general"
             logger.info("[TIER] INSTANT: intent=general (fast-path)")
         elif message_tier == "FAST":

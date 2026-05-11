@@ -18,6 +18,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
+import { getPythonApiUrl } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { refreshIrisContextCache } from "@/services/iris-cache";
 import { consumeChatStream } from "@/services/api";
@@ -79,10 +80,10 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
   async function callAIGrader(question: QuizQuestion, answer: string): Promise<{ score: number; rationale: string } | null> {
     try {
       const template = await academyApi.getPromptTemplate('short_answer_grader');
-      const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
+      const pythonBackendUrl = getPythonApiUrl();
       if (!pythonBackendUrl || !template) return null;
 
-      const systemPrompt = injectTemplateVars(template.template_text, {
+      const graderPrompt = injectTemplateVars(template.template_text, {
         question: question.prompt_md,
         answer,
       });
@@ -106,13 +107,14 @@ export function AcademyQuiz({ quiz, questions, options, lessonId, previousAttemp
           },
           body: JSON.stringify({
             messages: [
-              { role: 'system', content: systemPrompt },
               {
                 role: 'user',
-                content: `Grade this answer. Return ONLY a JSON object: {"score": <0-100>, "rationale": "<brief explanation>"}. Question: ${question.prompt_md}\nAnswer: ${answer}`,
+                content: `${graderPrompt}\n\nGrade this academy short-answer response. Return ONLY valid JSON in this exact shape: {"score": <0-100>, "rationale": "<brief explanation>"}.\n\nQuestion: ${question.prompt_md}\nStudent answer: ${answer}`,
               },
             ],
+            session_type: 'academy_quiz',
             max_tokens: 300,
+            temperature: 0.2,
           }),
         });
       } finally {

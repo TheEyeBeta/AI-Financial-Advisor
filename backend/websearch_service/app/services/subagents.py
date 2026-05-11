@@ -408,7 +408,7 @@ async def classify_intent(last_user_message: str, tier: str = "BALANCED") -> str
                     _classify_via_api(last_user_message, timeout=_FAST_TIER_TIMEOUT),
                     timeout=_FAST_TIER_TIMEOUT,
                 )
-            except asyncio.TimeoutError:
+            except (asyncio.TimeoutError, TimeoutError):
                 logger.warning(
                     "classify_intent: FAST-tier API call exceeded %.1fs, defaulting to general",
                     _FAST_TIER_TIMEOUT,

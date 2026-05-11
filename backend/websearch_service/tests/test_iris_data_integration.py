@@ -141,6 +141,7 @@ def fully_populated_store():
             "lesson_id": "lesson-101",
             "status": "completed",
             "completed_at": _fresh_ts(),
+            "best_quiz_score": 80,
         },
         {
             "id": "ulp-2",
@@ -148,6 +149,15 @@ def fully_populated_store():
             "lesson_id": "lesson-102",
             "status": "completed",
             "completed_at": _fresh_ts(),
+            "best_quiz_score": 76,
+        },
+        {
+            "id": "ulp-3",
+            "user_id": CORE_ID,
+            "lesson_id": "lesson-103",
+            "status": "in_progress",
+            "last_opened_at": _fresh_ts(),
+            "best_quiz_score": None,
         },
     ]
     store["lessons"] = [
@@ -227,6 +237,11 @@ def test_iris_prompt_contains_every_user_data_source(fully_populated_store):
     assert "Tester" in prompt, "last_name from core.users missing"
     assert "intermediate" in prompt, "experience_level missing"
     assert "moderate" in prompt, "risk_profile missing"
+    assert "Country of residence: Ireland" in prompt
+    assert "Employment status: Employed" in prompt
+    assert "Dependants: 1" in prompt
+    assert "Monthly expenses" in prompt
+    assert "Total debt" in prompt
 
     # ── Financial goals (meridian.user_goals) ─────────────────────────────
     assert "Retirement fund" in prompt, "active goal name missing"
@@ -270,6 +285,9 @@ def test_iris_prompt_contains_every_user_data_source(fully_populated_store):
     assert "Diversification basics" in prompt or "What is a stock?" in prompt, \
         "no completed lesson title in prompt"
     assert "Foundations" in prompt, "academy tier name missing"
+    assert "current module: Fundamentals" in prompt
+    assert "avg quiz score: 78%" in prompt
+    assert "financial literacy level: Developing" in prompt
 
     # ── Learned insights (meridian.user_insights) ─────────────────────────
     assert "LEARNED USER INSIGHTS" in prompt
@@ -850,6 +868,17 @@ def test_fast_prompt_includes_tier_guidance_section():
     assert "language signal" in FAST_SYSTEM_PROMPT
     # Currency hint
     assert "country_of_residence" in FAST_SYSTEM_PROMPT
+
+
+def test_prompts_instruct_iris_to_use_complete_profile_context():
+    """IRIS must proactively use complete Meridian profile context."""
+    from app.routes.ai_proxy import FAST_SYSTEM_PROMPT, FINANCIAL_ADVISOR_SYSTEM_PROMPT
+
+    for prompt in (FINANCIAL_ADVISOR_SYSTEM_PROMPT, FAST_SYSTEM_PROMPT):
+        assert "complete profile" in prompt
+        assert "active trade positions" in prompt
+        assert "academy progress" in prompt
+        assert "Never ask the user for information you already have" in prompt
 
 
 def test_balanced_prompt_redundancy_trim_removed_duplicate_filler_list():
