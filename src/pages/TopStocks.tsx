@@ -278,11 +278,13 @@ function BreakdownRow({
               </p>
               <div className="grid gap-2 sm:grid-cols-2">
                 <DetailCell label="RSI (14)" value={fmtNum(tech.rsi_14, 1)} color={rsiColor(tech.rsi_14)} />
+                {/* ADX temporarily disabled — re-enable once indicator is stable
                 <DetailCell
                   label="ADX"
                   value={fmtNum(tech.adx, 1)}
                   color={tech.adx != null ? (tech.adx > 25 ? "warning" : "neutral") : "neutral"}
                 />
+                */}
                 <DetailCell
                   label="MACD HIST."
                   value={fmtNum(tech.macd_histogram, 3)}
@@ -623,7 +625,7 @@ const TopStocks = () => {
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
                   Each name is filtered for price ≥ $5, market cap ≥ $500M, and
                   average volume ≥ 500k shares before scoring. Composite blends
-                  momentum, stability, trend, quality, volume and ADX —
+                  momentum, stability, trend, quality, and volume —
                   recalculated each cycle, never live.
                 </p>
               </div>
@@ -684,7 +686,7 @@ const TopStocks = () => {
 
           <div className="mt-4 rounded-[20px] border border-border/60 bg-background/70 p-4">
             <p className="text-xs leading-5 text-muted-foreground/80">
-              Composite weights: momentum 30 · stability 25 · trend 20 · quality 15 · volume 5 · ADX 5. Provided for research only — not personalised investment advice.
+              Composite weights: momentum 30 · stability 25 · trend 20 · quality 15 · volume 5. Provided for research only — not personalised investment advice.
             </p>
           </div>
         </section>
