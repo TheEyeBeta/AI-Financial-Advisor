@@ -1,7 +1,6 @@
-import { Download, Filter, History, TrendingDown, TrendingUp } from "lucide-react";
+import { History, TrendingDown, TrendingUp } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useClosedTrades } from "@/hooks/use-data";
 import { cn } from "@/lib/utils";
@@ -49,16 +48,6 @@ export function TradeHistory({ trades: tradesProp, isLoading: isLoadingProp }: T
           <p className="text-xs text-muted-foreground/70">
             {visibleTrades.length} closed trades - {winningTrades} wins - {visibleTrades.length - winningTrades} {visibleTrades.length - winningTrades === 1 ? 'loss' : 'losses'}
           </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="ghost" size="sm" disabled className="h-8 gap-1.5 text-xs cursor-not-allowed opacity-50" title="Coming soon">
-            <Filter className="h-3 w-3" />
-            Filter
-          </Button>
-          <Button variant="ghost" size="sm" disabled className="h-8 gap-1.5 text-xs cursor-not-allowed opacity-50" title="Coming soon">
-            <Download className="h-3 w-3" />
-            Export
-          </Button>
         </div>
       </div>
 

@@ -34,6 +34,7 @@ export function supabaseRestHeaders(apiKey, profile, extraHeaders = {}) {
   };
   if (profile) {
     headers["Accept-Profile"] = profile;
+    headers["Content-Profile"] = profile;
   }
   return Object.assign(headers, extraHeaders || {});
 }
@@ -48,7 +49,7 @@ export function parseTokenPool(rawValue) {
     if (Array.isArray(parsed)) {
       return parsed.map((item) => String(item).trim()).filter(Boolean);
     }
-  } catch {
+  } catch (_) {
     return rawValue
       .split(",")
       .map((item) => item.trim())

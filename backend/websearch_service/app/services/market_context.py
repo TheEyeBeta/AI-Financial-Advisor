@@ -34,13 +34,10 @@ def _fetch_macro_sync() -> Optional[dict]:
     client = supabase_client
     if not client:
         return None
-    result = (
-        _table(client, "market", "macro_snapshots")
-        .select("*")
-        .order("date", desc=True)
-        .limit(1)
-        .execute()
-    )
+    query = _table(client, "market", "macro_snapshots").select("*")
+    if hasattr(query, "not_"):
+        query = query.not_.is_("vix", "null")
+    result = query.order("date", desc=True).limit(1).execute()
     rows = result.data or []
     return rows[0] if rows else None
 

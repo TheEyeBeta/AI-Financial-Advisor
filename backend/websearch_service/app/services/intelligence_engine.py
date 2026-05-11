@@ -136,6 +136,7 @@ def _fetch_plans_by_user(user_ids: list[str]) -> dict[str, dict | None]:
         .in_("user_id", user_ids)
         .eq("status", "active")
         .order("created_at", desc=True)
+        .limit(len(user_ids) * 5)  # at most 5 active plans per user
         .execute()
     )
     # Since results are ordered newest-first, only keep the first plan per user.

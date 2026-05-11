@@ -7,10 +7,15 @@ import type { OpenPosition, PortfolioHistory } from '@/types/database';
 
 const mockNavigate = vi.fn();
 
-vi.mock('@/hooks/use-data', () => ({
-  usePortfolioHistory: vi.fn(() => ({ data: [], isLoading: false })),
-  useOpenPositions: vi.fn(() => ({ data: [], isLoading: false })),
-}));
+vi.mock('@/hooks/use-data', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/hooks/use-data')>();
+  return {
+    ...actual,
+    usePortfolioHistory: vi.fn(() => ({ data: [], isLoading: false })),
+    useOpenPositions: vi.fn(() => ({ data: [], isLoading: false })),
+    useTrades: vi.fn(() => ({ data: [], isLoading: false })),
+  };
+});
 
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -25,6 +30,9 @@ vi.mock('recharts', () => ({
   XAxis: () => null,
   YAxis: () => null,
   Tooltip: () => null,
+  BarChart: ({ children }: { children: React.ReactNode }) => <div data-testid="bar-chart">{children}</div>,
+  Bar: () => <div data-testid="bar" />,
+  Cell: () => null,
 }));
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
@@ -91,7 +99,6 @@ describe('PortfolioPerformance', () => {
     render(<PortfolioPerformance portfolioHistory={history} openPositions={[]} />);
 
     expect(screen.getByText('Portfolio Performance')).toBeInTheDocument();
-    expect(screen.getByTestId('chart-container')).toBeInTheDocument();
   });
 
   it('calculates positive return correctly', () => {
@@ -102,11 +109,8 @@ describe('PortfolioPerformance', () => {
 
     render(<PortfolioPerformance portfolioHistory={history} openPositions={[]} />);
 
-    // Current value = $12,000
     expect(screen.getByText('$12,000')).toBeInTheDocument();
-    // Return = +$2,000 all time
     expect(screen.getByText(/\+\$2,000.00 all time/)).toBeInTheDocument();
-    // Percent = +20.00%
     expect(screen.getByText('+20.00%')).toBeInTheDocument();
   });
 

@@ -23,7 +23,7 @@ export const options = {
     paper_trading_load: {
       executor: "constant-vus",
       vus: 100,
-      duration: __ENV.K6_DURATION || "30s",
+      duration: __ENV.LOAD_TEST_DURATION || "30s",
       gracefulStop: "10s",
     },
   },

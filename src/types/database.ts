@@ -117,9 +117,9 @@ export interface Database {
         Update: { id?: string; user_id?: string; name?: string; icon?: string | null; unlocked_at?: string | null };
       };
       user_profiles: {
-        Row: { id: string; user_id: string; created_at: string | null; updated_at: string | null; age_range: string | null; income_range: string | null; monthly_expenses: number | null; total_debt: number | null; dependants: number | null; risk_profile: string | null; knowledge_tier: number | null; investment_horizon: string | null; emergency_fund_months: number | null; monthly_investable: number | null };
-        Insert: { id?: string; user_id: string; created_at?: string | null; updated_at?: string | null; age_range?: string | null; income_range?: string | null; monthly_expenses?: number | null; total_debt?: number | null; dependants?: number | null; risk_profile?: string | null; knowledge_tier?: number | null; investment_horizon?: string | null; emergency_fund_months?: number | null; monthly_investable?: number | null };
-        Update: { id?: string; user_id?: string; created_at?: string | null; updated_at?: string | null; age_range?: string | null; income_range?: string | null; monthly_expenses?: number | null; total_debt?: number | null; dependants?: number | null; risk_profile?: string | null; knowledge_tier?: number | null; investment_horizon?: string | null; emergency_fund_months?: number | null; monthly_investable?: number | null };
+        Row: { id: string; user_id: string; created_at: string | null; updated_at: string | null; age_range: string | null; income_range: string | null; employment_status: string | null; country_of_residence: string | null; marital_status: string | null; monthly_expenses: number | null; total_debt: number | null; dependants: number | null; risk_profile: string | null; knowledge_tier: number | null; investment_horizon: string | null; emergency_fund_months: number | null; monthly_investable: number | null };
+        Insert: { id?: string; user_id: string; created_at?: string | null; updated_at?: string | null; age_range?: string | null; income_range?: string | null; employment_status?: string | null; country_of_residence?: string | null; marital_status?: string | null; monthly_expenses?: number | null; total_debt?: number | null; dependants?: number | null; risk_profile?: string | null; knowledge_tier?: number | null; investment_horizon?: string | null; emergency_fund_months?: number | null; monthly_investable?: number | null };
+        Update: { id?: string; user_id?: string; created_at?: string | null; updated_at?: string | null; age_range?: string | null; income_range?: string | null; employment_status?: string | null; country_of_residence?: string | null; marital_status?: string | null; monthly_expenses?: number | null; total_debt?: number | null; dependants?: number | null; risk_profile?: string | null; knowledge_tier?: number | null; investment_horizon?: string | null; emergency_fund_months?: number | null; monthly_investable?: number | null };
       };
       users: {
         Row: { id: string; auth_id: string; first_name: string | null; last_name: string | null; age: number | null; email: string | null; experience_level: string | null; risk_level: string | null; is_verified: boolean | null; email_verified_at: string | null; created_at: string | null; updated_at: string | null; userType: string; onboarding_complete: boolean | null; marital_status: string | null; investment_goal: string | null };
@@ -155,10 +155,14 @@ export interface Database {
           ticker: string | null;
           composite_score: number | null;
           momentum_score: number | null;
+          stability_score: number | null;
           technical_score: number | null;
           fundamental_score: number | null;
           consistency_score: number | null;
           signal_score: number | null;
+          momentum_20d_pct: number | null;
+          volatility_20d: number | null;
+          hard_filter_passed: boolean | null;
           momentum_1m: number | null;
           momentum_3m: number | null;
           momentum_6m: number | null;
@@ -177,10 +181,14 @@ export interface Database {
           ticker?: string | null;
           composite_score?: number | null;
           momentum_score?: number | null;
+          stability_score?: number | null;
           technical_score?: number | null;
           fundamental_score?: number | null;
           consistency_score?: number | null;
           signal_score?: number | null;
+          momentum_20d_pct?: number | null;
+          volatility_20d?: number | null;
+          hard_filter_passed?: boolean | null;
           momentum_1m?: number | null;
           momentum_3m?: number | null;
           momentum_6m?: number | null;
@@ -199,10 +207,14 @@ export interface Database {
           ticker?: string | null;
           composite_score?: number | null;
           momentum_score?: number | null;
+          stability_score?: number | null;
           technical_score?: number | null;
           fundamental_score?: number | null;
           consistency_score?: number | null;
           signal_score?: number | null;
+          momentum_20d_pct?: number | null;
+          volatility_20d?: number | null;
+          hard_filter_passed?: boolean | null;
           momentum_1m?: number | null;
           momentum_3m?: number | null;
           momentum_6m?: number | null;
@@ -335,10 +347,14 @@ export interface StockScore {
   change_percent: number | null;
   composite_score: number;
   momentum_score: number | null;
+  stability_score: number | null;
   technical_score: number | null;
   fundamental_score: number | null;
   consistency_score: number | null;
   signal_score: number | null;
+  momentum_20d_pct: number | null;
+  volatility_20d: number | null;
+  hard_filter_passed: boolean | null;
   momentum_1m: number | null;
   momentum_3m: number | null;
   momentum_6m: number | null;

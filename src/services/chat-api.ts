@@ -28,18 +28,22 @@ export function getTimeoutForMessage(message: string): number {
     return 15000; // 15 seconds — 3-4× headroom over expected ~2-4s INSTANT response
   }
 
-  // FAST tier - short analytical questions
+  // Short analytical questions. Length alone can't predict backend latency:
+  // a short message containing a ticker (e.g. "breakdown of NVDA") routes to
+  // the backend's BALANCED tier and may run the full pipeline plus tool calls
+  // before the first chunk arrives, so the time-to-first-byte budget needs to
+  // cover that worst case. Subsequent chunks reset via CHUNK_INTERVAL_TIMEOUT_MS.
   if (length < 150) {
-    return 25000; // 25 seconds — safe headroom for classifier + FAST path
+    return 60000; // 60 seconds
   }
 
-  // BALANCED tier - standard questions
+  // Standard questions
   if (length < 400) {
-    return 45000; // 45 seconds
+    return 90000; // 90 seconds
   }
 
-  // DEEP tier - long complex questions
-  return 90000; // 90 seconds
+  // Long complex questions
+  return 120000; // 120 seconds
 }
 
 export function createStreamTimeout(

@@ -31,6 +31,7 @@ from ..services.auth import (
 )
 from ..services.dataapi_client import get_dataapi_client
 from ..services.intelligence_engine import run_intelligence_cycle
+from ..services.job_logger import log_job_run
 from ..services.memory_agent import run_history_scan, run_memory_extraction_cycle
 from ..services.meridian_context import refresh_all_users_context
 from ..services.ranking_engine import run_ranking_cycle
@@ -239,14 +240,17 @@ async def dataapi_query(
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
 
     # Wrap with an outer LIMIT 1000 to enforce a hard row cap at the SQL level.
-    final_sql = f"SELECT * FROM ({q}) AS _q LIMIT 1000"
+    # nosec B608: admin-only endpoint (see _require_admin); SELECT-only with DML
+    # keywords blocked above; downstream DataAPI also enforces RLS and read-only role.
+    final_sql = f"SELECT * FROM ({q}) AS _q LIMIT 1000"  # nosec B608
 
     try:
         base_url, token = await _get_admin_token()
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"DataAPI auth error: {exc}") from exc
+        logger.warning("Admin DataAPI auth error: %s", exc)
+        raise HTTPException(status_code=502, detail="DataAPI authentication failed.") from exc
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as http:
@@ -260,7 +264,8 @@ async def dataapi_query(
                 raise HTTPException(status_code=resp.status_code, detail=f"DataAPI query error: {error_body}")
             result = resp.json()
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"DataAPI request failed: {exc}") from exc
+        logger.warning("Admin DataAPI request failed: %s", exc)
+        raise HTTPException(status_code=502, detail="DataAPI request failed.") from exc
 
     logger.info(
         "admin_dataapi_query admin=%s query=%r timestamp=%s",
@@ -271,10 +276,201 @@ async def dataapi_query(
     return result
 
 
+@router.delete("/api/admin/users/{auth_id}")
+async def delete_user(auth_id: str, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Permanently delete a user from Supabase Auth and all downstream tables.
+
+    Deletes the auth.users record via the Supabase Admin API.  The ON DELETE
+    CASCADE constraints on core.users (and its children) handle the rest, so
+    the email is fully released and can be reused for a new account.
+    """
+    supabase_url, service_role_key = _get_supabase_rest_config()
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as http:
+            resp = await http.delete(
+                f"{supabase_url}/auth/v1/admin/users/{auth_id}",
+                headers={
+                    "apikey": service_role_key,
+                    "Authorization": f"Bearer {service_role_key}",
+                },
+            )
+    except httpx.HTTPError as exc:
+        logger.error("Supabase auth user deletion failed for %s: %s", auth_id, exc)
+        raise HTTPException(status_code=502, detail="Failed to reach authentication service.") from exc
+
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail="Auth user not found")
+    if resp.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Supabase returned HTTP {resp.status_code}: {resp.text}",
+        )
+
+    logger.info("Admin %s deleted auth user %s", admin, auth_id)
+    return {"status": "deleted", "auth_id": auth_id}
+
+
+@router.post("/api/admin/purge-orphaned-auth-users")
+async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Delete auth.users records that have no matching core.users row.
+
+    Left over from the previous deleteUser implementation which removed
+    core.users but skipped auth.users, permanently blocking those email
+    addresses.  This endpoint finds the orphans and removes them so the
+    emails can be reused.
+    """
+    supabase_url, service_role_key = _get_supabase_rest_config()
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+    }
+
+    # Collect every auth_id that still has a core.users row.
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            resp = await http.get(
+                f"{supabase_url}/rest/v1/users",
+                params={"select": "auth_id"},
+                headers={**headers, "Accept-Profile": "core"},
+            )
+    except httpx.HTTPError as exc:
+        logger.warning("Failed to fetch core users: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to reach database service.") from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"core.users query failed: HTTP {resp.status_code}")
+
+    live_auth_ids: set[str] = {row["auth_id"] for row in resp.json() if row.get("auth_id")}
+
+    # Page through all auth users and collect orphans.
+    orphan_ids: list[str] = []
+    page = 1
+    per_page = 1000
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as http:
+            while True:
+                resp = await http.get(
+                    f"{supabase_url}/auth/v1/admin/users",
+                    params={"page": page, "per_page": per_page},
+                    headers=headers,
+                )
+                if resp.status_code != 200:
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"auth.users list failed: HTTP {resp.status_code}",
+                    )
+                data = resp.json()
+                auth_users = data.get("users", [])
+                if not auth_users:
+                    break
+
+                for user in auth_users:
+                    if user.get("id") not in live_auth_ids:
+                        orphan_ids.append(user["id"])
+
+                if len(auth_users) < per_page:
+                    break
+                page += 1
+    except httpx.HTTPError as exc:
+        logger.warning("Failed to list auth users: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to reach authentication service.") from exc
+
+    # Delete each orphan.
+    deleted: list[str] = []
+    failed: list[str] = []
+
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        for auth_id in orphan_ids:
+            try:
+                del_resp = await http.delete(
+                    f"{supabase_url}/auth/v1/admin/users/{auth_id}",
+                    headers=headers,
+                )
+                if del_resp.status_code in (200, 204):
+                    deleted.append(auth_id)
+                else:
+                    failed.append(auth_id)
+            except httpx.HTTPError:
+                failed.append(auth_id)
+
+    logger.info(
+        "Admin %s purged orphaned auth users: %d deleted, %d failed",
+        admin,
+        len(deleted),
+        len(failed),
+    )
+    return {"deleted": len(deleted), "failed": len(failed)}
+
+
+async def _run_ranking_logged() -> None:
+    started_at = datetime.now(timezone.utc)
+    try:
+        summary = await run_ranking_cycle()
+        skipped = summary.get("skipped", False)
+        await log_job_run(
+            job_name="ranking_engine",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("tickers_scored", 0),
+            raw_output=summary,
+        )
+    except Exception as exc:
+        await log_job_run(
+            job_name="ranking_engine",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
+
+
+async def _run_intelligence_logged() -> None:
+    started_at = datetime.now(timezone.utc)
+    try:
+        summary = await run_intelligence_cycle()
+        skipped = summary.get("skipped", False)
+        await log_job_run(
+            job_name="intelligence_engine",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("users_processed", 0),
+            raw_output=summary,
+        )
+    except Exception as exc:
+        await log_job_run(
+            job_name="intelligence_engine",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
+
+
+async def _run_memory_extraction_logged() -> None:
+    started_at = datetime.now(timezone.utc)
+    try:
+        summary = await run_memory_extraction_cycle()
+        skipped = summary.get("skipped", False)
+        await log_job_run(
+            job_name="memory_extraction",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("chats_processed", 0),
+            raw_output=summary,
+        )
+    except Exception as exc:
+        await log_job_run(
+            job_name="memory_extraction",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
+
+
 @router.post("/api/admin/trigger-ranking")
 async def trigger_ranking(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger a ranking cycle in the background and return immediately."""
-    asyncio.create_task(run_ranking_cycle())
+    asyncio.create_task(_run_ranking_logged())
     logger.info("Admin %s triggered ranking cycle in background", admin)
     return {"status": "started"}
 
@@ -290,7 +486,7 @@ async def trigger_memory_scan(admin: str = Depends(_require_admin)) -> dict[str,
 @router.post("/api/admin/trigger-intelligence")
 async def trigger_intelligence(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger an intelligence cycle in the background and return immediately."""
-    asyncio.create_task(run_intelligence_cycle())
+    asyncio.create_task(_run_intelligence_logged())
     logger.info("Admin %s triggered intelligence cycle in background", admin)
     return {"status": "started"}
 
@@ -298,7 +494,7 @@ async def trigger_intelligence(admin: str = Depends(_require_admin)) -> dict[str
 @router.post("/api/admin/trigger-memory-extraction")
 async def trigger_memory_extraction(admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Manually trigger a live memory extraction cycle in the background and return immediately."""
-    asyncio.create_task(run_memory_extraction_cycle())
+    asyncio.create_task(_run_memory_extraction_logged())
     logger.info("Admin %s triggered memory extraction cycle in background", admin)
     return {"status": "started"}
 
@@ -309,6 +505,40 @@ async def trigger_meridian_refresh(admin: str = Depends(_require_admin)) -> dict
     asyncio.create_task(refresh_all_users_context())
     logger.info("Admin %s triggered Meridian context refresh in background", admin)
     return {"status": "started"}
+
+
+@router.get("/api/admin/job-run-logs")
+async def job_run_logs(
+    job_name: str = Query(min_length=1, max_length=100),
+    limit: int = Query(default=10, ge=1, le=100),
+    admin: str = Depends(_require_admin),
+) -> dict[str, Any]:
+    """Return the last N run records for the given job from core.job_run_logs."""
+    base_url, service_role_key = _get_supabase_rest_config()
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.get(
+                f"{base_url}/rest/v1/job_run_logs",
+                params={
+                    "select": "id,job_name,started_at,finished_at,status,records_processed,summary,error,created_at",
+                    "job_name": f"eq.{job_name}",
+                    "order": "started_at.desc",
+                    "limit": str(limit),
+                },
+                headers={
+                    "apikey": service_role_key,
+                    "Authorization": f"Bearer {service_role_key}",
+                    "Accept-Profile": "core",
+                },
+            )
+        if resp.status_code >= 400:
+            logger.warning("job-run-logs query returned HTTP %s", resp.status_code)
+            return {"logs": []}
+        return {"logs": resp.json()}
+    except Exception as exc:
+        logger.warning("job-run-logs query failed: %s", exc)
+        return {"logs": []}
 
 
 @router.get("/api/admin/scheduler-status")

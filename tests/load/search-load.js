@@ -18,7 +18,7 @@ export const options = {
     search_load: {
       executor: "constant-vus",
       vus: 200,
-      duration: getFirstNonEmptyEnv("K6_DURATION", "30s"),
+      duration: __ENV.LOAD_TEST_DURATION || "30s",
       gracefulStop: "10s",
     },
   },

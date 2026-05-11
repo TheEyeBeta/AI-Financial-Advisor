@@ -417,6 +417,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/users/{auth_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete User
+         * @description Permanently delete a user from Supabase Auth and all downstream tables.
+         *
+         *     Deletes the auth.users record via the Supabase Admin API.  The ON DELETE
+         *     CASCADE constraints on core.users (and its children) handle the rest, so
+         *     the email is fully released and can be reused for a new account.
+         */
+        delete: operations["delete_user_api_admin_users__auth_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/purge-orphaned-auth-users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Orphaned Auth Users
+         * @description Delete auth.users records that have no matching core.users row.
+         *
+         *     Left over from the previous deleteUser implementation which removed
+         *     core.users but skipped auth.users, permanently blocking those email
+         *     addresses.  This endpoint finds the orphans and removes them so the
+         *     emails can be reused.
+         */
+        post: operations["purge_orphaned_auth_users_api_admin_purge_orphaned_auth_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/trigger-ranking": {
         parameters: {
             query?: never;
@@ -1017,16 +1066,24 @@ export interface components {
             change_percent?: number | null;
             /** Composite Score */
             composite_score: number;
-            /** Trend Score */
-            trend_score?: number | null;
             /** Momentum Score */
             momentum_score?: number | null;
+            /** Stability Score */
+            stability_score?: number | null;
+            /** Trend Score */
+            trend_score?: number | null;
             /** Volume Score */
             volume_score?: number | null;
             /** Range Score */
             range_score?: number | null;
             /** Adx Score */
             adx_score?: number | null;
+            /** Momentum 20D Pct */
+            momentum_20d_pct?: number | null;
+            /** Volatility 20D */
+            volatility_20d?: number | null;
+            /** Hard Filter Passed */
+            hard_filter_passed?: boolean | null;
             /** Technical Score */
             technical_score?: number | null;
             /** Fundamental Score */
@@ -1698,6 +1755,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_user_api_admin_users__auth_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                auth_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_orphaned_auth_users_api_admin_purge_orphaned_auth_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

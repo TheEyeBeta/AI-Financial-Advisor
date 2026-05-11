@@ -10,11 +10,19 @@ the spec dict, and writes it as pretty-printed JSON to ``docs/openapi.json``
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 # Ensure the websearch_service package is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+# The Supabase service-role client raises at import time when
+# SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are absent, so we seed harmless
+# placeholders here before importing the app. This script only reads static
+# route metadata — it never makes a real Supabase call.
+os.environ.setdefault("SUPABASE_URL", "https://openapi-export.placeholder.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "openapi-export-placeholder")
 
 from app.main import app  # noqa: E402
 

@@ -152,6 +152,7 @@ export interface StockScore {
   rank_tier: string;       // "Strong Buy" | "Buy" | "Hold" | "Underperform" | "Sell"
   conviction: string;      // "High" | "Medium" | "Low"
   momentum_score: number;
+  stability_score: number | null;
   technical_score: number;
   fundamental_score: number;
   risk_score: number;
@@ -159,6 +160,9 @@ export interface StockScore {
   ml_score: number | null;
   has_ml_data: boolean;
   dimensions_bullish: number;
+  momentum_20d_pct: number | null;
+  volatility_20d: number | null;
+  hard_filter_passed: boolean | null;
   breakdown: {
     // Technical
     rsi_14: number | null;
@@ -360,10 +364,18 @@ async function readErrorMessage(response: Response): Promise<string> {
   }
 }
 
+// Absolute ceiling on a single stream — independent of the per-chunk idle
+// timeout in chat-api.ts. Protects against an upstream that keeps the
+// connection alive with a steady drip of whitespace tokens or a model loop.
+// Set above the longest tier cap (120s) so it only fires on genuinely stuck
+// streams, not on legitimately long deep-analysis responses.
+export const STREAM_WALL_CLOCK_TIMEOUT_MS = 180_000;
+
 export async function consumeChatStream(
   response: Response,
   onChunk?: (chunk: string) => void,
   onChunkReceived?: () => void,
+  wallClockTimeoutMs: number = STREAM_WALL_CLOCK_TIMEOUT_MS,
 ): Promise<string> {
   const contentType = response.headers.get('content-type') ?? '';
 
@@ -385,6 +397,24 @@ export async function consumeChatStream(
   if (!reader) {
     throw new Error('Streaming response body is unavailable.');
   }
+
+  // Hard deadline that fires even if chunks keep arriving. We resolve a
+  // sentinel promise on expiry and Promise.race it against each read.
+  let wallClockExpired = false;
+  let wallClockReject: ((err: Error) => void) | null = null;
+  const wallClockPromise = new Promise<never>((_, reject) => {
+    wallClockReject = reject;
+  });
+  const wallClockId =
+    wallClockTimeoutMs > 0
+      ? setTimeout(() => {
+          wallClockExpired = true;
+          void reader.cancel().catch(() => {
+            /* reader may already be released */
+          });
+          wallClockReject?.(new Error('Stream exceeded maximum duration. Please try again.'));
+        }, wallClockTimeoutMs)
+      : null;
 
   const decoder = new TextDecoder();
   let buffer = '';
@@ -440,7 +470,7 @@ export async function consumeChatStream(
 
   try {
     while (true) {
-      const { value, done } = await reader.read();
+      const { value, done } = await Promise.race([reader.read(), wallClockPromise]);
       if (done) {
         buffer = normalizeStreamBuffer(buffer + decoder.decode());
         break;
@@ -459,7 +489,14 @@ export async function consumeChatStream(
       return assembled;
     }
   } finally {
+    if (wallClockId !== null) {
+      clearTimeout(wallClockId);
+    }
     reader.releaseLock();
+  }
+
+  if (wallClockExpired) {
+    throw new Error('Stream exceeded maximum duration. Please try again.');
   }
 
   if (assembled.length > 0) {
@@ -787,7 +824,7 @@ export const tradeEngineApi = {
       const data = await response.json();
       // If backend returns empty items with a message, it's a stub
       if (data.items && data.items.length === 0 && data.message) {
-        console.log('Backend news endpoint is a stub, using Supabase instead');
+        // stub response — UI will fall back to Supabase
       }
       return data;
     } catch (error) {
@@ -860,14 +897,10 @@ export const tradeEngineApi = {
 
       const response = await fetch(`${this.baseUrl}/api/v1/ai/context?${params}`);
       if (!response.ok) {
-        // Trade Engine not available - return null for graceful fallback
-        console.log('[TradeEngine] AI context endpoint not available, using Supabase fallback');
         return null;
       }
       return response.json();
-    } catch (error) {
-      // Network error or Trade Engine offline - return null for graceful fallback
-      console.log('[TradeEngine] AI context fetch failed, using Supabase fallback:', error);
+    } catch {
       return null;
     }
   },
@@ -886,12 +919,10 @@ export const tradeEngineApi = {
 
       const response = await fetch(`${this.baseUrl}/api/v1/ai/signals?${params}`);
       if (!response.ok) {
-        console.log('[TradeEngine] Signals endpoint not available');
         return [];
       }
       return response.json();
-    } catch (error) {
-      console.log('[TradeEngine] Signals fetch failed:', error);
+    } catch {
       return [];
     }
   },
@@ -1117,6 +1148,18 @@ export interface SchedulerJob {
   status: string;
 }
 
+export interface JobRunLog {
+  id: string;
+  job_name: string;
+  started_at: string;
+  finished_at: string | null;
+  status: "success" | "error" | "skipped";
+  records_processed: number | null;
+  summary: string | null;
+  error: string | null;
+  created_at: string;
+}
+
 async function _getAdminAuthHeaders(): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
@@ -1161,5 +1204,13 @@ export const adminApi = {
     const resp = await fetch(`${getPythonApiUrl()}/api/admin/scheduler-status`, { headers });
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
     return resp.json() as Promise<{ jobs: SchedulerJob[] }>;
+  },
+
+  async getJobRunLogs(jobName: string, limit = 10): Promise<{ logs: JobRunLog[] }> {
+    const headers = await _getAdminAuthHeaders();
+    const url = `${getPythonApiUrl()}/api/admin/job-run-logs?job_name=${encodeURIComponent(jobName)}&limit=${limit}`;
+    const resp = await fetch(url, { headers });
+    if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
+    return resp.json() as Promise<{ logs: JobRunLog[] }>;
   },
 };

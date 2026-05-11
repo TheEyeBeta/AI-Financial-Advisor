@@ -31,7 +31,7 @@ function formatMessage(content: string): React.ReactNode {
     if (/^\d+\.\s/.test(trimmed)) {
       const items = trimmed.split(/\n(?=\d+\.\s)/);
       return (
-        <ol key={paragraphIndex} className="my-3 ml-5 list-decimal space-y-1.5">
+        <ol key={paragraphIndex} className="my-3 pl-5 list-decimal space-y-1.5">
           {items.map((item, itemIndex) => (
             <li key={itemIndex} className="pl-1 text-sm leading-7 text-foreground/90">
               {formatInlineText(item.replace(/^\d+\.\s*/, ""), `ol-${paragraphIndex}-${itemIndex}`)}
@@ -44,7 +44,7 @@ function formatMessage(content: string): React.ReactNode {
     if (/^[-\u2022*]\s/.test(trimmed)) {
       const items = trimmed.split(/\n(?=[-\u2022*]\s)/);
       return (
-        <ul key={paragraphIndex} className="my-3 ml-5 list-disc space-y-1.5">
+        <ul key={paragraphIndex} className="my-3 pl-5 list-disc space-y-1.5">
           {items.map((item, itemIndex) => (
             <li key={itemIndex} className="pl-1 text-sm leading-7 text-foreground/90">
               {formatInlineText(item.replace(/^[-\u2022*]\s*/, ""), `ul-${paragraphIndex}-${itemIndex}`)}

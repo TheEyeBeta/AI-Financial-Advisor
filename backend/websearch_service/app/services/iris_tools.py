@@ -286,13 +286,12 @@ def _fetch_top_stocks_sync(limit: int) -> Dict[str, Any]:
     )
     stock_rows = (stocks_res and stocks_res.data) or []
 
-    macro_res = (
-        _table(client, "market", "macro_snapshots")
-        .select("vix, yield_10y, sp500_level, sp500_change_pct, fed_funds_rate")
-        .order("date", desc=True)
-        .limit(1)
-        .execute()
+    macro_query = _table(client, "market", "macro_snapshots").select(
+        "vix, yield_10y, sp500_level, sp500_change_pct, fed_funds_rate"
     )
+    if hasattr(macro_query, "not_"):
+        macro_query = macro_query.not_.is_("vix", "null")
+    macro_res = macro_query.order("date", desc=True).limit(1).execute()
     macro_rows = (macro_res and macro_res.data) or []
     macro = macro_rows[0] if macro_rows else {}
 

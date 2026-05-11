@@ -51,12 +51,18 @@ class TrendingStock(BaseModel):
     name: Optional[str] = None
     change_percent: Optional[float] = None
     composite_score: float
-    # ── Indicator-based sub-scores (new composite formula) ────────────────────
-    trend_score: Optional[float] = None       # 30% weight: price vs SMA50/200
-    momentum_score: Optional[float] = None    # 30% weight: RSI + MACD histogram
-    volume_score: Optional[float] = None      # 20% weight: volume / avg_volume_10d
-    range_score: Optional[float] = None       # 10% weight: 52-week position
-    adx_score: Optional[float] = None         # 10% weight: ADX (bullish only)
+    # ── Indicator-based sub-scores (current composite formula) ───────────────
+    # Weights: momentum 30 / stability 25 / trend 20 / quality 15 / volume 5 / adx 5
+    momentum_score: Optional[float] = None
+    stability_score: Optional[float] = None   # 25% weight: inverted Bollinger band width
+    trend_score: Optional[float] = None
+    volume_score: Optional[float] = None
+    range_score: Optional[float] = None       # disabled until 52w data is reliable
+    adx_score: Optional[float] = None
+    # ── Headline metrics used by the redesigned TopStocks UI ─────────────────
+    momentum_20d_pct: Optional[float] = None  # ~20 trading days, %
+    volatility_20d: Optional[float] = None    # raw Bollinger band-width ratio
+    hard_filter_passed: Optional[bool] = None
     # ── Legacy dimension scores (kept for backwards compatibility) ─────────────
     technical_score: Optional[float] = None
     fundamental_score: Optional[float] = None
@@ -143,10 +149,8 @@ async def get_stock_ranking(
             result = query.execute()
             rows = result.data or []
         except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to read trending stocks: {exc}",
-            ) from exc
+            logger.warning("Trending stocks query failed: %s", exc)
+            raise HTTPException(status_code=502, detail="Market data temporarily unavailable.") from exc
 
         # Compute data age from the most recent ranked_at
         last_ranked_at: Optional[str] = None
@@ -293,10 +297,8 @@ async def get_stock_detail(
             )
             snap_rows = snap_result.data or []
         except Exception as exc:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Failed to read stock snapshot: {exc}",
-            ) from exc
+            logger.warning("Stock snapshot query failed for %s: %s", ticker_upper, exc)
+            raise HTTPException(status_code=502, detail="Market data temporarily unavailable.") from exc
 
         if not snap_rows:
             raise HTTPException(

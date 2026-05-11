@@ -18,14 +18,24 @@ Schema routing:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+import threading
+import time
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional, Tuple
 
 from .supabase_client import supabase_client
 
 logger = logging.getLogger(__name__)
+
+
+_LEGACY_OPTIONAL_IRIS_CACHE_COLUMNS = {
+    "journal_summary",
+    "portfolio_stats",
+    "achievement_summary",
+}
 
 
 def _sanitise_for_prompt(value: str | None, max_length: int = 100) -> str:
@@ -51,6 +61,124 @@ def _sanitise_for_prompt(value: str | None, max_length: int = 100) -> str:
     if len(value) > max_length:
         value = value[:max_length] + "..."
     return value.strip() or "not set"
+
+
+def _humanise_profile_label(value: Any) -> Optional[str]:
+    """Convert stored enum-like profile values into user-facing labels."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text.replace("_", " ").replace("-", " ").title()
+
+
+def _has_context_value(value: Any) -> bool:
+    """Return True for values worth injecting into the prompt."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        text = value.strip()
+        return bool(text) and text.lower() != "not set"
+    if isinstance(value, (list, dict, tuple, set)):
+        return bool(value)
+    return True
+
+
+def _format_currency_amount(value: Any) -> str:
+    try:
+        amount = float(value)
+    except (TypeError, ValueError):
+        return _sanitise_for_prompt(value, max_length=60)
+    if amount.is_integer():
+        return f"€{amount:,.0f}"
+    return f"€{amount:,.2f}"
+
+
+def _format_percent_value(value: Any) -> str:
+    try:
+        pct = float(value)
+    except (TypeError, ValueError):
+        return _sanitise_for_prompt(value, max_length=30)
+    if pct.is_integer():
+        return f"{pct:.0f}%"
+    return f"{pct:.1f}%"
+
+
+def _append_context_line(
+    lines: List[str],
+    label: str,
+    value: Any,
+    *,
+    max_length: int = 100,
+    formatter=None,
+) -> None:
+    if not _has_context_value(value):
+        return
+    if formatter is not None:
+        rendered = formatter(value)
+    else:
+        rendered = _sanitise_for_prompt(value, max_length=max_length)
+    if _has_context_value(rendered):
+        lines.append(f"- {label}: {rendered}")
+
+
+def _calculate_age_from_dob(dob: Any, today: Optional[date] = None) -> Optional[int]:
+    """Calculate age from a date_of_birth value if one is present."""
+    if not dob:
+        return None
+    try:
+        if isinstance(dob, datetime):
+            dob_date = dob.date()
+        elif isinstance(dob, date):
+            dob_date = dob
+        else:
+            dob_date = date.fromisoformat(str(dob).strip()[:10])
+        today_date = today or datetime.now(timezone.utc).date()
+        age = today_date.year - dob_date.year
+        if (today_date.month, today_date.day) < (dob_date.month, dob_date.day):
+            age -= 1
+        return age if 0 <= age <= 150 else None
+    except Exception:
+        return None
+
+
+def _resolve_age(age_value: Any, dob_value: Any = None) -> Optional[int]:
+    age_from_dob = _calculate_age_from_dob(dob_value)
+    if age_from_dob is not None:
+        return age_from_dob
+    if age_value in (None, ""):
+        return None
+    try:
+        return int(age_value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalise_position_type(value: Any) -> str:
+    return _sanitise_for_prompt(value, max_length=10).replace("_", " ").title()
+
+
+def _derive_financial_literacy_level(knowledge_tier: Any) -> Optional[str]:
+    try:
+        tier = int(knowledge_tier)
+    except (TypeError, ValueError):
+        return None
+    return {
+        1: "Foundation",
+        2: "Developing",
+        3: "Advanced",
+    }.get(tier)
+
+
+def _extract_missing_postgrest_column(exc: Exception) -> Optional[str]:
+    """Parse a PostgREST missing-column error into the missing column name."""
+    message = str(exc)
+    marker = "Could not find the '"
+    if marker not in message:
+        return None
+    remainder = message.split(marker, 1)[1]
+    return remainder.split("'", 1)[0] or None
 
 
 def _table(client, schema_name: str, table_name: str):
@@ -147,12 +275,30 @@ def _build_minimal_context_sync(auth_id: str) -> str:
 
 
 # Cache staleness threshold. Beyond this age the cache is still served,
-# but a refresh is scheduled asynchronously in the background.
-_CACHE_STALE_AFTER = timedelta(hours=24)
+# but a refresh is scheduled asynchronously in the background. The frontend
+# triggers explicit refreshes after every relevant mutation, so this is the
+# safety net for cold sessions / missed triggers — not the primary refresh
+# path. Default 30 minutes balances freshness (a trade or completed lesson
+# surfaces within half an hour) against churn (chatty sessions don't trigger
+# a refresh on every turn). Override via IRIS_CACHE_STALE_MINUTES.
+def _stale_after_minutes() -> int:
+    raw = os.environ.get("IRIS_CACHE_STALE_MINUTES", "30")
+    try:
+        value = int(raw)
+        return value if value > 0 else 30
+    except (TypeError, ValueError):
+        return 30
+
+
+_CACHE_STALE_AFTER = timedelta(minutes=_stale_after_minutes())
 
 
 def _is_cache_stale(updated_at: Any) -> bool:
-    """Return True if the cache row's updated_at is older than _CACHE_STALE_AFTER."""
+    """Return True if the cache row's updated_at is older than the stale threshold.
+
+    Re-reads IRIS_CACHE_STALE_MINUTES on each call so deploys / tests can
+    change the threshold without restarting the process.
+    """
     if not updated_at:
         return True
     try:
@@ -162,7 +308,8 @@ def _is_cache_stale(updated_at: Any) -> bool:
             ts = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
         if ts.tzinfo is None:
             ts = ts.replace(tzinfo=timezone.utc)
-        return (datetime.now(timezone.utc) - ts) > _CACHE_STALE_AFTER
+        threshold = timedelta(minutes=_stale_after_minutes())
+        return (datetime.now(timezone.utc) - ts) > threshold
     except Exception:
         return True
 
@@ -176,12 +323,57 @@ def _schedule_background_refresh(user_id: str) -> None:
     loop.create_task(refresh_iris_context_cache(user_id))
 
 
+# ── In-process cache for the formatted context block ─────────────────────────
+# The Supabase row in ai.iris_context_cache is the durable cache; this is an
+# extra layer in front of it so a chat session bursting messages does not pay
+# the 50–100ms Supabase round-trip on every turn. Sub-millisecond hits make
+# personalised context viable on INSTANT messages without measurable latency.
+# Eviction: explicit refresh writes always invalidate the matching key.
+_LOCAL_TTL_SECONDS = float(os.environ.get("IRIS_LOCAL_CACHE_TTL_SECONDS", "60"))
+_LOCAL_CACHE_MAX_ENTRIES = 1024  # bounded so a runaway worker can't OOM
+_local_cache: Dict[str, Tuple[float, str]] = {}
+# Protects _local_cache against concurrent access from asyncio.to_thread workers
+# and the event loop. Threading lock (not asyncio.Lock) because callers are a mix
+# of sync threads (_refresh_iris_context_cache_sync) and sync calls from async code.
+_local_cache_lock = threading.Lock()
+
+
+def _local_cache_get(user_id: str) -> Optional[str]:
+    with _local_cache_lock:
+        entry = _local_cache.get(user_id)
+        if not entry:
+            return None
+        written_at, value = entry
+        if (time.monotonic() - written_at) >= _LOCAL_TTL_SECONDS:
+            _local_cache.pop(user_id, None)
+            return None
+        return value
+
+
+def _local_cache_set(user_id: str, value: str) -> None:
+    with _local_cache_lock:
+        if len(_local_cache) >= _LOCAL_CACHE_MAX_ENTRIES:
+            # Evict the oldest entry — simple O(n) sweep, fine at this size.
+            oldest = min(_local_cache.items(), key=lambda kv: kv[1][0])[0]
+            _local_cache.pop(oldest, None)
+        _local_cache[user_id] = (time.monotonic(), value)
+
+
+def _local_cache_evict(user_id: str) -> None:
+    with _local_cache_lock:
+        _local_cache.pop(user_id, None)
+
+
 async def build_iris_context(user_id: Optional[str]) -> str:
     """
     Fetches user's Meridian context from ai.iris_context_cache.
     Returns a formatted string prepended to FINANCIAL_ADVISOR_SYSTEM_PROMPT.
 
-    Non-blocking policy:
+    Two-layer cache:
+      1. In-process (60s TTL by default) — sub-ms hits across a chat burst.
+      2. Supabase ai.iris_context_cache — durable across processes / replicas.
+
+    Non-blocking policy on layer 2:
       - Fresh cache hit  → serve it.
       - Stale cache hit  → serve it, schedule async refresh.
       - Cache miss       → serve minimal context from core.users, schedule async refresh.
@@ -192,6 +384,10 @@ async def build_iris_context(user_id: Optional[str]) -> str:
     if not user_id:
         return ""
 
+    cached = _local_cache_get(user_id)
+    if cached is not None:
+        return cached
+
     try:
         data = await asyncio.to_thread(_fetch_iris_cache_sync, user_id)
 
@@ -199,7 +395,9 @@ async def build_iris_context(user_id: Optional[str]) -> str:
             if _is_cache_stale(data.get("updated_at")):
                 logger.info("IRIS cache stale for user %s — scheduling async refresh", user_id)
                 _schedule_background_refresh(user_id)
-            return _format_context_block(data)
+            block = _format_context_block(data)
+            _local_cache_set(user_id, block)
+            return block
 
         # Cache miss — never block the chat. Build a minimal context from
         # core.users (name + tier) so IRIS still greets the user personally,
@@ -208,7 +406,10 @@ async def build_iris_context(user_id: Optional[str]) -> str:
         _schedule_background_refresh(user_id)
 
         minimal = await asyncio.to_thread(_build_minimal_context_sync, user_id)
-        return minimal or ""
+        result = minimal or ""
+        if result:
+            _local_cache_set(user_id, result)
+        return result
     except Exception as exc:
         logger.debug("Meridian context unavailable for user %s: %s", user_id, exc)
         return ""
@@ -239,8 +440,53 @@ def _format_context_block(ctx: dict) -> str:
     last_name = _sanitise_for_prompt(profile.get("last_name"), max_length=40)
     name_parts = [p for p in (first_name, last_name) if p and p != "not set"]
     display_name = " ".join(name_parts) if name_parts else "not set"
-    age_value = profile.get("age")
-    age_str = str(age_value) if age_value not in (None, "") else "not set"
+    age_value = _resolve_age(profile.get("age"), profile.get("date_of_birth"))
+
+    profile_lines = ["USER PROFILE:"]
+    _append_context_line(profile_lines, "Name", display_name if display_name != "not set" else None)
+    _append_context_line(profile_lines, "Age", age_value)
+    _append_context_line(profile_lines, "Age range", profile.get("age_range"), max_length=30)
+    _append_context_line(profile_lines, "Country of residence", profile.get("country_of_residence"), max_length=60)
+    _append_context_line(profile_lines, "Marital status", profile.get("marital_status"), max_length=30)
+    _append_context_line(profile_lines, "Employment status", profile.get("employment_status"), max_length=40)
+    _append_context_line(profile_lines, "Dependants", profile.get("dependants"))
+    _append_context_line(profile_lines, "Occupation", profile.get("occupation"), max_length=60)
+    _append_context_line(profile_lines, "Income source", profile.get("income_source"), max_length=80)
+    _append_context_line(profile_lines, "Experience level", profile.get("experience_level"), max_length=30)
+
+    investment_lines = ["INVESTMENT PROFILE:"]
+    _append_context_line(investment_lines, "Investment goal", profile.get("investment_goal"), max_length=40)
+    _append_context_line(investment_lines, "Income range", profile.get("income_range"), max_length=40)
+    _append_context_line(
+        investment_lines,
+        "Monthly expenses",
+        profile.get("monthly_expenses"),
+        formatter=_format_currency_amount,
+    )
+    _append_context_line(
+        investment_lines,
+        "Total debt",
+        profile.get("total_debt"),
+        formatter=_format_currency_amount,
+    )
+    _append_context_line(
+        investment_lines,
+        "Net worth",
+        profile.get("net_worth"),
+        formatter=_format_currency_amount,
+    )
+    _append_context_line(investment_lines, "Emergency fund status", profile.get("emergency_fund_status"))
+    _append_context_line(investment_lines, "Risk profile", profile.get("risk_profile"))
+    _append_context_line(investment_lines, "Risk level", profile.get("risk_level"), max_length=30)
+    _append_context_line(investment_lines, "Investment horizon", profile.get("investment_horizon"))
+    _append_context_line(
+        investment_lines,
+        "Monthly investable amount",
+        profile.get("monthly_investable"),
+        formatter=_format_currency_amount,
+    )
+    profile_block = "\n".join(profile_lines)
+    investment_block = "\n".join(investment_lines)
 
     parts.append(
         "\n"
@@ -251,25 +497,13 @@ def _format_context_block(ctx: dict) -> str:
         "# Reason from this naturally as an adviser who knows their client.\n"
         "################################################################################\n"
         "\n"
-        "USER PROFILE:\n"
-        f"- Name: {display_name}\n"
-        f"- Age: {age_str}\n"
-        f"- Age range: {profile.get('age_range', 'not set')}\n"
-        f"- Marital status: {_sanitise_for_prompt(profile.get('marital_status'), max_length=30)}\n"
-        f"- Experience level: {_sanitise_for_prompt(profile.get('experience_level'), max_length=30)}\n"
-        f"- Investment goal: {_sanitise_for_prompt(profile.get('investment_goal'), max_length=40)}\n"
-        f"- Income range: {profile.get('income_range', 'not set')}\n"
-        f"- Emergency fund status: {profile.get('emergency_fund_status', 'not set')}\n"
+        f"{profile_block}\n"
         "\n"
         f"KNOWLEDGE TIER: {tier}\n"
         "Adapt communication depth and vocabulary accordingly.\n"
         "Tier 1 = complete beginner. Tier 2 = developing. Tier 3 = advanced/institutional.\n"
         "\n"
-        "INVESTMENT PROFILE:\n"
-        f"- Risk profile: {_sanitise_for_prompt(profile.get('risk_profile'))}\n"
-        f"- Risk level: {_sanitise_for_prompt(profile.get('risk_level'), max_length=30)}\n"
-        f"- Investment horizon: {_sanitise_for_prompt(profile.get('investment_horizon'))}\n"
-        f"- Monthly investable amount: {profile.get('monthly_investable', 'not set')}\n"
+        f"{investment_block}\n"
     )
 
     # ── 4. Financial plan ─────────────────────────────────────────────────────
@@ -445,15 +679,15 @@ def _format_trading_positions(positions: list, closed_trades: list) -> str:
         parts.append("\n=== LIVE TRADING POSITIONS ===\n")
         for pos in positions:
             symbol = _sanitise_for_prompt(pos.get("symbol"), max_length=10)
-            pos_type = _sanitise_for_prompt(pos.get("type"), max_length=10)
+            pos_type = _normalise_position_type(pos.get("type"))
             qty = pos.get("quantity", 0)
             entry = float(pos.get("entry_price") or 0)
             current = float(pos.get("current_price") or entry)
             pnl = float(pos.get("pnl_pct") or 0)
             pnl_str = f"+{pnl:.1f}%" if pnl >= 0 else f"{pnl:.1f}%"
             parts.append(
-                f"{symbol} {pos_type} x{qty} @ entry ${entry:,.2f}, "
-                f"current ${current:,.2f} ({pnl_str})\n"
+                f"{symbol}: {pos_type}, size {qty}, entry ${entry:,.2f}, "
+                f"current P&L {pnl_str}\n"
             )
 
     if closed_trades:
@@ -484,6 +718,7 @@ def _format_portfolio_stats(
     avg_profit: float,
     avg_loss: float,
     profit_factor: Optional[float],
+    avg_return_pct: Optional[float] = None,
 ) -> str:
     """Format portfolio value + aggregate trade stats (context block 10B)."""
     lines = ["\n=== PORTFOLIO SUMMARY ==="]
@@ -503,6 +738,8 @@ def _format_portfolio_stats(
         lines.append(f"  Total trades: {total_trades}")
         lines.append(f"  Open positions: {total_open_positions}")
         lines.append(f"  Win rate: {win_rate:.1f}%")
+        if avg_return_pct is not None:
+            lines.append(f"  Avg return: {avg_return_pct:+.1f}%")
         lines.append(f"  Realized P&L: €{realized_pnl:+,.2f}")
         lines.append(f"  Avg profit per winner: €{avg_profit:,.2f}")
         lines.append(f"  Avg loss per loser: €{avg_loss:,.2f}")
@@ -525,11 +762,32 @@ def _format_academy_progress(progress: dict) -> str:
     completed = progress.get("completed", 0)
     total = progress.get("total", 0)
     recent = progress.get("recent_lessons") or []
+    current_module = progress.get("current_module")
+    current_lesson = progress.get("current_lesson")
+    avg_quiz_score = progress.get("avg_quiz_score")
+    literacy_level = progress.get("financial_literacy_level")
+
+    summary_parts = [f"{completed}/{total} lessons complete"]
+    if _has_context_value(current_module):
+        summary_parts.append(
+            f"current module: {_sanitise_for_prompt(current_module, max_length=60)}"
+        )
+    if _has_context_value(avg_quiz_score):
+        summary_parts.append(f"avg quiz score: {_format_percent_value(avg_quiz_score)}")
+    if _has_context_value(literacy_level):
+        summary_parts.append(
+            f"financial literacy level: {_sanitise_for_prompt(literacy_level, max_length=40)}"
+        )
 
     parts = [
         "\n=== LEARNING PROGRESS ===\n",
-        f"Completed {completed} of {total} lessons.\n",
+        f"{', '.join(summary_parts)}.\n",
     ]
+
+    if _has_context_value(current_lesson):
+        parts.append(
+            f"Current lesson: {_sanitise_for_prompt(current_lesson, max_length=80)}\n"
+        )
 
     if recent:
         recent_strs = [
@@ -553,7 +811,10 @@ def _format_recent_chat_summaries(summaries: list) -> str:
         snippet = content[:150].rstrip()
         if len(content) > 150:
             snippet += "..."
-        parts.append(f"Previous chat: '{title}' — {snippet}\n")
+        line = f"Recent topic: '{title}'"
+        if snippet:
+            line += f" — {snippet}"
+        parts.append(f"{line}\n")
     return "".join(parts)
 
 
@@ -687,28 +948,41 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
     try:
         fp_res = (
             _table(client, "meridian", "financial_plans")
-            .select("plan_name, target_amount, target_date, current_amount, status")
+            .select("*")
             .eq("user_id", user_id)
-            .eq("status", "active")
             .order("created_at", desc=True)
-            .limit(1)
+            .limit(20)
             .execute()
         )
         fp_rows = (fp_res and fp_res.data) or []
         if fp_rows:
-            p = fp_rows[0]
-            target_amount = float(p.get("target_amount") or 0)
-            current_amount = float(p.get("current_amount") or 0)
+            p = next((row for row in fp_rows if row.get("status") == "active"), None)
+            if p is None:
+                p = next((row for row in fp_rows if row.get("is_current") is True), fp_rows[0])
+
+            plan_data = p.get("plan_data")
+            plan_data = plan_data if isinstance(plan_data, dict) else {}
+            target_amount = float(
+                p.get("target_amount")
+                or plan_data.get("target_amount")
+                or 0
+            )
+            current_amount = float(
+                p.get("current_amount")
+                or plan_data.get("current_amount")
+                or plan_data.get("saved_amount")
+                or 0
+            )
             pct = (current_amount / target_amount * 100) if target_amount > 0 else 0.0
-            target_date = p.get("target_date")
+            target_date = p.get("target_date") or plan_data.get("target_date")
             if hasattr(target_date, "isoformat"):
                 target_date = target_date.isoformat()
             financial_plan = {
-                "plan_name": p.get("plan_name"),
+                "plan_name": p.get("plan_name") or plan_data.get("plan_name") or plan_data.get("name"),
                 "target_amount": target_amount,
                 "target_date": str(target_date) if target_date else None,
                 "current_amount": current_amount,
-                "status": p.get("status"),
+                "status": p.get("status") or ("active" if p.get("is_current") is True else None),
                 "progress_pct": round(pct, 2),
             }
     except Exception:
@@ -721,7 +995,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         if goal_ids:
             gp_res = (
                 _table(client, "meridian", "goal_progress")
-                .select("goal_id, period, actual_amount, target_amount, on_track")
+                .select("goal_id, on_track")
                 .in_("goal_id", goal_ids)
                 .execute()
             )
@@ -755,15 +1029,22 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             created_at = d.get("created_at")
             if hasattr(created_at, "isoformat"):
                 created_at = created_at.isoformat()
+            # content is stored as JSONB; convert to a plain string for the prompt
+            raw_content = d.get("content")
+            if isinstance(raw_content, (dict, list)):
+                content_str = json.dumps(raw_content)
+            else:
+                content_str = str(raw_content) if raw_content is not None else None
             intelligence_digest = {
                 "digest_type": d.get("digest_type"),
-                "content": d.get("content"),
+                "content": content_str,
                 "created_at": str(created_at) if created_at else None,
             }
     except Exception:
         logger.exception("DB query failed: meridian.intelligence_digests SELECT for user_id=%s", user_id)
 
     # 7. Fetch life events within the next 90 days from meridian.life_events
+    # The DB column is "notes"; we expose it as "description" for the formatter.
     life_events: List[Dict[str, Any]] = []
     try:
         now = datetime.now(timezone.utc)
@@ -771,7 +1052,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         cutoff_str = (now + timedelta(days=90)).date().isoformat()
         le_res = (
             _table(client, "meridian", "life_events")
-            .select("event_type, event_date, description")
+            .select("event_type, event_date, notes")
             .eq("user_id", user_id)
             .gte("event_date", today_str)
             .lte("event_date", cutoff_str)
@@ -785,7 +1066,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             life_events.append({
                 "event_type": le.get("event_type"),
                 "event_date": str(event_date) if event_date else None,
-                "description": le.get("description"),
+                "description": le.get("notes"),  # DB column is "notes"
             })
     except Exception:
         logger.exception("DB query failed: meridian.life_events SELECT for user_id=%s", user_id)
@@ -863,10 +1144,17 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             for pos in ((open_pos_res and open_pos_res.data) or []):
                 entry_price = float(pos.get("entry_price") or 0)
                 current_price = float(pos.get("current_price") or entry_price)
-                pnl_pct = (
-                    (current_price - entry_price) / entry_price * 100
-                    if entry_price > 0 else 0.0
-                )
+                pos_type = (pos.get("type") or "").upper()
+                if pos_type == "SHORT":
+                    pnl_pct = (
+                        (entry_price - current_price) / entry_price * 100
+                        if entry_price > 0 else 0.0
+                    )
+                else:
+                    pnl_pct = (
+                        (current_price - entry_price) / entry_price * 100
+                        if entry_price > 0 else 0.0
+                    )
                 entry_date = pos.get("entry_date")
                 if hasattr(entry_date, "isoformat"):
                     entry_date = entry_date.isoformat()
@@ -979,7 +1267,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         try:
             all_trades_res = (
                 _table(client, "trading", "trades")
-                .select("pnl, type")
+                .select("pnl, type, entry_price, exit_price")
                 .eq("user_id", core_user_id)
                 .filter("exit_date", "not.is", "null")
                 .execute()
@@ -1012,6 +1300,20 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         profit_factor: Optional[float] = (
             (sum(winning_pnls) / abs(sum(losing_pnls))) if losing_pnls else None
         )
+        return_pcts: List[float] = []
+        for trade in all_closed_trades:
+            entry_price = float(trade.get("entry_price") or 0)
+            exit_price = float(trade.get("exit_price") or 0)
+            if entry_price <= 0 or exit_price <= 0:
+                continue
+            trade_type = (trade.get("type") or "").upper()
+            if trade_type == "SHORT":
+                return_pcts.append((entry_price - exit_price) / entry_price * 100)
+            else:
+                return_pcts.append((exit_price - entry_price) / entry_price * 100)
+        avg_return_pct: Optional[float] = (
+            sum(return_pcts) / len(return_pcts) if return_pcts else None
+        )
 
         portfolio_stats_str = _format_portfolio_stats(
             portfolio_history_rows=portfolio_history_rows,
@@ -1022,6 +1324,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             avg_profit=avg_profit,
             avg_loss=avg_loss,
             profit_factor=profit_factor,
+            avg_return_pct=avg_return_pct,
         )
 
     # ── NEW BLOCK 11: Academy progress ────────────────────────────────────────
@@ -1067,14 +1370,71 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 else 0
             )
 
-            # Fetch lesson titles and tier_ids for the 5 most recently completed
+            current_progress_res = (
+                _table(client, "academy", "user_lesson_progress")
+                .select("lesson_id, status, last_opened_at, best_quiz_score")
+                .eq("user_id", core_user_id)
+                .eq("status", "in_progress")
+                .order("last_opened_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            current_progress_rows = (current_progress_res and current_progress_res.data) or []
+            current_lesson_id = (
+                current_progress_rows[0].get("lesson_id")
+                if current_progress_rows else None
+            )
+
+            quiz_score_rows: List[Dict[str, Any]] = []
+            try:
+                quiz_scores_res = (
+                    _table(client, "academy", "user_lesson_progress")
+                    .select("best_quiz_score")
+                    .eq("user_id", core_user_id)
+                    .execute()
+                )
+                quiz_score_rows = (quiz_scores_res and quiz_scores_res.data) or []
+            except Exception:
+                logger.warning("Could not fetch academy.user_lesson_progress quiz scores for user_id=%s", user_id)
+
+            quiz_scores = [
+                float(row.get("best_quiz_score"))
+                for row in quiz_score_rows
+                if row.get("best_quiz_score") is not None
+            ]
+            if not quiz_scores:
+                try:
+                    quiz_attempts_res = (
+                        _table(client, "academy", "quiz_attempts")
+                        .select("score")
+                        .eq("user_id", core_user_id)
+                        .execute()
+                    )
+                    quiz_scores = [
+                        float(row.get("score"))
+                        for row in ((quiz_attempts_res and quiz_attempts_res.data) or [])
+                        if row.get("score") is not None
+                    ]
+                except Exception:
+                    logger.warning("Could not fetch academy.quiz_attempts for user_id=%s", user_id)
+            avg_quiz_score = (
+                round(sum(quiz_scores) / len(quiz_scores), 1) if quiz_scores else None
+            )
+
+            # Fetch lesson titles and tier_ids for recent completed + current lesson.
             recent_lesson_ids = [r["lesson_id"] for r in completed_rows if r.get("lesson_id")]
+            lesson_ids = list(dict.fromkeys([
+                *recent_lesson_ids,
+                *([current_lesson_id] if current_lesson_id else []),
+            ]))
             recent_lessons_detail: List[Dict[str, Any]] = []
-            if recent_lesson_ids:
+            current_lesson_title: Optional[str] = None
+            current_module_name: Optional[str] = None
+            if lesson_ids:
                 lessons_res = (
                     _table(client, "academy", "lessons")
                     .select("id, title, tier_id")
-                    .in_("id", recent_lesson_ids)
+                    .in_("id", lesson_ids)
                     .execute()
                 )
                 lessons_by_id = {
@@ -1095,6 +1455,14 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                         r["id"]: r["name"] for r in ((tiers_res and tiers_res.data) or []) if r.get("id")
                     }
 
+                if current_lesson_id:
+                    current_lesson = lessons_by_id.get(current_lesson_id)
+                    if current_lesson:
+                        current_lesson_title = current_lesson.get("title")
+                        current_module_name = tiers_by_id.get(
+                            current_lesson.get("tier_id") or ""
+                        )
+
                 # Preserve order of completion (most recent first)
                 for row in completed_rows:
                     lesson = lessons_by_id.get(row.get("lesson_id") or "")
@@ -1108,6 +1476,12 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 "completed": total_completed,
                 "total": total_lessons,
                 "recent_lessons": recent_lessons_detail,
+                "current_lesson": current_lesson_title,
+                "current_module": current_module_name,
+                "avg_quiz_score": avg_quiz_score,
+                "financial_literacy_level": _derive_financial_literacy_level(
+                    profile.get("knowledge_tier")
+                ),
             }
     except Exception:
         logger.exception("DB query failed: academy progress for user_id=%s", user_id)
@@ -1125,7 +1499,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
                 .select("id, title")
                 .eq("user_id", core_user_id)
                 .order("updated_at", desc=True)
-                .limit(3)
+                .limit(5)
                 .execute()
             )
             recent_chats = (chats_res and chats_res.data) or []
@@ -1154,7 +1528,7 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
             for chat in recent_chats:
                 cid = chat.get("id")
                 last_msg = last_msg_by_chat.get(cid or "")
-                if last_msg:
+                if last_msg or chat.get("title"):
                     recent_chat_summaries.append({
                         "title": chat.get("title"),
                         "last_assistant_message": last_msg,
@@ -1222,6 +1596,10 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         ef_status = "None — building an emergency fund should come before investing"
 
     # 11. Build profile summary (merges core.user_profiles + core.users)
+    resolved_age = _resolve_age(
+        core_user_row.get("age") or profile.get("age"),
+        profile.get("date_of_birth"),
+    )
     profile_summary: Dict[str, Any] = {
         "risk_profile": profile.get("risk_profile", "not set"),
         "investment_horizon": profile.get("investment_horizon", "not set"),
@@ -1236,13 +1614,19 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "dependants": profile.get("dependants"),
         "first_name": core_user_row.get("first_name"),
         "last_name": core_user_row.get("last_name"),
-        "age": core_user_row.get("age"),
+        "age": resolved_age,
+        "date_of_birth": profile.get("date_of_birth"),
         "experience_level": core_user_row.get("experience_level"),
         "risk_level": core_user_row.get("risk_level"),
         "investment_goal": core_user_row.get("investment_goal"),
-        "marital_status": core_user_row.get("marital_status"),
+        "marital_status": _humanise_profile_label(
+            core_user_row.get("marital_status") or profile.get("marital_status")
+        ),
         "country_of_residence": profile.get("country_of_residence"),
-        "employment_status": profile.get("employment_status"),
+        "employment_status": _humanise_profile_label(profile.get("employment_status")),
+        "net_worth": profile.get("net_worth"),
+        "occupation": profile.get("occupation"),
+        "income_source": profile.get("income_source"),
     }
 
     # 12. Format goals for context injection
@@ -1302,28 +1686,52 @@ def _refresh_iris_context_cache_sync(user_id: str) -> bool:
         "user_insights": user_insights,
     }
 
-    try:
-        _table(client, "ai", "iris_context_cache").upsert(
-            cache_data,
-            on_conflict="user_id",
-        ).execute()
-    except Exception:
-        logger.exception("DB query failed: ai.iris_context_cache UPSERT for user_id=%s", user_id)
-        raise
+    upsert_payload = dict(cache_data)
+    retryable_missing_columns = set(_LEGACY_OPTIONAL_IRIS_CACHE_COLUMNS)
+    while True:
+        try:
+            _table(client, "ai", "iris_context_cache").upsert(
+                upsert_payload,
+                on_conflict="user_id",
+            ).execute()
+            break
+        except Exception as exc:
+            missing_column = _extract_missing_postgrest_column(exc)
+            if (
+                missing_column in retryable_missing_columns
+                and missing_column in upsert_payload
+            ):
+                logger.warning(
+                    "Legacy ai.iris_context_cache schema missing column %s for user_id=%s; retrying without it",
+                    missing_column,
+                    user_id,
+                )
+                upsert_payload.pop(missing_column, None)
+                retryable_missing_columns.remove(missing_column)
+                continue
+            logger.exception("DB query failed: ai.iris_context_cache UPSERT for user_id=%s", user_id)
+            raise
 
+    # The Supabase row is now fresh — invalidate the in-process layer so the
+    # next chat turn picks up the new data instead of serving stale strings
+    # from the local TTL window.
+    _local_cache_evict(user_id)
     return True
 
 
 async def refresh_iris_context_cache(user_id: str) -> None:
     """
     Reads core.user_profiles + meridian.user_goals + meridian.risk_alerts,
-    computes enriched context, upserts ai.iris_context_cache.
+    computes enriched context, upserts ai.iris_context_cache, and evicts
+    the in-process cache so the next chat turn re-reads the fresh row.
+
     Logs success at INFO, failure at ERROR. Never raises.
     """
     if not user_id:
         return
     try:
         await asyncio.to_thread(_refresh_iris_context_cache_sync, user_id)
+        _local_cache_evict(user_id)
         logger.info("Refreshed ai.iris_context_cache for user_id=%s", user_id)
     except Exception as exc:
         logger.error("Failed to refresh ai.iris_context_cache for user_id=%s: %s", user_id, exc)

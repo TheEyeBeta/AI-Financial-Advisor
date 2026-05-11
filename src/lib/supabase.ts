@@ -9,7 +9,7 @@ assertSupabaseConfigForProduction(supabaseConfig);
 const createDummyClient = () => {
   // Use a placeholder URL that won't cause errors
   const dummyUrl = 'https://placeholder.supabase.co';
-  const dummyKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBsYWNlaG9sZGVyIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NDUxOTIwMDAsImV4cCI6MTk2MDc2ODAwMH0.placeholder';
+  const dummyKey = 'UNCONFIGURED';
   
   return createClient<Database>(dummyUrl, dummyKey, {
     db: {

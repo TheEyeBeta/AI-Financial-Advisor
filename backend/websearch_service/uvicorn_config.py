@@ -13,7 +13,10 @@ backlog = 2048
 workers = int(os.getenv("WORKERS", multiprocessing.cpu_count() * 2 + 1))
 worker_class = "uvicorn.workers.UvicornWorker"
 worker_connections = 1000
-timeout = 30
+# Worker timeout must exceed STREAM_TIMEOUT_SECONDS (90s) in app/routes/ai_proxy.py
+# plus headroom; otherwise the worker kills active SSE chat streams before the
+# OpenAI client timeout fires. 120s keeps long BALANCED responses intact.
+timeout = int(os.getenv("UVICORN_TIMEOUT", "120"))
 keepalive = 2
 
 # Logging
@@ -42,5 +45,6 @@ max_requests = 1000
 max_requests_jitter = 50
 preload_app = True
 
-# Graceful timeout
-graceful_timeout = 30
+# Graceful timeout — match worker timeout so in-flight SSE streams can drain
+# during a rolling deploy instead of being severed mid-response.
+graceful_timeout = int(os.getenv("UVICORN_GRACEFUL_TIMEOUT", "120"))

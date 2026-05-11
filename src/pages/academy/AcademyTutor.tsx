@@ -5,6 +5,7 @@ import { Separator } from "@/components/ui/separator";
 import { Bot, Send, Loader2, User, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
+import { getPythonApiUrl } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { consumeChatStream } from "@/services/api";
 import {
@@ -134,10 +135,16 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
       // Build conversation for AI using the pre-send snapshot + new message
       const systemPrompt = await buildSystemPrompt();
 
-      const conversationHistory = [...historySnapshot, { role: 'user' as const, content: userText }];
+      const conversationHistory = [
+        ...historySnapshot,
+        {
+          role: 'user' as const,
+          content: `${systemPrompt}\n\nStudent question: ${userText}`,
+        },
+      ];
 
       // Call AI backend
-      const pythonBackendUrl = import.meta.env.VITE_PYTHON_API_URL;
+      const pythonBackendUrl = getPythonApiUrl();
       let aiResponse = "I'm sorry, the AI service is currently unavailable.";
 
       if (pythonBackendUrl) {
@@ -157,11 +164,10 @@ export function AcademyTutor({ lesson, tier, lessonContent, onClose }: AcademyTu
                 'Authorization': `Bearer ${accessToken}`,
               },
               body: JSON.stringify({
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  ...conversationHistory,
-                ],
+                messages: conversationHistory,
+                session_type: 'academy_tutor',
                 max_tokens: 1000,
+                temperature: 0.5,
               }),
             });
             if (res.ok) {

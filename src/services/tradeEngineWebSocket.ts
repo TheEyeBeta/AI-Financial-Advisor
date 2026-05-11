@@ -36,6 +36,11 @@ class TradeEngineWebSocket {
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 5;
   private readonly reconnectDelay = 2000;
+  // Hard ceiling on the exponential backoff so a future bump of
+  // maxReconnectAttempts can't extend the wait into multi-minute territory,
+  // and so the user sees a fresh attempt within a bounded window during a
+  // partial outage. Current sequence with cap: 2s → 4s → 8s → 16s → 30s.
+  private readonly maxReconnectDelay = 30000;
   private readonly handlers: Map<HandlerKey, Set<WSMessageHandler<WSMessage>>> = new Map();
   private readonly connectionStateHandlers: Set<(state: ConnectionState) => void> = new Set();
   private pingInterval: ReturnType<typeof setInterval> | null = null;
@@ -125,7 +130,6 @@ class TradeEngineWebSocket {
           this.ws = new WebSocket(`${this.baseUrl}/ws/live${tokenQuery}`);
 
           this.ws.onopen = () => {
-            console.log('[TradeEngine WS] Connected');
             this.reconnectAttempts = 0;
             this.setConnectionState('connected');
             this.startPingInterval();
@@ -136,17 +140,18 @@ class TradeEngineWebSocket {
           };
 
           this.ws.onclose = (event) => {
-            console.log(`[TradeEngine WS] Disconnected (code: ${event.code})`);
             this.stopPingInterval();
             this._connectionId = null;
 
             if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
               this.setConnectionState('reconnecting');
-              const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-              console.log(
-                `[TradeEngine WS] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`
-              );
-
+              // Capped exponential backoff with ±20% jitter so a fleet of
+              // clients reconnecting after a backend blip doesn't synchronise
+              // and thunder the server.
+              const exponential = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+              const capped = Math.min(exponential, this.maxReconnectDelay);
+              const jitter = capped * (0.8 + Math.random() * 0.4);
+              const delay = Math.round(jitter);
               setTimeout(() => {
                 this.reconnectAttempts += 1;
                 this.connect();

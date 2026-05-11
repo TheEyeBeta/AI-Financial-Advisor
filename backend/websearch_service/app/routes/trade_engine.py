@@ -15,13 +15,15 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from ..services.auth import (
+    AuthenticatedUser,
     get_backend_anon_key,
     get_backend_service_role_key,
     get_backend_supabase_url,
+    require_auth,
     require_websocket_auth,
 )
 from ..services.dataapi_client import get_dataapi_client
@@ -211,8 +213,8 @@ async def _build_context_from_dataapi() -> AIContextResponse | None:
                     timestamp=s.get("timestamp", ""),
                     price_at_signal=s.get("entry_price"),
                 ))
-        except Exception:
-            pass
+        except Exception as sig_exc:
+            logger.warning("DataAPI signals fetch skipped during context build: %s", sig_exc)
 
         tracked = [s.ticker for s in snapshots]
         return AIContextResponse(
@@ -249,6 +251,7 @@ async def get_ai_context(
     news_limit: int = Query(15, ge=1, le=100, description="Maximum news articles to return"),
     signals_hours: int = Query(48, ge=1, le=168, description="Hours of signal history to include"),
     source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    _auth: AuthenticatedUser = Depends(require_auth),
 ) -> AIContextResponse:
     """
     Get comprehensive AI context for the chatbot.
@@ -311,6 +314,7 @@ async def get_signals(
     hours: int = Query(24, ge=1, le=168, description="Hours of history to include"),
     limit: int = Query(50, ge=1, le=500, description="Maximum signals to return"),
     source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    _auth: AuthenticatedUser = Depends(require_auth),
 ) -> List[TradingSignal]:
     """
     Get recent trading signals.
@@ -348,6 +352,7 @@ async def get_signals(
 @router.get("/api/v1/engine/status")
 async def get_engine_status(
     source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     """
     Get Trade Engine / DataAPI connection status.
@@ -405,6 +410,7 @@ def _get_supabase_client():
 async def get_stock_price(
     ticker: str,
     source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     """
     Return the last known price for a ticker.
@@ -454,8 +460,8 @@ async def get_stock_price(
                     "updated_at": row.get("updated_at"),
                     "source": "supabase",
                 }
-        except Exception:
-            pass
+        except Exception as sb_exc:
+            logger.warning("Supabase price fetch failed for %s: %s", ticker, sb_exc)
 
     return {"ticker": ticker, "price": None, "change_percent": None, "source": "unavailable"}
 

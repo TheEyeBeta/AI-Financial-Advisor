@@ -49,6 +49,7 @@ from .routes.trade_engine import router as trade_engine_router
 from .routes.stock_ranking import router as stock_ranking_router
 from .services.auth import validate_auth_configuration
 from .services.intelligence_engine import run_intelligence_cycle
+from .services.job_logger import log_job_run
 from .services.memory_agent import run_history_scan, run_memory_extraction_cycle
 from .services.ranking_engine import run_ranking_cycle
 
@@ -59,14 +60,23 @@ START_TIME = time.time()
 
 async def _run_scheduled_cycle() -> None:
     """Scheduler callback: run one intelligence cycle and log the summary."""
+    started_at = datetime.now(timezone.utc)
     try:
         summary = await run_intelligence_cycle()
+        skipped = summary.get("skipped", False)
         logger.info(
             "Scheduled intelligence cycle: users_processed=%s digests_generated=%s errors=%s%s",
             summary.get("users_processed", 0),
             summary.get("digests_generated", 0),
             len(summary.get("errors", [])),
-            " [skipped — previous cycle still running]" if summary.get("skipped") else "",
+            " [skipped — previous cycle still running]" if skipped else "",
+        )
+        await log_job_run(
+            job_name="intelligence_engine",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("users_processed", 0),
+            raw_output=summary,
         )
     except Exception as exc:
         # Belt-and-suspenders: run_intelligence_cycle() never raises, but if it
@@ -75,13 +85,21 @@ async def _run_scheduled_cycle() -> None:
             "Scheduled intelligence cycle raised an unexpected exception: %s",
             type(exc).__name__,
         )
+        await log_job_run(
+            job_name="intelligence_engine",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
 
 
 async def _run_scheduled_memory_extraction() -> None:
     """Scheduler callback: run one memory extraction cycle and log the summary."""
+    started_at = datetime.now(timezone.utc)
     try:
         summary = await run_memory_extraction_cycle()
-        if summary.get("skipped"):
+        skipped = summary.get("skipped", False)
+        if skipped:
             logger.info("Scheduled memory extraction: skipped — previous cycle still running")
         else:
             logger.info(
@@ -90,18 +108,33 @@ async def _run_scheduled_memory_extraction() -> None:
                 summary.get("total_insights_extracted", 0),
                 len(summary.get("errors", [])),
             )
+        await log_job_run(
+            job_name="memory_extraction",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("chats_processed", 0),
+            raw_output=summary,
+        )
     except Exception as exc:
         logger.error(
             "Scheduled memory extraction raised an unexpected exception: %s",
             type(exc).__name__,
         )
+        await log_job_run(
+            job_name="memory_extraction",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+        )
 
 
 async def _run_scheduled_ranking_cycle() -> None:
     """Scheduler callback: run one ranking cycle and log the summary."""
+    started_at = datetime.now(timezone.utc)
     try:
         summary = await run_ranking_cycle()
-        if summary.get("skipped"):
+        skipped = summary.get("skipped", False)
+        if skipped:
             logger.info("Scheduled ranking cycle: skipped — previous cycle still running")
         else:
             logger.info(
@@ -112,10 +145,23 @@ async def _run_scheduled_ranking_cycle() -> None:
                 summary.get("top_50_written", 0),
                 summary.get("cycle_duration_seconds", 0.0),
             )
+        await log_job_run(
+            job_name="ranking_engine",
+            started_at=started_at,
+            status="skipped" if skipped else "success",
+            records_processed=summary.get("tickers_scored", 0),
+            raw_output=summary,
+        )
     except Exception as exc:
         logger.error(
             "Scheduled ranking cycle raised an unexpected exception: %s",
             type(exc).__name__,
+        )
+        await log_job_run(
+            job_name="ranking_engine",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
         )
 
 

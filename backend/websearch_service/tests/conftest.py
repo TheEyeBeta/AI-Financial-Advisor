@@ -2,16 +2,38 @@
 import os
 import time
 from typing import AsyncGenerator
+from unittest.mock import MagicMock, patch
+
+# Shared test JWT secret — also set in mock_env_vars so auth.py picks it up.
+TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests"
+
+# ─── Critical: seed required env vars BEFORE any app import ────────────────
+# app.services.supabase_client (imported transitively by app.main) raises at
+# module-import time when SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are absent,
+# so we must provide test placeholders before collection begins.
+# setdefault keeps real values from .env.test intact for integration tests.
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+os.environ.setdefault("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+os.environ.setdefault("AUTH_REQUIRED", "false")
+os.environ.setdefault("ENVIRONMENT", "test")
+os.environ.setdefault("TAVILY_API_KEY", "test-tavily-key")
+os.environ.setdefault("OPENAI_API_KEY", "test-openai-key")
+os.environ.setdefault("APP_VERSION", "test-version")
 
 import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
-from app.main import create_app
+# Set stub Supabase credentials before the app module chain is imported.
+# supabase_client.py calls create_client() at module level and raises if missing.
+os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 
-# Shared test JWT secret — also set in mock_env_vars so auth.py picks it up.
-TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests"
+# Patch create_client so no real network connection is attempted at import time.
+with patch("supabase.create_client", return_value=MagicMock()):
+    from app.main import create_app
 
 
 def _make_jwt(role: str = "service_role", sub: str = "test-service", **extra) -> str:
@@ -64,3 +86,14 @@ def mock_audit_log_path(tmp_path, monkeypatch):
     log_path = tmp_path / "audit.jsonl"
     monkeypatch.setenv("AI_AUDIT_LOG_PATH", str(log_path))
     return log_path
+
+
+@pytest.fixture(autouse=True)
+def _clear_iris_local_cache():
+    """The IRIS context layer keeps an in-process LRU keyed by user_id;
+    clear it between tests so seeded supabase doubles aren't bypassed by a
+    stale formatted block left over from a previous test."""
+    from app.services import meridian_context
+    meridian_context._local_cache.clear()
+    yield
+    meridian_context._local_cache.clear()

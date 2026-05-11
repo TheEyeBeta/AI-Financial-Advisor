@@ -13,6 +13,14 @@ export interface HealthStatus {
   lastCheck: number;
 }
 
+// Per-service timeouts. `/health/live` is a static OK; `/health` on the AI
+// backend can touch DB/Supabase, so it gets more headroom before being marked
+// degraded. Tighter caps surface real outages faster than a flat 5s would.
+const SERVICE_TIMEOUTS_MS: Record<string, number> = {
+  websearch: 2000,
+  ai_backend: 4000,
+};
+
 class HealthCheckService {
   private readonly checkIntervalMs = 30000;
 
@@ -88,10 +96,13 @@ class HealthCheckService {
       return this.status;
     }
 
-    const services = {
-      websearch: await this.checkService('websearch', this.endpoints.websearch),
-      ai_backend: await this.checkService('ai_backend', this.endpoints.ai_backend),
-    };
+    // Probes are independent — run in parallel so a slow service doesn't
+    // delay surfacing the status of a healthy one.
+    const [websearch, ai_backend] = await Promise.all([
+      this.checkService('websearch', this.endpoints.websearch, SERVICE_TIMEOUTS_MS.websearch),
+      this.checkService('ai_backend', this.endpoints.ai_backend, SERVICE_TIMEOUTS_MS.ai_backend),
+    ]);
+    const services = { websearch, ai_backend };
 
     const allHealthy = Object.values(services).every((service) => service.available);
     const someHealthy = Object.values(services).some((service) => service.available);

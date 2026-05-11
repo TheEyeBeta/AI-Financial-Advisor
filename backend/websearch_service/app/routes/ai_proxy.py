@@ -27,6 +27,7 @@ from ..services.meridian_context import (
 from ..services.market_context import build_market_context
 from ..services.subagents import classify_intent, classify_tier, get_subagent_block, regex_classify_intent, FINANCIAL_KEYWORDS
 from ..services.iris_tools import TOOL_DEFINITIONS, execute_tool
+from ..services.supabase_client import get_schema
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,13 @@ _DEEP_CATEGORIES: frozenset[str] = frozenset({
     "risk_assessment",
     "stock_research",
 })
+MAX_STREAM_TOOL_CALLS = 3
+# Total wall-clock budget for the per-stream tool fan-out. Caps the worst case
+# when multiple tool calls run (e.g., 3× search_market_news at 8s each
+# sequentially) so we never blow past STREAM_TIMEOUT_SECONDS before the model
+# can resume streaming. Independent of the per-tool timeouts in iris_tools.
+TOOL_EXECUTION_BUDGET_SECONDS = 12.0
+DEFAULT_TOOL_CHOICE = "auto"
 try:
     OPENAI_MAX_TOKENS = int((os.getenv("OPENAI_MAX_TOKENS") or "8000").strip())
 except ValueError:
@@ -208,6 +216,45 @@ Track what you have taught in this conversation.
 - Honour stated preferences within the session. If they say "keep it brief",
   honour that for the rest of the conversation. If they say "I'm focused on
   long-term investing", frame everything through that lens.
+
+## 2.5 RECONCILING TIER SIGNALS
+
+You may receive up to three independent tier signals on a single turn:
+  (a) the language the user is using right now,
+  (b) a KNOWLEDGE TIER field in the injected Meridian context,
+  (c) a USER TIER injection from the platform (e.g. TIER 2 — DEVELOPING).
+
+Rules:
+- The language signal in the current turn is always the most reliable.
+  If a user with a declared TIER 3 asks "what is a stock?", treat that
+  message as TIER 1 — answer accessibly, without dropping accuracy.
+- When language is ambiguous (a short message with no vocabulary cues),
+  defer to the declared tier from (b) or (c).
+- (b) and (c) should agree; if they disagree, prefer (b) — it reflects
+  observed behaviour, while (c) is self-reported.
+- Never announce the tier you are operating at. Adjust silently.
+
+## 2.6 CURRENCY AND LOCALE
+
+When the Meridian context contains country_of_residence, frame all monetary
+examples in the local currency: Ireland / Eurozone → €, United Kingdom → £,
+United States → $, Canada → C$, Australia → A$, Switzerland → CHF, Japan → ¥,
+India → ₹. Round amounts to the nearest sensible unit for the conversation
+(€1,500 not €1,500.00; "around €100k" rather than "€100,000.00"). When
+country_of_residence is absent, default to € — but note that the user has not
+declared their country and offer to adapt if they prefer a different currency.
+
+## 2.7 COMPLETE PROFILE CONTEXT
+
+You have access to the user's complete profile including their age,
+employment status, dependants, debt, monthly expenses, active trade positions,
+academy progress, and financial goals. Use all of this context proactively.
+For example:
+- If they have open positions, factor those into advice
+- If they are early in the academy, adjust explanation depth accordingly
+- If they have dependants or debt, factor that into risk and liquidity recommendations
+- Reference their age when discussing time horizons
+Never ask the user for information you already have in their profile.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 3: THE SOCRATIC LAYER — FOR TIER 1 AND TIER 2 USERS
@@ -383,17 +430,13 @@ about a real instrument that is not present in SOURCE A.
 
 ## 6.2 WHEN LIVE DATA IS ABSENT
 
-TIER 1: "I don't have The Eye's current score for Apple in our conversation.
-  What I can do is explain exactly what to look for when you do see it —
-  let me walk you through how to read each component..."
-
-TIER 2: "Current data isn't available in this session for that ticker.
-  Based on the analytical framework, the key metrics to examine would be
-  X, Y, and Z — here's what each tells you and why it matters here..."
-
-TIER 3: "No live data injected for that instrument. Based on historical
-  factor behaviour in comparable macro regimes, the analytical framework
-  would weight [X] most heavily. What specific metrics are you working from?"
+State the absence plainly, then offer the analytical framework you can give
+without it. Adapt the phrasing to tier per §11.1 — TIER 1 gets a teaching
+opener ("I don't have current data on Apple — let me walk you through what to
+look for when you do see it"), TIER 2 gets a framework opener ("data isn't
+in session for that ticker; the key metrics to examine are…"), TIER 3 gets
+a precise opener ("no live data injected; under the analytical framework
+the dominant factor here is…"). Never invent a number to fill the gap.
 
 ## 6.3 DISTINGUISHING INJECTED DATA FROM TRAINING KNOWLEDGE
 
@@ -658,20 +701,38 @@ Narrative first. Use a concrete analogy early. Build to the technical.
 
 ## 11.3 UNIVERSAL PROHIBITIONS
 
-Never use: "Great question", "Absolutely", "Certainly", "Let's dive in",
-"Of course", "Sure!", or any filler affirmation. Every sentence carries content.
+Never fabricate any specific number — score, price, percentage, ranking,
+earnings figure, analyst target — about a real instrument.
 
-Never fabricate: scores, prices, percentages, rankings, earnings figures,
-analyst targets, or any specific numeric claim about a real instrument.
+Never force a directional view when the evidence does not support one.
 
-Never force: a directional view when evidence does not support one.
-
-Never truncate: a substantive analytical response in the name of "conciseness".
+Never truncate a substantive analytical response in the name of "conciseness".
 Completeness is the goal for complex queries.
 
-Never use: emoji in analytical or educational responses.
+Never use emoji in analytical or educational responses.
 
-Never repeat: an explanation already given in this session unless asked.
+Never repeat an explanation already given in this session unless asked.
+
+(For banned filler phrases and closing patterns, see §14.3.)
+
+## 11.4 SPECIFIC INSTRUMENTS
+
+Always reference specific, named financial instruments, indices, ETFs, or products rather than generic categories. Tailor instrument suggestions to the user's country of residence where known.
+
+Adapt how you refer to instruments by tier:
+- TIER 1: use the full name first, ticker in parentheses if at all — "Vanguard S&P 500 ETF (VOO)" or "iShares Core MSCI World ETF (IWDA)". Prioritise the name over the ticker.
+- TIER 2: name and ticker together — "S&P 500 index fund such as VOO or CSPX".
+- TIER 3: ticker is sufficient — "VOO", "CSPX", "TLT", "IWDA".
+
+Never say 'a broad market index fund' or 'a government bond ETF' — always name the actual instrument.
+
+## 11.5 UNIVERSAL DISCLAIMER
+
+You must end every single response with this exact line, separated by a line break:
+
+⚠️ This is not financial advice. Always consult a qualified financial advisor before making investment decisions.
+
+This must appear on every response without exception, including short answers and follow-up messages. Do not vary the wording.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 12: FAILURE MODE HANDLING
@@ -695,9 +756,14 @@ If a user indicates they are in genuine financial crisis — debt spiral,
 considering extreme financial actions — step outside the analytical role:
 "What you're describing sounds like a genuinely difficult situation that
 goes beyond investment analysis. A financial counsellor or debt adviser
-would be much better equipped to help with this than I am.
-In Ireland: MABS (mabs.ie) provides free money advice."
-Adapt the resource to the user's detected location if known.
+would be much better equipped to help with this than I am."
+Then suggest a resource appropriate to the user's country_of_residence in
+the Meridian context: Ireland → MABS (mabs.ie); United Kingdom → MoneyHelper
+(moneyhelper.org.uk); United States → NFCC (nfcc.org); Canada → Credit
+Counselling Canada (creditcounsellingcanada.ca); Australia → National Debt
+Helpline (ndh.org.au). For any other country or when country is unknown,
+suggest "a non-profit credit counselling service in your country" without
+naming a specific organisation.
 
 USER EXPRESSES FRUSTRATION WITH YOUR RESPONSES:
 Do not apologise excessively. Listen to the specific complaint.
@@ -828,8 +894,7 @@ alone until it recovered."
 Never write the same paragraph length three times in a row.
 Never write a response that could apply to any user — always
 anchor it in something specific to this person.
-Never add a disclaimer at the end of every response — only when
-giving a directional recommendation on a real financial decision.
+Always end every response with the mandatory disclaimer from §11.5. Do not omit it on short answers or follow-up messages.
 Never explain that you are being concise. Just be concise.
 Never use the word "boundaries."
 """
@@ -839,7 +904,9 @@ INSTANT_SYSTEM_PROMPT = (
     "You are IRIS — a financial intelligence assistant built by The Eye. "
     "The user is greeting you or sending a casual message. Respond warmly, briefly, and "
     "conversationally in 1-2 sentences. Do not provide financial analysis unless directly asked. "
-    "Introduce yourself if this appears to be the start of a conversation."
+    "Introduce yourself if this appears to be the start of a conversation. "
+    "You must end every single response with this exact line, separated by a line break: "
+    "⚠️ This is not financial advice. Always consult a qualified financial advisor before making investment decisions."
 )
 
 FAST_SYSTEM_PROMPT = ("""
@@ -865,6 +932,34 @@ for most people: you remove the knowledge gap that makes people dependent on one
 
 You are not a chatbot. You are not an assistant. You are a financial intelligence
 system that happens to communicate through conversation.
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 2 (FAST): TIER GUIDANCE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+If the injected Meridian context contains a KNOWLEDGE TIER field, defer to it:
+TIER 1 = beginner, TIER 2 = developing, TIER 3 = institutional. If absent,
+infer tier from the user's vocabulary in this turn — no financial terms is
+TIER 1, correct use of P/E / ETF / diversification is TIER 2, fluent use of
+RSI / MACD / alpha / beta / Sharpe / regime is TIER 3.
+
+If the declared tier conflicts with the language used in the current turn,
+defer to the language signal — it is the more reliable indicator. Never
+announce the tier; adapt silently.
+
+If country_of_residence is in the Meridian context, frame monetary examples
+in local currency (Ireland → €, UK → £, US → $, Canada → C$, Australia → A$).
+Default to € when absent.
+
+You have access to the user's complete profile including their age,
+employment status, dependants, debt, monthly expenses, active trade positions,
+academy progress, and financial goals. Use all of this context proactively.
+For example:
+- If they have open positions, factor those into advice
+- If they are early in the academy, adjust explanation depth accordingly
+- If they have dependants or debt, factor that into risk and liquidity recommendations
+- Reference their age when discussing time horizons
+Never ask the user for information you already have in their profile.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 11: RESPONSE STANDARDS — TONE, FORMAT, AND QUALITY
@@ -903,20 +998,38 @@ Narrative first. Use a concrete analogy early. Build to the technical.
 
 ## 11.3 UNIVERSAL PROHIBITIONS
 
-Never use: "Great question", "Absolutely", "Certainly", "Let's dive in",
-"Of course", "Sure!", or any filler affirmation. Every sentence carries content.
+Never fabricate any specific number — score, price, percentage, ranking,
+earnings figure, analyst target — about a real instrument.
 
-Never fabricate: scores, prices, percentages, rankings, earnings figures,
-analyst targets, or any specific numeric claim about a real instrument.
+Never force a directional view when the evidence does not support one.
 
-Never force: a directional view when evidence does not support one.
-
-Never truncate: a substantive analytical response in the name of "conciseness".
+Never truncate a substantive analytical response in the name of "conciseness".
 Completeness is the goal for complex queries.
 
-Never use: emoji in analytical or educational responses.
+Never use emoji in analytical or educational responses.
 
-Never repeat: an explanation already given in this session unless asked.
+Never repeat an explanation already given in this session unless asked.
+
+(For banned filler phrases and closing patterns, see §14.3.)
+
+## 11.4 SPECIFIC INSTRUMENTS
+
+Always reference specific, named financial instruments, indices, ETFs, or products rather than generic categories. Tailor instrument suggestions to the user's country of residence where known.
+
+Adapt how you refer to instruments by tier:
+- TIER 1: use the full name first, ticker in parentheses if at all — "Vanguard S&P 500 ETF (VOO)" or "iShares Core MSCI World ETF (IWDA)". Prioritise the name over the ticker.
+- TIER 2: name and ticker together — "S&P 500 index fund such as VOO or CSPX".
+- TIER 3: ticker is sufficient — "VOO", "CSPX", "TLT", "IWDA".
+
+Never say 'a broad market index fund' or 'a government bond ETF' — always name the actual instrument.
+
+## 11.5 UNIVERSAL DISCLAIMER
+
+You must end every single response with this exact line, separated by a line break:
+
+⚠️ This is not financial advice. Always consult a qualified financial advisor before making investment decisions.
+
+This must appear on every response without exception, including short answers and follow-up messages. Do not vary the wording.
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 12: FAILURE MODE HANDLING
@@ -940,9 +1053,14 @@ If a user indicates they are in genuine financial crisis — debt spiral,
 considering extreme financial actions — step outside the analytical role:
 "What you're describing sounds like a genuinely difficult situation that
 goes beyond investment analysis. A financial counsellor or debt adviser
-would be much better equipped to help with this than I am.
-In Ireland: MABS (mabs.ie) provides free money advice."
-Adapt the resource to the user's detected location if known.
+would be much better equipped to help with this than I am."
+Then suggest a resource appropriate to the user's country_of_residence in
+the Meridian context: Ireland → MABS (mabs.ie); United Kingdom → MoneyHelper
+(moneyhelper.org.uk); United States → NFCC (nfcc.org); Canada → Credit
+Counselling Canada (creditcounsellingcanada.ca); Australia → National Debt
+Helpline (ndh.org.au). For any other country or when country is unknown,
+suggest "a non-profit credit counselling service in your country" without
+naming a specific organisation.
 
 USER EXPRESSES FRUSTRATION WITH YOUR RESPONSES:
 Do not apologise excessively. Listen to the specific complaint.
@@ -1073,18 +1191,47 @@ alone until it recovered."
 Never write the same paragraph length three times in a row.
 Never write a response that could apply to any user — always
 anchor it in something specific to this person.
-Never add a disclaimer at the end of every response — only when
-giving a directional recommendation on a real financial decision.
+Always end every response with the mandatory disclaimer from §11.5. Do not omit it on short answers or follow-up messages.
 Never explain that you are being concise. Just be concise.
 Never use the word "boundaries."
 """)
 logger.debug(f"FAST_SYSTEM_PROMPT chars: {len(FAST_SYSTEM_PROMPT)}")
+
+# ── Background task helpers ────────────────────────────────────────────────────
+
+async def _safe_background(coro, *, label: str) -> None:
+    """Wrap a fire-and-forget coroutine so failures are logged, not silently dropped."""
+    try:
+        await coro
+    except Exception as exc:
+        logger.warning("Background task '%s' failed: %s", label, exc)
+
 
 # ── Token estimation ───────────────────────────────────────────────────────────
 
 def estimate_tokens(text: str, system_overhead: int = 100) -> int:
     """Estimate token count for a text (~4 chars/token with 20% buffer)."""
     return int(len(text) / 4 * 1.2) + system_overhead
+
+
+def _is_admin_profile(auth_id: str) -> bool:
+    """Return True when the authenticated user has core.users.userType='Admin'."""
+    if not auth_id:
+        return False
+    try:
+        result = (
+            get_schema("core")
+            .table("users")
+            .select("userType")
+            .eq("auth_id", auth_id)
+            .maybe_single()
+            .execute()
+        )
+        row = ((result and result.data) or {}) or {}
+        return row.get("userType") == "Admin"
+    except Exception:
+        logger.exception("Failed to resolve admin profile status for auth_id=%s", auth_id)
+        return False
 
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
@@ -1149,6 +1296,30 @@ _ACADEMY_QUIZ_BLOCK = (
     "user's answer. Grade answers fairly: explain why they are correct or incorrect. Reinforce "
     "key concepts through targeted feedback. Track what the user knows well and what needs more "
     "practice. Keep the tone encouraging but accurate."
+)
+
+# Injected only when _is_deep_request() is True, regardless of intent. Tightens
+# the analytical contract for heavy questions: signal convergence vs divergence,
+# regime conditioning, explicit invalidation conditions. Complements (does not
+# replace) any subagent block also selected for the same request.
+_DEEP_MODE_BLOCK = (
+    "=== DEEP ANALYSIS MODE ===\n"
+    "This question warrants the full analytical apparatus. Apply the four-part "
+    "structure from §7.1 (Signal → Thesis → Risk → Context) but tighten each "
+    "element:\n"
+    "  - SIGNAL: cite specific values from injected data; identify which "
+    "independent metrics converge and which diverge.\n"
+    "  - THESIS: state the regime under which this view holds (risk-on / "
+    "risk-off / late-cycle / disinflation / etc). If macro context is not "
+    "injected, say the regime is unknown and treat the view as conditional.\n"
+    "  - RISK: state the explicit invalidation conditions — the specific "
+    "data, signal change, or macro shift that would make this wrong.\n"
+    "  - CONTEXT: cross-reference against sector peers or comparable assets "
+    "where the data is present.\n"
+    "Surface the non-obvious. The user has asked a heavy question because the "
+    "obvious answer is insufficient — the second-order implication, the edge "
+    "case, the conflicting signal is what makes this response valuable.\n"
+    "Use labelled sections. Complete the analysis in one response."
 )
 
 
@@ -1538,6 +1709,7 @@ def _build_openai_chat_stream_payload(
     reasoning_effort: str,
     model: str = OPENAI_CHAT_MODEL,
     tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Optional[str] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "model": model,
@@ -1545,12 +1717,14 @@ def _build_openai_chat_stream_payload(
         "stream": True,
         "stream_options": {"include_usage": True},
         **_max_completion_field(model, max_output_tokens),
+        **_temperature_field(model, 0.35),
     }
     if _is_reasoning_model(model):
         payload["reasoning_effort"] = reasoning_effort
     if tools:
         payload["tools"] = tools
-        payload["tool_choice"] = "auto"
+        payload["tool_choice"] = tool_choice or DEFAULT_TOOL_CHOICE
+        payload["parallel_tool_calls"] = False
     return payload
 
 
@@ -1575,6 +1749,45 @@ def _tools_for_intent(category: str) -> List[Dict[str, Any]]:
     if not allowed:
         return []
     return [t for t in TOOL_DEFINITIONS if t.get("function", {}).get("name") in allowed]
+
+
+def _is_deep_request(subagent_category: str, classification: Dict[str, Any]) -> bool:
+    """Decide whether a BALANCED request warrants the DEEP_MODEL upgrade."""
+    _ = classification
+    if subagent_category == "deep_analysis":
+        return True
+    if subagent_category in _DEEP_CATEGORIES:
+        return True
+    return False
+
+
+def _accumulate_tool_call_delta(
+    tool_calls_acc: Dict[int, Dict[str, Any]],
+    tool_call_delta: Dict[str, Any],
+    *,
+    max_tool_calls: int = MAX_STREAM_TOOL_CALLS,
+) -> bool:
+    """Merge a streamed tool-call delta; return True when the hard cap is reached."""
+    idx = tool_call_delta.get("index", 0) or 0
+    if idx >= max_tool_calls:
+        return True
+
+    slot = tool_calls_acc.setdefault(
+        idx,
+        {
+            "id": "",
+            "type": "function",
+            "function": {"name": "", "arguments": ""},
+        },
+    )
+    if tool_call_delta.get("id"):
+        slot["id"] = tool_call_delta["id"]
+    func = tool_call_delta.get("function") or {}
+    if func.get("name"):
+        slot["function"]["name"] += func["name"]
+    if func.get("arguments"):
+        slot["function"]["arguments"] += func["arguments"]
+    return False
 
 
 def _build_perplexity_chat_stream_payload(
@@ -1624,7 +1837,8 @@ async def _open_provider_stream(
         raise HTTPException(status_code=504, detail=f"{provider_name} request timed out") from exc
     except httpx.RequestError as exc:
         await _close_stream_resources(client, None)
-        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+        logger.warning("Model provider unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable.") from exc
 
 
 async def _start_chat_completion_stream(
@@ -1635,9 +1849,17 @@ async def _start_chat_completion_stream(
     temperature: float,
     model: str = OPENAI_CHAT_MODEL,
     tools: Optional[List[Dict[str, Any]]] = None,
+    tool_choice: Optional[str] = None,
 ) -> tuple[httpx.AsyncClient, httpx.Response]:
     perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
-    openai_payload = _build_openai_chat_stream_payload(messages, max_output_tokens, reasoning_effort, model, tools=tools)
+    openai_payload = _build_openai_chat_stream_payload(
+        messages,
+        max_output_tokens,
+        reasoning_effort,
+        model,
+        tools=tools,
+        tool_choice=tool_choice,
+    )
     perplexity_payload = _build_perplexity_chat_stream_payload(messages, max_output_tokens, temperature)
 
     try:
@@ -1727,7 +1949,7 @@ async def _call_perplexity(payload: Dict[str, Any]) -> Dict[str, Any]:
     except httpx.RequestError as exc:
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to reach Perplexity provider: {exc}",
+            detail="AI service temporarily unavailable.",
         ) from exc
 
     if response.status_code != 200:
@@ -1751,7 +1973,8 @@ async def _call_openai(payload: Dict[str, Any]) -> Dict[str, Any]:
         if perplexity_key:
             await audit_log("openai_fallback_perplexity", {"reason": "network_error", "error": str(exc)})
             return await _call_perplexity(payload)
-        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
+        logger.warning("Model provider unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable.") from exc
 
     if response.status_code == 429:
         perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
@@ -1794,9 +2017,9 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
             "max_tokens": payload.get("max_output_tokens", 300),
         }
 
-    client = httpx.AsyncClient(timeout=60.0)
     try:
-        response = await client.post(OPENAI_RESPONSES_ENDPOINT, headers=_build_headers(), json=payload)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(OPENAI_RESPONSES_ENDPOINT, headers=_build_headers(), json=payload)
     except httpx.TimeoutException as exc:
         raise HTTPException(status_code=504, detail="OpenAI request timed out") from exc
     except httpx.RequestError as exc:
@@ -1804,11 +2027,8 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
         if perplexity_key:
             await audit_log("openai_fallback_perplexity", {"reason": "network_error", "error": str(exc)})
             return await _call_perplexity(_perplexity_fallback_payload())
-        raise HTTPException(status_code=502, detail=f"Failed to reach model provider: {exc}") from exc
-    finally:
-        aclose = getattr(client, "aclose", None)
-        if callable(aclose):
-            await aclose()
+        logger.warning("Model provider unreachable: %s", exc)
+        raise HTTPException(status_code=502, detail="AI service temporarily unavailable.") from exc
 
     if response.status_code == 429:
         perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)
@@ -1893,6 +2113,43 @@ async def _fetch_fresh_portfolio(auth_id: str) -> str | None:
         return None
 
 
+# Tier-aware Meridian context fetch.
+#
+# INSTANT messages are pure conversational atoms ("hi", "thanks", "ok thanks",
+# "continue") that the INSTANT system prompt explicitly forbids from triggering
+# financial analysis — knowing the user's portfolio does not change the reply
+# to "thanks". So INSTANT skips the fetch entirely and stays genuinely instant.
+#
+# FAST messages are short, non-financial questions (under 200 chars, no finance
+# keywords). They benefit from name + tier + risk profile so IRIS can adjust
+# tone, but do not need the full 13-table rebuild. The fetch reads the cached
+# row written by the background refresher, fronted by an in-process LRU so
+# warm-path hits are sub-millisecond. The 1.5 s cap protects cold-path latency
+# only on infrastructure trouble.
+#
+# BALANCED runs the same fetch inside the asyncio.gather block, so this helper
+# returns None for it to avoid duplicate fetches.
+_TIER_MERIDIAN_TIMEOUT_S = {"FAST": 1.5}
+
+
+async def _fetch_meridian_for_tier(tier: str, user_id: Optional[str]) -> Optional[str]:
+    """Return cached Meridian context for a tier, capped by tier-specific timeout.
+
+    Returns ``None`` on timeout, missing user, or any error so the chat path
+    is never blocked by a slow / failing context fetch.
+    """
+    timeout = _TIER_MERIDIAN_TIMEOUT_S.get(tier)
+    if timeout is None:
+        return None
+    try:
+        return await asyncio.wait_for(
+            build_iris_context(user_id),
+            timeout=timeout,
+        )
+    except (asyncio.TimeoutError, Exception):
+        return None
+
+
 async def _classify_query(user_message: str) -> Dict[str, Any]:
     """Classify query complexity using a lightweight Responses model."""
     default_classification: Dict[str, Any] = {
@@ -1937,9 +2194,10 @@ async def meridian_onboard(
     verified_user_id = auth_user.auth_id
     try:
         await run_meridian_onboard(verified_user_id, body.model_dump())
-        asyncio.create_task(
-            asyncio.to_thread(_refresh_iris_context_cache_sync, verified_user_id)
-        )
+        asyncio.create_task(_safe_background(
+            asyncio.to_thread(_refresh_iris_context_cache_sync, verified_user_id),
+            label="iris_context_cache_refresh",
+        ))
         return {"status": "ok", "message": "Meridian profile created"}
     except Exception as exc:
         logger.exception("Meridian onboarding failed for user_id=%s: %s", verified_user_id, exc)
@@ -2010,6 +2268,7 @@ async def chat_completion(
     # SECURITY: Use the auth_id from the verified JWT — never from the request body.
     # This prevents user_id spoofing for rate-limit bypass or false audit attribution.
     verified_user_id = auth_user.auth_id
+    token_limit_exempt = await asyncio.to_thread(_is_admin_profile, verified_user_id)
 
     # Build message list
     messages: List[Dict[str, str]]
@@ -2032,6 +2291,7 @@ async def chat_completion(
         "/api/chat",
         user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
+        token_limit_exempt=token_limit_exempt,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
@@ -2065,6 +2325,7 @@ async def chat_completion(
         # Identify the last user message for classification
         user_messages = [m for m in messages if m.get("role") == "user"]
         last_user_text = user_messages[-1]["content"] if user_messages else ""
+        academy_session = request.session_type in {"academy_tutor", "academy_quiz"}
 
         # Prompt injection guard — fires before any I/O or tier classification.
         if _contains_injection(last_user_text):
@@ -2083,6 +2344,10 @@ async def chat_completion(
 
         # Tier detection — zero I/O, drives all subsequent gating decisions.
         message_tier = classify_tier(last_user_text)
+        if academy_session:
+            # Academy tutor/grader calls already carry bounded lesson context and
+            # should not pay the full advisor routing/context cost on every turn.
+            message_tier = "FAST"
         logger.info(
             "[TIER] tier=%s msg_len=%d msg='%s'",
             message_tier,
@@ -2101,14 +2366,14 @@ async def chat_completion(
 
         # Ticker detection is pure (no I/O) — extract once here so it is available
         # to the BALANCED gather and to the FAST/INSTANT skip path.
-        detected_ticker = _extract_ticker(last_user_text)
+        detected_ticker = None if academy_session else _extract_ticker(last_user_text)
 
         # ── Non-finance rejection gate ──────────────────────────────────────────
         # Fires before any I/O for FAST/BALANCED messages that clearly match a
         # non-finance pattern and contain no finance allowlist override.
         # INSTANT messages (trivial social phrases) bypass this check entirely
         # because they are already handled by their own fast-path below.
-        if message_tier != "INSTANT" and _is_nonfin_message(last_user_text):
+        if not academy_session and message_tier != "INSTANT" and _is_nonfin_message(last_user_text):
             logger.info(
                 "[NONFIN_GATE] rejected non-financial message | msg='%s'",
                 last_user_text[:50],
@@ -2133,11 +2398,22 @@ async def chat_completion(
 
         # ── Steps 1 & 1b–1d: concurrent pipeline ───────────────────────────────
         # BALANCED  → run all four concurrently via asyncio.gather (saves wall time).
-        # FAST      → _classify_query with a hard 3 s timeout cap; skip Meridian.
-        # INSTANT   → skip both entirely; use safe defaults.
+        # FAST      → _classify_query with a hard 2 s timeout cap; serve cached Meridian.
+        # INSTANT   → pure conversational atoms ("hi", "thanks", "continue"); the
+        #             INSTANT system prompt forbids financial analysis, so user
+        #             context would not change the reply. Skip everything and keep
+        #             the response genuinely instant.
         fresh_goals_data: Optional[str] = None
         fresh_portfolio_data: Optional[str] = None
-        if message_tier == "INSTANT":
+        if academy_session:
+            logger.info("[ACADEMY] skipped advisor classifiers and Meridian/market context")
+            classification = _default_classification
+            reasoning_effort = _default_reasoning_effort
+            meridian_context = None
+            market_context = None
+            subagent_category = "general"
+
+        elif message_tier == "INSTANT":
             logger.info("[TIER] INSTANT: skipped _classify_query")
             classification: Dict[str, Any] = _default_classification
             reasoning_effort = _default_reasoning_effort
@@ -2168,15 +2444,7 @@ async def chat_completion(
             )
             reasoning_effort = _get_reasoning_effort(classification)
             # FAST tier — inject compact user context (core block only, no full rebuild)
-            fast_meridian = None
-            try:
-                fast_meridian = await asyncio.wait_for(
-                    build_iris_context(verified_user_id),
-                    timeout=1.5  # hard 1.5s cap — serve stale cache or skip
-                )
-            except (asyncio.TimeoutError, Exception):
-                fast_meridian = None  # never block the response
-            meridian_context = fast_meridian
+            meridian_context = await _fetch_meridian_for_tier("FAST", verified_user_id)
             logger.info("[TIER] FAST: meridian=%s", "present" if meridian_context else "None")
 
         else:  # BALANCED — run all four concurrently
@@ -2198,12 +2466,16 @@ async def chat_completion(
                     if _ci_result in {"portfolio_analysis", "deep_analysis"}
                     else asyncio.sleep(0)
                 )
+                # BALANCED tier runs alongside the full context build, so the
+                # fresh goals/portfolio fetches share the BALANCED budget rather
+                # than the tighter FAST cap. 4s leaves enough headroom for cold
+                # PostgREST connections without blocking the streaming start.
                 _cq_result, _mc_result, _mkt_result, _fresh_goals_result, _fresh_portfolio_result = await asyncio.gather(
                     _classify_query(last_user_text),
                     build_iris_context(verified_user_id),
                     build_market_context(ticker=detected_ticker),
-                    asyncio.wait_for(fresh_goals_task, timeout=2.0),
-                    asyncio.wait_for(fresh_portfolio_task, timeout=2.0),
+                    asyncio.wait_for(fresh_goals_task, timeout=4.0),
+                    asyncio.wait_for(fresh_portfolio_task, timeout=4.0),
                     return_exceptions=True,
                 )
             else:
@@ -2315,7 +2587,10 @@ async def chat_completion(
         # INSTANT: skip API call entirely, default to "general".
         # FAST: classify sequentially with tier-aware timeout inside classify_intent().
         # BALANCED: already completed inside the concurrent gather above.
-        if message_tier == "INSTANT":
+        if academy_session:
+            subagent_category = "general"
+            logger.info("[ACADEMY] intent=general (academy mode)")
+        elif message_tier == "INSTANT":
             subagent_category = "general"
             logger.info("[TIER] INSTANT: intent=general (fast-path)")
         elif message_tier == "FAST":
@@ -2378,21 +2653,20 @@ async def chat_completion(
         if message_tier == "INSTANT":
             _base_system_prompt = INSTANT_SYSTEM_PROMPT
             _chat_model = INSTANT_MODEL
+            _deep_mode = False
         elif message_tier == "FAST":
             _base_system_prompt = FAST_SYSTEM_PROMPT
             _chat_model = BALANCED_MODEL
-        else:  # BALANCED — high-stakes categories get the deep model
+            _deep_mode = False
+        else:  # BALANCED — escalate to DEEP_MODEL when the request demands it.
             _base_system_prompt = FINANCIAL_ADVISOR_SYSTEM_PROMPT
-            if subagent_category in _DEEP_CATEGORIES:
-                _chat_model = BALANCED_MODEL
-            elif subagent_category == "deep_analysis":
-                _chat_model = BALANCED_MODEL  # gpt-4o with full context
-            else:
-                _chat_model = BALANCED_MODEL
+            _deep_mode = _is_deep_request(subagent_category, classification)
+            _chat_model = DEEP_MODEL if _deep_mode else BALANCED_MODEL
 
         logger.info(
             f"[MODEL] tier={message_tier} "
             f"category={subagent_category} "
+            f"deep={_deep_mode} "
             f"model={_chat_model}"
         )
 
@@ -2408,6 +2682,8 @@ async def chat_completion(
             system_parts.append(fresh_goals_data)
         if fresh_portfolio_data:
             system_parts.append(fresh_portfolio_data)
+        if _deep_mode:
+            system_parts.append(_DEEP_MODE_BLOCK)
         if subagent_block:
             system_parts.append(subagent_block)
         if session_block:
@@ -2453,6 +2729,7 @@ async def chat_completion(
                 temperature=request.temperature,
                 model=_chat_model,
                 tools=enabled_tools,
+                tool_choice=DEFAULT_TOOL_CHOICE if enabled_tools else None,
             )
 
             async def generate_stream():
@@ -2461,6 +2738,7 @@ async def chat_completion(
                 usage_entries: List[Dict[str, Any]] = []
                 # Accumulates streamed tool-call deltas indexed by `index` position.
                 tool_calls_acc: Dict[int, Dict[str, Any]] = {}
+                tool_call_cap_reached = False
 
                 async def _consume_stream(
                     response: httpx.Response,
@@ -2468,6 +2746,7 @@ async def chat_completion(
                     accumulate_tool_calls: bool,
                 ):
                     """Drain an SSE stream; emit content deltas, optionally accumulate tool_calls."""
+                    nonlocal tool_call_cap_reached
                     async for line in response.aiter_lines():
                         if not line or not line.startswith("data:"):
                             continue
@@ -2503,22 +2782,15 @@ async def chat_completion(
                                 for tc in tc_deltas:
                                     if not isinstance(tc, dict):
                                         continue
-                                    idx = tc.get("index", 0) or 0
-                                    slot = tool_calls_acc.setdefault(
-                                        idx,
-                                        {
-                                            "id": "",
-                                            "type": "function",
-                                            "function": {"name": "", "arguments": ""},
-                                        },
-                                    )
-                                    if tc.get("id"):
-                                        slot["id"] = tc["id"]
-                                    func = tc.get("function") or {}
-                                    if func.get("name"):
-                                        slot["function"]["name"] += func["name"]
-                                    if func.get("arguments"):
-                                        slot["function"]["arguments"] += func["arguments"]
+                                    if _accumulate_tool_call_delta(tool_calls_acc, tc):
+                                        logger.warning(
+                                            "[TOOLS] tool call cap reached (%d); truncating additional tool calls",
+                                            MAX_STREAM_TOOL_CALLS,
+                                        )
+                                        tool_call_cap_reached = True
+                                        break
+                                if tool_call_cap_reached:
+                                    break
 
                 try:
                     assert upstream_response is not None
@@ -2533,6 +2805,14 @@ async def chat_completion(
                         # client sees nothing until tool results
                         # are incorporated into follow-up response
 
+                    # If tools were available but the model produced a direct
+                    # text answer without calling any, replay the suppressed
+                    # first-stream content — otherwise the client receives only
+                    # `done: true` and surfaces an empty-response error.
+                    if enabled_tools and not tool_calls_acc and collected_chunks:
+                        for chunk in collected_chunks:
+                            yield _sse_event({"content": chunk})
+
                     # If the model requested tool calls, execute them and run a
                     # follow-up streaming completion with the results appended.
                     if tool_calls_acc:
@@ -2542,9 +2822,17 @@ async def chat_completion(
                             len(ordered_calls),
                             [c["function"]["name"] for c in ordered_calls],
                         )
+                        if tool_call_cap_reached:
+                            logger.info(
+                                "[TOOLS] proceeding with capped tool execution (%d max)",
+                                MAX_STREAM_TOOL_CALLS,
+                            )
 
-                        tool_result_messages: List[Dict[str, Any]] = []
-                        for call in ordered_calls:
+                        # Run tool calls concurrently and cap the combined wall
+                        # time. Tool calls are independent (each appends its
+                        # own result), so gather() is safe and avoids a 3×
+                        # blow-up when multiple calls hit Tavily's 8s timeout.
+                        async def _run_single_tool(call: Dict[str, Any]) -> Dict[str, Any]:
                             name = call["function"]["name"] or ""
                             args_raw = call["function"]["arguments"] or "{}"
                             try:
@@ -2558,11 +2846,35 @@ async def chat_completion(
                             except Exception as tool_exc:
                                 logger.exception("Tool execution crashed for %s", name)
                                 result_json = json.dumps({"error": f"Tool execution failed: {tool_exc}"})
-                            tool_result_messages.append({
+                            return {
                                 "role": "tool",
                                 "tool_call_id": call.get("id") or "",
                                 "content": result_json,
-                            })
+                            }
+
+                        try:
+                            tool_result_messages = list(
+                                await asyncio.wait_for(
+                                    asyncio.gather(*(_run_single_tool(c) for c in ordered_calls)),
+                                    timeout=TOOL_EXECUTION_BUDGET_SECONDS,
+                                )
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[TOOLS] combined tool fan-out exceeded %.1fs budget; substituting timeout payload",
+                                TOOL_EXECUTION_BUDGET_SECONDS,
+                            )
+                            tool_result_messages = [
+                                {
+                                    "role": "tool",
+                                    "tool_call_id": call.get("id") or "",
+                                    "content": json.dumps({
+                                        "error": "Tool execution exceeded time budget",
+                                        "tool": call["function"]["name"] or "",
+                                    }),
+                                }
+                                for call in ordered_calls
+                            ]
 
                         assistant_tool_call_message: Dict[str, Any] = {
                             "role": "assistant",
@@ -2617,7 +2929,12 @@ async def chat_completion(
                     final_answer = "".join(collected_chunks).strip()
                     if not final_answer:
                         logger.warning("Empty streamed response from /api/chat for user %s", verified_user_id)
-                        yield _sse_event({"error": "Stream interrupted"})
+                        fallback = (
+                            "I couldn't put a response together for that one — "
+                            "could you rephrase or try again in a moment?"
+                        )
+                        yield _sse_event({"content": fallback})
+                        yield _sse_event({"done": True})
                         return
 
                     final_answer = _ensure_test_mode_disclaimer(final_answer)
@@ -2649,7 +2966,10 @@ async def chat_completion(
                         logger.warning("Failed to write chat_response audit log: %s", audit_exc)
 
                     if tier_from_classifier and verified_user_id:
-                        asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
+                        asyncio.ensure_future(_safe_background(
+                            update_knowledge_tier(verified_user_id, tier_from_classifier),
+                            label="knowledge_tier_update",
+                        ))
 
                     yield _sse_event({"done": True})
                 except Exception as stream_exc:
@@ -2749,7 +3069,8 @@ async def chat_completion(
         # Step 5: Record token usage (Responses API uses input_tokens/output_tokens)
         usage = data.get("usage", {})
         actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
-        rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+        if not token_limit_exempt:
+            rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
         await audit_log(
             "chat_response",
             {
@@ -2767,7 +3088,10 @@ async def chat_completion(
             (classification.get("user_level") or "").lower()
         )
         if tier_from_classifier and verified_user_id:
-            asyncio.ensure_future(update_knowledge_tier(verified_user_id, tier_from_classifier))
+            asyncio.ensure_future(_safe_background(
+                update_knowledge_tier(verified_user_id, tier_from_classifier),
+                label="knowledge_tier_update",
+            ))
 
         return {"response": final_answer}
     except HTTPException as exc:
@@ -2808,6 +3132,7 @@ async def chat_title(
     auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
     verified_user_id = auth_user.auth_id
+    token_limit_exempt = await asyncio.to_thread(_is_admin_profile, verified_user_id)
 
     # Estimate tokens (title generation is lightweight)
     estimated_tokens = estimate_tokens(request.first_message, system_overhead=50) + 60
@@ -2818,6 +3143,7 @@ async def chat_title(
         "/api/chat/title",
         user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
+        token_limit_exempt=token_limit_exempt,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
@@ -2847,7 +3173,8 @@ async def chat_title(
             data = await _call_openai(payload)
             usage = data.get("usage", {})
             actual_tokens = usage.get("total_tokens", 0)
-            rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+            if not token_limit_exempt:
+                rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
             content = _extract_text_unified(data).strip().strip('"').strip("'")
         except Exception as exc:
             logger.warning("Title generation model call failed: %s", exc)
@@ -2884,6 +3211,7 @@ async def analyze_quantitative_data(
     auth_user: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, str]:
     verified_user_id = auth_user.auth_id
+    token_limit_exempt = await asyncio.to_thread(_is_admin_profile, verified_user_id)
 
     # Estimate tokens
     data_str = str(request.quantitative_data)
@@ -2895,6 +3223,7 @@ async def analyze_quantitative_data(
         "/api/ai/analyze-quantitative",
         user_id=verified_user_id,
         estimated_tokens=estimated_tokens,
+        token_limit_exempt=token_limit_exempt,
     )
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
@@ -2924,7 +3253,8 @@ async def analyze_quantitative_data(
 
         usage = data.get("usage", {})
         actual_tokens = usage.get("total_tokens", 0)
-        rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+        if not token_limit_exempt:
+            rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
 
         content = _extract_text_unified(data).strip()
         if not content:

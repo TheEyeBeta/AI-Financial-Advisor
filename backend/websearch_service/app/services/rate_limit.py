@@ -287,6 +287,7 @@ class RateLimitService:
         identifier: str,
         endpoint: str,
         estimated_tokens: int = 0,
+        token_limit_exempt: bool = False,
         config_override: Optional[RateLimitConfig] = None,
     ) -> Tuple[bool, Optional[str], Dict[str, int]]:
         self._cleanup_old_entries()
@@ -338,12 +339,13 @@ class RateLimitService:
                 f"Retry after {remaining} seconds."
             ), {}
 
-        if state.tokens_minute + estimated_tokens > config.tokens_per_minute:
-            return False, f"Token limit exceeded: {config.tokens_per_minute} tokens per minute.", {}
-        if state.tokens_hour + estimated_tokens > config.tokens_per_hour:
-            return False, f"Token limit exceeded: {config.tokens_per_hour} tokens per hour.", {}
-        if state.tokens_day + estimated_tokens > config.tokens_per_day:
-            return False, f"Token limit exceeded: {config.tokens_per_day} tokens per day.", {}
+        if not token_limit_exempt:
+            if state.tokens_minute + estimated_tokens > config.tokens_per_minute:
+                return False, f"Token limit exceeded: {config.tokens_per_minute} tokens per minute.", {}
+            if state.tokens_hour + estimated_tokens > config.tokens_per_hour:
+                return False, f"Token limit exceeded: {config.tokens_per_hour} tokens per hour.", {}
+            if state.tokens_day + estimated_tokens > config.tokens_per_day:
+                return False, f"Token limit exceeded: {config.tokens_per_day} tokens per day.", {}
 
         if state.concurrent_requests >= config.max_concurrent_requests:
             return False, (
@@ -353,9 +355,10 @@ class RateLimitService:
         state.requests_minute.append(now)
         state.requests_hour.append(now)
         state.requests_day.append(now)
-        state.tokens_minute += estimated_tokens
-        state.tokens_hour += estimated_tokens
-        state.tokens_day += estimated_tokens
+        if not token_limit_exempt:
+            state.tokens_minute += estimated_tokens
+            state.tokens_hour += estimated_tokens
+            state.tokens_day += estimated_tokens
         state.concurrent_requests += 1
 
         self._check_abuse(identifier, state, config)
@@ -380,12 +383,14 @@ class RateLimitService:
         endpoint: str,
         request_id: str,
         estimated_tokens: int,
+        token_limit_exempt: bool,
     ) -> None:
         try:
             request.state.rate_limit_identifier = identifier
             request.state.rate_limit_endpoint = endpoint
             request.state.rate_limit_request_id = request_id
             request.state.rate_limit_estimated_tokens = estimated_tokens
+            request.state.rate_limit_token_limit_exempt = token_limit_exempt
         except Exception:
             pass
 
@@ -395,6 +400,7 @@ class RateLimitService:
         endpoint: str,
         user_id: Optional[str] = None,
         estimated_tokens: int = 0,
+        token_limit_exempt: bool = False,
         config_override: Optional[RateLimitConfig] = None,
     ) -> Tuple[bool, Optional[str], Dict[str, int]]:
         identifier = self._get_identifier(request, user_id)
@@ -407,6 +413,7 @@ class RateLimitService:
                 endpoint=endpoint,
                 config=config,
                 estimated_tokens=estimated_tokens,
+                token_limit_exempt=token_limit_exempt,
                 now=time.time(),
                 request_id=request_id,
             )
@@ -415,11 +422,19 @@ class RateLimitService:
                 identifier,
                 endpoint,
                 estimated_tokens,
+                token_limit_exempt=token_limit_exempt,
                 config_override=config_override,
             )
 
         if allowed:
-            self._store_request_context(request, identifier, endpoint, request_id, estimated_tokens)
+            self._store_request_context(
+                request,
+                identifier,
+                endpoint,
+                request_id,
+                estimated_tokens,
+                token_limit_exempt,
+            )
 
         return allowed, error_message, rate_limit_info
 
@@ -430,6 +445,8 @@ class RateLimitService:
         tokens_used: int = 0,
     ) -> None:
         identifier = self._get_identifier(request, user_id)
+        if bool(getattr(getattr(request, "state", object()), "rate_limit_token_limit_exempt", False)):
+            return
         endpoint = getattr(getattr(request, "state", object()), "rate_limit_endpoint", "")
         request_id = getattr(getattr(request, "state", object()), "rate_limit_request_id", None)
         if self._redis_backend is not None and request_id and endpoint:
