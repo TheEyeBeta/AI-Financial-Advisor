@@ -22,7 +22,7 @@ export const options = {
     chat_load: {
       executor: "constant-vus",
       vus: 50,
-      duration: getFirstNonEmptyEnv("K6_DURATION", "30s"),
+      duration: __ENV.LOAD_TEST_DURATION || "30s",
       gracefulStop: "10s",
     },
   },

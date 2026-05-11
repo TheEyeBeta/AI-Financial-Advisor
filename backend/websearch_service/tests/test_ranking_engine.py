@@ -11,6 +11,10 @@ import math
 import pytest
 
 from app.services.ranking_engine import (
+    MIN_AVG_VOLUME_SHARES,
+    MIN_MARKET_CAP_USD,
+    MIN_PRICE_USD,
+    _bollinger_band_width,
     _conviction,
     _f,
     _has_complete_data,
@@ -180,3 +184,41 @@ def test_has_complete_data_rejects_nonfinite_snapshot_fields():
     snap = _valid_snap()
     snap["rsi_14"] = math.inf
     assert _has_complete_data(snap, _valid_returns()) is False
+
+
+# ─── _bollinger_band_width (stability proxy) ─────────────────────────────────
+
+def test_bollinger_band_width_returns_ratio_for_valid_bands():
+    snap = {"bollinger_upper": 105.0, "bollinger_middle": 100.0, "bollinger_lower": 95.0}
+    width = _bollinger_band_width(snap)
+    assert width == pytest.approx(0.10, abs=1e-9)
+
+
+def test_bollinger_band_width_handles_negative_middle_band():
+    snap = {"bollinger_upper": -90.0, "bollinger_middle": -100.0, "bollinger_lower": -110.0}
+    width = _bollinger_band_width(snap)
+    assert width is not None
+    assert width > 0  # absolute middle keeps the width positive
+
+
+@pytest.mark.parametrize(
+    "snap",
+    [
+        {"bollinger_upper": None, "bollinger_middle": 100.0, "bollinger_lower": 95.0},
+        {"bollinger_upper": 105.0, "bollinger_middle": None, "bollinger_lower": 95.0},
+        {"bollinger_upper": 105.0, "bollinger_middle": 100.0, "bollinger_lower": None},
+        {"bollinger_upper": 105.0, "bollinger_middle": 0.0, "bollinger_lower": 95.0},
+    ],
+)
+def test_bollinger_band_width_returns_none_when_inputs_invalid(snap: dict):
+    assert _bollinger_band_width(snap) is None
+
+
+# ─── Quality-gate thresholds ─────────────────────────────────────────────────
+
+def test_quality_gate_thresholds_have_sensible_floors():
+    # Locked-in floors so a future edit can't quietly drop these to "pass" more
+    # tickers and reintroduce penny / micro-cap / illiquid spike bias.
+    assert MIN_PRICE_USD >= 5.0
+    assert MIN_MARKET_CAP_USD >= 500_000_000.0
+    assert MIN_AVG_VOLUME_SHARES >= 500_000.0

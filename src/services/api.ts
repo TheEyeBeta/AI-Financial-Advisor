@@ -152,6 +152,7 @@ export interface StockScore {
   rank_tier: string;       // "Strong Buy" | "Buy" | "Hold" | "Underperform" | "Sell"
   conviction: string;      // "High" | "Medium" | "Low"
   momentum_score: number;
+  stability_score: number | null;
   technical_score: number;
   fundamental_score: number;
   risk_score: number;
@@ -159,6 +160,9 @@ export interface StockScore {
   ml_score: number | null;
   has_ml_data: boolean;
   dimensions_bullish: number;
+  momentum_20d_pct: number | null;
+  volatility_20d: number | null;
+  hard_filter_passed: boolean | null;
   breakdown: {
     // Technical
     rsi_14: number | null;

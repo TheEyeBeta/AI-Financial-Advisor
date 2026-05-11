@@ -2784,17 +2784,6 @@
             "type": "number",
             "title": "Composite Score"
           },
-          "trend_score": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Trend Score"
-          },
           "momentum_score": {
             "anyOf": [
               {
@@ -2805,6 +2794,28 @@
               }
             ],
             "title": "Momentum Score"
+          },
+          "stability_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stability Score"
+          },
+          "trend_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trend Score"
           },
           "volume_score": {
             "anyOf": [
@@ -2838,6 +2849,39 @@
               }
             ],
             "title": "Adx Score"
+          },
+          "momentum_20d_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Momentum 20D Pct"
+          },
+          "volatility_20d": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volatility 20D"
+          },
+          "hard_filter_passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hard Filter Passed"
           },
           "technical_score": {
             "anyOf": [

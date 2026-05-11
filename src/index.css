@@ -198,3 +198,78 @@
     background: hsl(var(--muted-foreground) / 0.4);
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────── *
+ * Noise-reduction tokens (see docs / TopStocks redesign).
+ *
+ * Use `.score-badge` for any neutral quality score — never colour it
+ * red/green because the score is objective, not directional.
+ *
+ * Use `.price-up` / `.price-down` for resting-state price colouring; the
+ * background is intentionally muted so a wall of red/green never trains
+ * the eye to treat noise as signal.
+ *
+ * Use `.price-flash-up` / `.price-flash-down` for one-shot 600 ms flashes
+ * that fire on price *change* and return to neutral.  Apply the class for
+ * one render then remove it (e.g. via a setTimeout) so it can re-trigger.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+@layer utilities {
+  .score-badge {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-variant-numeric: tabular-nums;
+    border-radius: 9999px;
+    padding: 0.25rem 0.75rem;
+  }
+
+  .price-up {
+    color: hsl(var(--profit));
+    background-color: hsl(var(--profit) / 0.1);
+  }
+
+  .price-down {
+    color: hsl(var(--loss));
+    background-color: hsl(var(--loss) / 0.1);
+  }
+
+  .price-flash-up {
+    animation: price-flash-up 600ms ease-out forwards;
+  }
+
+  .price-flash-down {
+    animation: price-flash-down 600ms ease-out forwards;
+  }
+
+  /* Subtle stability segments bar — used in TopStocks to visualise
+     low-volatility quality.  Caller provides --segments-filled (0–10). */
+  .stability-bar {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 0.25rem;
+    width: 100%;
+  }
+
+  .stability-bar > span {
+    display: block;
+    height: 0.5rem;
+    border-radius: 9999px;
+    background-color: hsl(var(--muted));
+  }
+
+  .stability-bar > span[data-filled="true"] {
+    background-color: hsl(var(--primary));
+  }
+}
+
+@keyframes price-flash-up {
+  0%   { background-color: hsl(var(--profit) / 0.25); }
+  30%  { background-color: hsl(var(--profit) / 0.12); }
+  100% { background-color: transparent; }
+}
+
+@keyframes price-flash-down {
+  0%   { background-color: hsl(var(--loss) / 0.25); }
+  30%  { background-color: hsl(var(--loss) / 0.12); }
+  100% { background-color: transparent; }
+}
