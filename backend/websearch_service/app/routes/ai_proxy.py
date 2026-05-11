@@ -2017,9 +2017,9 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
             "max_tokens": payload.get("max_output_tokens", 300),
         }
 
-    client = httpx.AsyncClient(timeout=60.0)
     try:
-        response = await client.post(OPENAI_RESPONSES_ENDPOINT, headers=_build_headers(), json=payload)
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(OPENAI_RESPONSES_ENDPOINT, headers=_build_headers(), json=payload)
     except httpx.TimeoutException as exc:
         raise HTTPException(status_code=504, detail="OpenAI request timed out") from exc
     except httpx.RequestError as exc:
@@ -2029,10 +2029,6 @@ async def _call_openai_responses(payload: Dict[str, Any]) -> Dict[str, Any]:
             return await _call_perplexity(_perplexity_fallback_payload())
         logger.warning("Model provider unreachable: %s", exc)
         raise HTTPException(status_code=502, detail="AI service temporarily unavailable.") from exc
-    finally:
-        aclose = getattr(client, "aclose", None)
-        if callable(aclose):
-            await aclose()
 
     if response.status_code == 429:
         perplexity_key = os.getenv(PERPLEXITY_API_KEY_ENV)

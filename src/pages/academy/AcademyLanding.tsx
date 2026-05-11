@@ -589,7 +589,7 @@ export default function AcademyLanding() {
                               )}
                               {tierLessons.length === 0 && (
                                 <span className="rounded-full border border-dashed border-border/60 px-3 py-1 text-xs text-muted-foreground">
-                                  Lessons coming soon
+                                  No lessons yet
                                 </span>
                               )}
                             </div>
