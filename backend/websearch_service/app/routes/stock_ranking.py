@@ -256,9 +256,9 @@ class StockDetailResponse(BaseModel):
 
 @router.get("/api/stocks/detail/{ticker}", response_model=StockDetailResponse)
 async def get_stock_detail(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
     raw_request: Request,
     response: Response,
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
     auth_user: Optional[AuthenticatedUser] = Depends(optional_auth),
 ) -> StockDetailResponse:
     """
