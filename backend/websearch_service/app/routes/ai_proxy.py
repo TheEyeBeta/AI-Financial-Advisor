@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -2250,10 +2251,12 @@ async def meridian_refresh_all(
 
         cron_secret = os.getenv("MERIDIAN_CRON_SECRET")
         if not cron_secret:
-            raise HTTPException(status_code=501, detail="Cron secret not configured.")
+            # Fail closed — never allow the endpoint without a configured secret.
+            raise HTTPException(status_code=401, detail="Cron authentication not configured.")
         provided = raw_request.headers.get("x-cron-secret", "")
-        if provided != cron_secret:
-            raise HTTPException(status_code=403, detail="Invalid cron secret.")
+        # Constant-time comparison prevents timing-based secret enumeration.
+        if not hmac.compare_digest(provided.encode(), cron_secret.encode()):
+            raise HTTPException(status_code=403, detail="Forbidden.")
     result = await refresh_all_users_context()
     return {"success": True, **result}
 

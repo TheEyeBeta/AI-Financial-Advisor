@@ -37,9 +37,11 @@ for _env_path in _env_paths:
         break
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response as StarletteResponse
 
 from .routes.admin import router as admin_router
 from .routes.ai_proxy import router as ai_proxy_router
@@ -56,6 +58,24 @@ from .services.ranking_engine import run_ranking_cycle
 logger = logging.getLogger(__name__)
 
 START_TIME = time.time()
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Attach hardening headers to every response."""
+
+    async def dispatch(self, request: Request, call_next) -> StarletteResponse:
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+        if os.getenv("ENVIRONMENT") == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=63072000; includeSubDomains; preload"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'"
+        )
+        return response
 
 
 async def _run_scheduled_cycle() -> None:
@@ -370,6 +390,8 @@ def create_app() -> FastAPI:
         # dict.fromkeys preserves insertion order and deduplicates
         allowed_origins = list(dict.fromkeys(default_dev_origins + extra_origins))
         allow_creds = True
+
+    app.add_middleware(SecurityHeadersMiddleware)
 
     app.add_middleware(
         CORSMiddleware,

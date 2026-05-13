@@ -234,14 +234,21 @@ async def dataapi_query(
     if not normalized.startswith("select"):
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
 
-    # Block CTE-wrapped mutations (e.g. WITH x AS (DELETE ...) SELECT * FROM x)
-    # and any other DDL/DML keywords appearing anywhere in the query.
-    if re.search(r"\b(delete|insert|update|drop|truncate|alter)\b", q, re.IGNORECASE):
+    # Block CTE-wrapped mutations and DDL/DML keywords anywhere in the query.
+    if re.search(r"\b(delete|insert|update|drop|truncate|alter|create|grant|revoke|execute|exec|call)\b", q, re.IGNORECASE):
         raise HTTPException(status_code=400, detail="Only SELECT queries are permitted")
 
-    # Wrap with an outer LIMIT 1000 to enforce a hard row cap at the SQL level.
-    # nosec B608: admin-only endpoint (see _require_admin); SELECT-only with DML
-    # keywords blocked above; downstream DataAPI also enforces RLS and read-only role.
+    # Block comment sequences used to bypass keyword checks (e.g. SEL/**/ECT, -- comments).
+    if re.search(r"(--|/\*|\*/|#)", q):
+        raise HTTPException(status_code=400, detail="SQL comments are not permitted")
+
+    # Block semicolons to prevent stacked/multi-statement queries.
+    if ";" in q:
+        raise HTTPException(status_code=400, detail="Multi-statement queries are not permitted")
+
+    # Wrap with an outer LIMIT to enforce a hard row cap at the SQL level.
+    # nosec B608: admin-only endpoint; SELECT-only with DML, comments, and
+    # semicolons blocked above; downstream DataAPI also enforces read-only role.
     final_sql = f"SELECT * FROM ({q}) AS _q LIMIT 1000"  # nosec B608
 
     try:
@@ -260,8 +267,9 @@ async def dataapi_query(
                 headers={"Authorization": f"Bearer {token}"},
             )
             if resp.status_code != 200:
-                error_body = resp.text
-                raise HTTPException(status_code=resp.status_code, detail=f"DataAPI query error: {error_body}")
+                # Log full error internally; never surface raw upstream bodies to clients.
+                logger.warning("DataAPI query error HTTP %s: %s", resp.status_code, resp.text[:500])
+                raise HTTPException(status_code=502, detail="DataAPI query failed.")
             result = resp.json()
     except httpx.HTTPError as exc:
         logger.warning("Admin DataAPI request failed: %s", exc)
@@ -302,10 +310,8 @@ async def delete_user(auth_id: str, admin: str = Depends(_require_admin)) -> dic
     if resp.status_code == 404:
         raise HTTPException(status_code=404, detail="Auth user not found")
     if resp.status_code not in (200, 204):
-        raise HTTPException(
-            status_code=502,
-            detail=f"Supabase returned HTTP {resp.status_code}: {resp.text}",
-        )
+        logger.error("Supabase user delete HTTP %s for %s: %s", resp.status_code, auth_id, resp.text[:200])
+        raise HTTPException(status_code=502, detail="Failed to delete user.")
 
     logger.info("Admin %s deleted auth user %s", admin, auth_id)
     return {"status": "deleted", "auth_id": auth_id}

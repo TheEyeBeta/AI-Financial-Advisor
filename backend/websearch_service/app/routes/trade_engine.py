@@ -15,7 +15,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from ..services.auth import (
@@ -408,7 +408,7 @@ def _get_supabase_client():
 
 @router.get("/api/stock-price/{ticker}")
 async def get_stock_price(
-    ticker: str,
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
     source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -480,6 +480,10 @@ async def websocket_live(websocket: WebSocket) -> None:
     except HTTPException as exc:
         reason = exc.detail if isinstance(exc.detail, str) else "Authentication required."
         await websocket.close(code=4401, reason=reason[:123])
+        return
+    except Exception as exc:
+        logger.warning("Unexpected WebSocket auth error: %s", type(exc).__name__)
+        await websocket.close(code=4401, reason="Authentication error.")
         return
 
     await websocket.accept()
