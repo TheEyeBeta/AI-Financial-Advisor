@@ -177,6 +177,28 @@ def _jwt_algorithm(token: str) -> str:
     return algorithm.strip()
 
 
+def _get_expected_issuer() -> Optional[str]:
+    """Return the expected JWT issuer derived from SUPABASE_URL, or None if not set."""
+    url = get_backend_supabase_url()
+    if not url:
+        return None
+    return f"{url.rstrip('/')}/auth/v1"
+
+
+def _verify_issuer(payload: dict) -> None:
+    """Reject tokens whose iss claim doesn't match the configured Supabase project."""
+    expected = _get_expected_issuer()
+    if not expected:
+        return
+    iss = payload.get("iss")
+    if not iss or iss.rstrip("/") != expected.rstrip("/"):
+        logger.warning("JWT issuer mismatch: got=%r expected=%r", iss, expected)
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+        )
+
+
 def _verify_jwt_with_secret(
     token: str,
     secret: str,
@@ -196,7 +218,10 @@ def _verify_jwt_with_secret(
             algorithms=[algorithm],
             options={"require": list(required_claims), "verify_aud": False},
         )
+        _verify_issuer(payload)
         return payload
+    except HTTPException:
+        raise
     except ImportError:
         raise HTTPException(
             status_code=500,
@@ -251,12 +276,16 @@ def _verify_jwt_with_supabase_jwks(
 
     try:
         signing_key = _jwks_client(jwks_url).get_signing_key_from_jwt(token)
-        return pyjwt.decode(
+        payload = pyjwt.decode(
             token,
             signing_key.key,
             algorithms=[algorithm],
             options={"require": list(required_claims), "verify_aud": False},
         )
+        _verify_issuer(payload)
+        return payload
+    except HTTPException:
+        raise
     except Exception as exc:
         exc_name = type(exc).__name__
         if exc_name == "PyJWKClientConnectionError":

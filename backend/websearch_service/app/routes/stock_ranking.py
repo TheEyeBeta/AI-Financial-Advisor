@@ -19,7 +19,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from pydantic import BaseModel
 
 from ..services.auth import AuthenticatedUser, optional_auth
@@ -256,7 +256,7 @@ class StockDetailResponse(BaseModel):
 
 @router.get("/api/stocks/detail/{ticker}", response_model=StockDetailResponse)
 async def get_stock_detail(
-    ticker: str,
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
     raw_request: Request,
     response: Response,
     auth_user: Optional[AuthenticatedUser] = Depends(optional_auth),

@@ -179,7 +179,16 @@ class RateLimitService:
             logger.info("Rate limiting is using Redis-backed shared state")
         else:
             if (os.getenv("ENVIRONMENT") or "").strip().lower() == "production":
-                logger.warning("Redis is not configured; rate limiting is running in local fallback mode")
+                # ERROR (not WARNING) so alerting/monitoring picks this up.
+                # Rate limits are per-process in fallback mode — each uvicorn worker
+                # enforces limits independently, multiplying the effective limit by
+                # the worker count. This is a security misconfiguration in production.
+                logger.error(
+                    "SECURITY: Redis is not configured in production. "
+                    "Rate limiting is running in per-process fallback mode. "
+                    "Effective limits are multiplied by the number of workers. "
+                    "Configure REDIS_URL to enable shared rate limiting."
+                )
             else:
                 logger.info("Redis is not configured; rate limiting is running in local fallback mode")
 
