@@ -20,10 +20,10 @@ logger = logging.getLogger("advisor.dataapi_client")
 # Configuration
 # ---------------------------------------------------------------------------
 
-DATAAPI_URL = os.getenv("DATAAPI_URL", "").rstrip("/")
-DATAAPI_CLIENT_ID = os.getenv("DATAAPI_CLIENT_ID", "")
-DATAAPI_CLIENT_SECRET = os.getenv("DATAAPI_CLIENT_SECRET", "")
-DATAAPI_ENABLED = os.getenv("DATAAPI_ENABLED", "false").lower() in ("true", "1", "yes")
+DATAAPI_URL = (os.getenv("DATA_API_BASE_URL") or os.getenv("DATAAPI_URL", "")).rstrip("/")
+DATAAPI_CLIENT_ID = os.getenv("SERVICE_CLIENT_ID") or os.getenv("DATAAPI_CLIENT_ID", "")
+DATAAPI_CLIENT_SECRET = os.getenv("SERVICE_CLIENT_SECRET") or os.getenv("DATAAPI_CLIENT_SECRET", "")
+_RAW_SCOPES = os.getenv("SERVICE_REQUESTED_SCOPES", "")
 
 # Refresh JWT when less than this many seconds remain before expiry.
 _TOKEN_REFRESH_MARGIN_SECONDS = 120
@@ -56,7 +56,7 @@ class DataAPIClient:
     base_url: str = field(default_factory=lambda: DATAAPI_URL)
     client_id: str = field(default_factory=lambda: DATAAPI_CLIENT_ID)
     client_secret: str = field(default_factory=lambda: DATAAPI_CLIENT_SECRET)
-    enabled: bool = field(default_factory=lambda: DATAAPI_ENABLED)
+    scopes: str = field(default_factory=lambda: _RAW_SCOPES)
     timeout: float = 15.0
 
     _cached_token: CachedToken | None = field(default=None, init=False, repr=False)
@@ -67,8 +67,8 @@ class DataAPIClient:
 
     @property
     def is_configured(self) -> bool:
-        """Return True if all required settings are present and feature is enabled."""
-        return bool(self.enabled and self.base_url and self.client_id and self.client_secret)
+        """Return True if credentials and base URL are present."""
+        return bool(self.base_url and self.client_id and self.client_secret)
 
     # ------------------------------------------------------------------
     # Authentication
@@ -81,10 +81,11 @@ class DataAPIClient:
 
         url = f"{self.base_url}/api/v1/auth/service-token"
         async with httpx.AsyncClient(timeout=self.timeout) as http:
+            requested = [s for s in self.scopes.split() if s] if self.scopes else []
             resp = await http.post(
                 url,
                 auth=(self.client_id, self.client_secret),
-                json={"requested_scopes": []},  # request all granted scopes
+                json={"requested_scopes": requested},
             )
             resp.raise_for_status()
 
@@ -203,6 +204,153 @@ class DataAPIClient:
             json_body=body,
             extra_headers={"Idempotency-Key": idempotency_key},
         )
+
+    # -- News --
+
+    async def get_market_news(self, limit: int = 15) -> dict[str, Any]:
+        """GET /api/v1/news/market"""
+        return await self._get("/api/v1/news/market", {"limit": limit})
+
+    async def get_ticker_news(self, ticker: str, limit: int = 10) -> dict[str, Any]:
+        """GET /api/v1/news/ticker/{ticker}"""
+        return await self._get(f"/api/v1/news/ticker/{ticker}", {"limit": limit})
+
+    # -- Indicators --
+
+    async def get_technical_indicators(
+        self,
+        ticker: str,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """GET /api/v1/indicators/{ticker}/technical"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get(f"/api/v1/indicators/{ticker}/technical", params)
+
+    # -- Price history --
+
+    async def get_price_history(
+        self,
+        ticker: str,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """GET /api/v1/tickers/{ticker}/price-history"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get(f"/api/v1/tickers/{ticker}/price-history", params)
+
+    # -- Ticker profile / fundamentals / corporate actions --
+
+    async def get_ticker_profile(self, ticker: str) -> dict[str, Any]:
+        """GET /api/v1/tickers/{ticker}"""
+        return await self._get(f"/api/v1/tickers/{ticker}")
+
+    async def get_ticker_fundamentals(self, ticker: str) -> dict[str, Any]:
+        """GET /api/v1/tickers/{ticker}/fundamentals"""
+        return await self._get(f"/api/v1/tickers/{ticker}/fundamentals")
+
+    async def get_corporate_actions(self, ticker: str, limit: int = 50) -> dict[str, Any]:
+        """GET /api/v1/tickers/{ticker}/corporate-actions"""
+        return await self._get(f"/api/v1/tickers/{ticker}/corporate-actions", {"limit": limit})
+
+    # -- Financials --
+
+    async def get_financials_income(self, ticker: str, limit: int = 12) -> dict[str, Any]:
+        """GET /api/v1/financials/{ticker}/income"""
+        return await self._get(f"/api/v1/financials/{ticker}/income", {"limit": limit})
+
+    async def get_financials_balance(self, ticker: str, limit: int = 12) -> dict[str, Any]:
+        """GET /api/v1/financials/{ticker}/balance"""
+        return await self._get(f"/api/v1/financials/{ticker}/balance", {"limit": limit})
+
+    async def get_financials_cashflow(self, ticker: str, limit: int = 12) -> dict[str, Any]:
+        """GET /api/v1/financials/{ticker}/cashflow"""
+        return await self._get(f"/api/v1/financials/{ticker}/cashflow", {"limit": limit})
+
+    async def get_financials_quality(self, ticker: str, limit: int = 12) -> dict[str, Any]:
+        """GET /api/v1/financials/{ticker}/quality"""
+        return await self._get(f"/api/v1/financials/{ticker}/quality", {"limit": limit})
+
+    # -- Risk / valuation / returns indicators --
+
+    async def get_risk_indicators(
+        self, ticker: str, start: str | None = None, end: str | None = None, limit: int = 100
+    ) -> dict[str, Any]:
+        """GET /api/v1/indicators/{ticker}/risk"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get(f"/api/v1/indicators/{ticker}/risk", params)
+
+    async def get_valuation_indicators(
+        self, ticker: str, start: str | None = None, end: str | None = None, limit: int = 100
+    ) -> dict[str, Any]:
+        """GET /api/v1/indicators/{ticker}/valuation"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get(f"/api/v1/indicators/{ticker}/valuation", params)
+
+    async def get_returns_indicators(
+        self, ticker: str, start: str | None = None, end: str | None = None, limit: int = 100
+    ) -> dict[str, Any]:
+        """GET /api/v1/indicators/{ticker}/returns"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get(f"/api/v1/indicators/{ticker}/returns", params)
+
+    # -- Reference data --
+
+    async def get_reference_countries(self) -> dict[str, Any]:
+        """GET /api/v1/reference/countries"""
+        return await self._get("/api/v1/reference/countries")
+
+    async def get_reference_currencies(self) -> dict[str, Any]:
+        """GET /api/v1/reference/currencies"""
+        return await self._get("/api/v1/reference/currencies")
+
+    async def get_reference_exchanges(self) -> dict[str, Any]:
+        """GET /api/v1/reference/exchanges"""
+        return await self._get("/api/v1/reference/exchanges")
+
+    async def get_reference_sectors(self) -> dict[str, Any]:
+        """GET /api/v1/reference/sectors"""
+        return await self._get("/api/v1/reference/sectors")
+
+    async def get_reference_industries(self, sector_id: int | None = None) -> dict[str, Any]:
+        """GET /api/v1/reference/industries"""
+        params: dict[str, Any] = {}
+        if sector_id is not None:
+            params["sector_id"] = sector_id
+        return await self._get("/api/v1/reference/industries", params)
+
+    async def get_reference_calendar(
+        self, start: str | None = None, end: str | None = None, limit: int = 30
+    ) -> dict[str, Any]:
+        """GET /api/v1/reference/calendar"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get("/api/v1/reference/calendar", params)
 
     # -- Health --
 

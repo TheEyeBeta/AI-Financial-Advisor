@@ -250,7 +250,7 @@ async def get_ai_context(
     include_news: bool = Query(True, description="Include recent news articles"),
     news_limit: int = Query(15, ge=1, le=100, description="Maximum news articles to return"),
     signals_hours: int = Query(48, ge=1, le=168, description="Hours of signal history to include"),
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> AIContextResponse:
     """
@@ -313,7 +313,7 @@ async def get_signals(
     signal_type: Optional[str] = Query(None, description="Filter by signal type (BUY, SELL, HOLD)"),
     hours: int = Query(24, ge=1, le=168, description="Hours of history to include"),
     limit: int = Query(50, ge=1, le=500, description="Maximum signals to return"),
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> List[TradingSignal]:
     """
@@ -351,7 +351,7 @@ async def get_signals(
 
 @router.get("/api/v1/engine/status")
 async def get_engine_status(
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     """
@@ -409,7 +409,7 @@ def _get_supabase_client():
 @router.get("/api/stock-price/{ticker}")
 async def get_stock_price(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     """
@@ -464,6 +464,481 @@ async def get_stock_price(
             logger.warning("Supabase price fetch failed for %s: %s", ticker, sb_exc)
 
     return {"ticker": ticker, "price": None, "change_percent": None, "source": "unavailable"}
+
+
+@router.get("/api/v1/indicators/{ticker}/technical")
+async def get_technical_indicators(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    date: Optional[str] = Query(None, description="Filter to a specific date (YYYY-MM-DD)"),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Latest technical indicators for a ticker, sourced from TheEyeBetaDataAPI."""
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            data = await client.get_technical_indicators(ticker, end=date, limit=1 if date else 1)
+            rows = data.get("indicators", [])
+            if rows:
+                row = rows[-1]
+                return {
+                    "ticker": ticker,
+                    "date": row.get("date", ""),
+                    "sma_10": row.get("sma_10"),
+                    "sma_50": row.get("sma_50"),
+                    "sma_200": row.get("sma_200"),
+                    "rsi_14": row.get("rsi_14"),
+                    "macd": row.get("macd"),
+                }
+        except Exception as exc:
+            logger.warning("DataAPI technical indicators failed for %s: %s", ticker, exc)
+    raise HTTPException(status_code=404, detail=f"No indicator data for {ticker}")
+
+
+@router.get("/api/v1/charting/{ticker}/prices")
+async def get_charting_prices(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    start_date: Optional[str] = Query(None),
+    end_date: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=2000),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> List[Dict[str, Any]]:
+    """OHLCV price history for charting, sourced from TheEyeBetaDataAPI."""
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            data = await client.get_price_history(ticker, start=start_date, end=end_date, limit=limit)
+            prices = data.get("prices", [])
+            return [
+                {
+                    "date": p.get("date", ""),
+                    "open": p.get("open"),
+                    "high": p.get("high"),
+                    "low": p.get("low"),
+                    "close": p.get("close"),
+                    "volume": p.get("volume"),
+                }
+                for p in prices
+            ]
+        except Exception as exc:
+            logger.warning("DataAPI price history failed for %s: %s", ticker, exc)
+    return []
+
+
+@router.get("/api/v1/tickers")
+async def get_tickers(
+    active_only: bool = Query(True),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> List[Dict[str, Any]]:
+    """List of tracked tickers, sourced from TheEyeBetaDataAPI advisor context."""
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            ctx = await client.get_advisor_context(ticker_limit=200, news_limit=0)
+            tickers = ctx.get("tickers", [])
+            return [
+                {
+                    "ticker_id": i,
+                    "ticker": t.get("ticker", "") if isinstance(t, dict) else t,
+                    "name": t.get("company_name", "") if isinstance(t, dict) else t,
+                }
+                for i, t in enumerate(tickers)
+            ]
+        except Exception as exc:
+            logger.warning("DataAPI tickers list failed: %s", exc)
+    return []
+
+
+@router.get("/api/v1/ai/portfolio")
+async def get_portfolio_summary(
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Market summary in portfolio-summary shape, sourced from TheEyeBetaDataAPI."""
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            ctx = await client.get_advisor_context(ticker_limit=100, news_limit=0)
+            tickers = ctx.get("tickers", [])
+            buy_tickers = [t.get("ticker", "") for t in tickers if (t.get("latest_signal") or "").upper() == "BUY"]
+            sell_tickers = [t.get("ticker", "") for t in tickers if (t.get("latest_signal") or "").upper() == "SELL"]
+            rsi_values = [t.get("rsi_14") for t in tickers if t.get("rsi_14") is not None]
+            avg_rsi = sum(rsi_values) / len(rsi_values) if rsi_values else None
+            bullish = sum(1 for t in tickers if t.get("is_bullish") is True)
+            bearish = sum(1 for t in tickers if t.get("is_bullish") is False)
+            return {
+                "total_tickers": len(tickers),
+                "tickers_with_buy_signals": buy_tickers,
+                "tickers_with_sell_signals": sell_tickers,
+                "average_rsi": avg_rsi,
+                "bullish_count": bullish,
+                "bearish_count": bearish,
+                "neutral_count": len(tickers) - bullish - bearish,
+            }
+        except Exception as exc:
+            logger.warning("DataAPI portfolio summary failed: %s", exc)
+    return {
+        "total_tickers": 0,
+        "tickers_with_buy_signals": [],
+        "tickers_with_sell_signals": [],
+        "average_rsi": None,
+        "bullish_count": 0,
+        "bearish_count": 0,
+        "neutral_count": 0,
+    }
+
+
+@router.get("/api/v1/symbols/search")
+async def search_symbols(
+    q: str = Query(..., min_length=1, max_length=64),
+    limit: int = Query(25, ge=1, le=100),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.search_symbols(q, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI symbol search failed: %s", exc)
+    return {"results": []}
+
+
+@router.get("/api/v1/tickers/{ticker}/fundamentals")
+async def get_ticker_fundamentals(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_ticker_fundamentals(ticker)
+        except Exception as exc:
+            logger.warning("DataAPI fundamentals failed for %s: %s", ticker, exc)
+    raise HTTPException(status_code=404, detail=f"No fundamentals for {ticker}")
+
+
+@router.get("/api/v1/tickers/{ticker}/corporate-actions")
+async def get_corporate_actions(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    limit: int = Query(50, ge=1, le=500),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_corporate_actions(ticker, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI corporate actions failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "actions": []}
+
+
+@router.get("/api/v1/financials/{ticker}/income")
+async def get_financials_income(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    limit: int = Query(12, ge=1, le=40),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_financials_income(ticker, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI income failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "statements": []}
+
+
+@router.get("/api/v1/financials/{ticker}/balance")
+async def get_financials_balance(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    limit: int = Query(12, ge=1, le=40),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_financials_balance(ticker, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI balance failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "statements": []}
+
+
+@router.get("/api/v1/financials/{ticker}/cashflow")
+async def get_financials_cashflow(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    limit: int = Query(12, ge=1, le=40),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_financials_cashflow(ticker, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI cashflow failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "statements": []}
+
+
+@router.get("/api/v1/financials/{ticker}/quality")
+async def get_financials_quality(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    limit: int = Query(12, ge=1, le=40),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_financials_quality(ticker, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI quality failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "metrics": []}
+
+
+@router.get("/api/v1/indicators/{ticker}/risk")
+async def get_risk_indicators(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=2000),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_risk_indicators(ticker, start=start, end=end, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI risk indicators failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "indicators": []}
+
+
+@router.get("/api/v1/indicators/{ticker}/valuation")
+async def get_valuation_indicators(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=2000),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_valuation_indicators(ticker, start=start, end=end, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI valuation indicators failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "indicators": []}
+
+
+@router.get("/api/v1/indicators/{ticker}/returns")
+async def get_returns_indicators(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=2000),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_returns_indicators(ticker, start=start, end=end, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI returns indicators failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "returns": []}
+
+
+@router.get("/api/v1/news/ticker/{ticker}")
+async def get_ticker_news(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    limit: int = Query(10, ge=1, le=50),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_ticker_news(ticker, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI ticker news failed for %s: %s", ticker, exc)
+    return {"ticker": ticker, "news": []}
+
+
+@router.get("/api/v1/reference/countries")
+async def get_reference_countries(_auth: AuthenticatedUser = Depends(require_auth)) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_reference_countries()
+        except Exception as exc:
+            logger.warning("DataAPI reference/countries failed: %s", exc)
+    return {"countries": []}
+
+
+@router.get("/api/v1/reference/currencies")
+async def get_reference_currencies(_auth: AuthenticatedUser = Depends(require_auth)) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_reference_currencies()
+        except Exception as exc:
+            logger.warning("DataAPI reference/currencies failed: %s", exc)
+    return {"currencies": []}
+
+
+@router.get("/api/v1/reference/exchanges")
+async def get_reference_exchanges(_auth: AuthenticatedUser = Depends(require_auth)) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_reference_exchanges()
+        except Exception as exc:
+            logger.warning("DataAPI reference/exchanges failed: %s", exc)
+    return {"exchanges": []}
+
+
+@router.get("/api/v1/reference/sectors")
+async def get_reference_sectors(_auth: AuthenticatedUser = Depends(require_auth)) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_reference_sectors()
+        except Exception as exc:
+            logger.warning("DataAPI reference/sectors failed: %s", exc)
+    return {"sectors": []}
+
+
+@router.get("/api/v1/reference/industries")
+async def get_reference_industries(
+    sector_id: Optional[int] = Query(None),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_reference_industries(sector_id=sector_id)
+        except Exception as exc:
+            logger.warning("DataAPI reference/industries failed: %s", exc)
+    return {"industries": []}
+
+
+@router.get("/api/v1/reference/calendar")
+async def get_reference_calendar(
+    start: Optional[str] = Query(None),
+    end: Optional[str] = Query(None),
+    limit: int = Query(30, ge=1, le=500),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if client.is_configured:
+        try:
+            return await client.get_reference_calendar(start=start, end=end, limit=limit)
+        except Exception as exc:
+            logger.warning("DataAPI reference/calendar failed: %s", exc)
+    return {"days": []}
+
+
+@router.post("/api/v1/trades/orders")
+async def place_trade_order(
+    body: Dict[str, Any],
+    idempotency_key: str = Query(..., description="Unique key to prevent duplicate orders"),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    client = get_dataapi_client()
+    if not client.is_configured:
+        raise HTTPException(status_code=503, detail="Trading data source unavailable")
+    try:
+        return await client.place_order(
+            symbol=body["symbol"],
+            side=body["side"],
+            quantity=body["quantity"],
+            idempotency_key=idempotency_key,
+            limit_price=body.get("limit_price"),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"Missing required field: {exc}")
+    except Exception as exc:
+        logger.error("DataAPI place order failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Order placement failed")
+
+
+@router.get("/api/v1/ai/ticker/{ticker}")
+async def get_ticker_details(
+    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    _auth: AuthenticatedUser = Depends(require_auth),
+) -> Dict[str, Any]:
+    """Full ticker detail (snapshot + signals + price history), sourced from TheEyeBetaDataAPI."""
+    ticker = ticker.upper()
+    client = get_dataapi_client()
+    if not client.is_configured:
+        raise HTTPException(status_code=503, detail="Data source unavailable")
+
+    snapshot: Optional[Dict[str, Any]] = None
+    signals: List[Dict[str, Any]] = []
+    price_history: List[Dict[str, Any]] = []
+    name = ticker
+
+    try:
+        snap_data = await client.get_analytics_snapshot(ticker)
+        s = snap_data.get("snapshot", {})
+        name = s.get("company_name") or ticker
+        snapshot = {
+            "ticker": ticker,
+            "company_name": s.get("company_name"),
+            "last_price": s.get("last_price"),
+            "price_change_pct": s.get("price_change_pct"),
+            "rsi_14": s.get("rsi_14"),
+            "sma_50": s.get("sma_50"),
+            "sma_200": s.get("sma_200"),
+            "macd": s.get("macd"),
+            "updated_at": s.get("updated_at"),
+        }
+    except Exception as exc:
+        logger.warning("DataAPI snapshot failed for %s: %s", ticker, exc)
+
+    try:
+        sig_data = await client.get_latest_signals(ticker=ticker, limit=10)
+        for s in sig_data.get("signals", []):
+            signals.append({
+                "ticker": ticker,
+                "company_name": None,
+                "signal": s.get("signal", ""),
+                "strategy": s.get("strategy_name", ""),
+                "confidence": s.get("confidence"),
+                "timestamp": s.get("timestamp", ""),
+                "entry_price": s.get("entry_price"),
+                "target_price": s.get("target_price"),
+                "stop_loss": s.get("stop_loss"),
+            })
+    except Exception as exc:
+        logger.warning("DataAPI signals failed for %s: %s", ticker, exc)
+
+    try:
+        hist_data = await client.get_price_history(ticker, limit=30)
+        for p in hist_data.get("prices", []):
+            price_history.append({
+                "timestamp": p.get("date", ""),
+                "price": p.get("close"),
+                "open": p.get("open"),
+                "high": p.get("high"),
+                "low": p.get("low"),
+                "close": p.get("close"),
+                "volume": p.get("volume"),
+            })
+    except Exception as exc:
+        logger.warning("DataAPI price history failed for %s: %s", ticker, exc)
+
+    return {
+        "ticker": ticker,
+        "name": name,
+        "snapshot": snapshot,
+        "recent_signals": signals,
+        "price_history": price_history,
+    }
 
 
 @router.websocket("/ws/live")
