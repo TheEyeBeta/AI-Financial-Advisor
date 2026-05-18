@@ -250,7 +250,7 @@ async def get_ai_context(
     include_news: bool = Query(True, description="Include recent news articles"),
     news_limit: int = Query(15, ge=1, le=100, description="Maximum news articles to return"),
     signals_hours: int = Query(48, ge=1, le=168, description="Hours of signal history to include"),
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> AIContextResponse:
     """
@@ -313,7 +313,7 @@ async def get_signals(
     signal_type: Optional[str] = Query(None, description="Filter by signal type (BUY, SELL, HOLD)"),
     hours: int = Query(24, ge=1, le=168, description="Hours of history to include"),
     limit: int = Query(50, ge=1, le=500, description="Maximum signals to return"),
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> List[TradingSignal]:
     """
@@ -351,7 +351,7 @@ async def get_signals(
 
 @router.get("/api/v1/engine/status")
 async def get_engine_status(
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     """
@@ -409,7 +409,7 @@ def _get_supabase_client():
 @router.get("/api/stock-price/{ticker}")
 async def get_stock_price(
     ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
-    source: str = Query(default="supabase", description="Data source: supabase, dataapi, or auto"),
+    source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     """
