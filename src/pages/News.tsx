@@ -133,7 +133,7 @@ const News = () => {
   const [sortOrder, setSortOrder] = useState<SortOrder>("latest");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
-  const { data: supabaseArticles = [], isLoading, error } = useRecentNews(24, FETCH_LIMIT);
+  const { data: supabaseArticles = [], isLoading, error } = useRecentNews(168, FETCH_LIMIT);
 
   const allArticles = useMemo<DisplayArticle[]>(() => {
     const normalized: DisplayArticle[] = supabaseArticles.map((article) => {
@@ -366,7 +366,7 @@ const News = () => {
               </div>
               <h2 className="text-xl font-semibold text-foreground">No headlines in scope</h2>
               <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-                No articles were published in the last 24 hours for the mirrored Supabase feed.
+                No articles were published in the last 7 days for the mirrored Supabase feed.
               </p>
             </CardContent>
           </Card>
