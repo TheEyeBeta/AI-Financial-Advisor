@@ -204,6 +204,56 @@ class DataAPIClient:
             extra_headers={"Idempotency-Key": idempotency_key},
         )
 
+    # -- News --
+
+    async def get_market_news(self, limit: int = 15) -> dict[str, Any]:
+        """GET /api/v1/news/market"""
+        return await self._get("/api/v1/news/market", {"limit": limit})
+
+    async def get_ticker_news(self, ticker: str, limit: int = 10) -> dict[str, Any]:
+        """GET /api/v1/news/ticker/{ticker}"""
+        return await self._get(f"/api/v1/news/ticker/{ticker}", {"limit": limit})
+
+    # -- Indicators --
+
+    async def get_technical_indicators(
+        self,
+        ticker: str,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """GET /api/v1/indicators/{ticker}/technical"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get(f"/api/v1/indicators/{ticker}/technical", params)
+
+    # -- Price history --
+
+    async def get_price_history(
+        self,
+        ticker: str,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """GET /api/v1/tickers/{ticker}/price-history"""
+        params: dict[str, Any] = {"limit": limit}
+        if start:
+            params["start"] = start
+        if end:
+            params["end"] = end
+        return await self._get(f"/api/v1/tickers/{ticker}/price-history", params)
+
+    # -- Ticker profile --
+
+    async def get_ticker_profile(self, ticker: str) -> dict[str, Any]:
+        """GET /api/v1/tickers/{ticker}"""
+        return await self._get(f"/api/v1/tickers/{ticker}")
+
     # -- Health --
 
     async def check_health(self) -> dict[str, Any]:

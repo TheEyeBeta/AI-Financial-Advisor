@@ -1,6 +1,6 @@
 """
-News endpoint stub - returns empty results since news is handled by Supabase.
-This endpoint exists to prevent 404 errors when the frontend calls it.
+News endpoint — serves market news from TheEyeBetaDataAPI when available,
+falls back to an empty response so the frontend uses its Supabase path.
 """
 import os
 from typing import Any, Dict, Optional
@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from ..services.auth import AuthenticatedUser, optional_auth
+from ..services.dataapi_client import get_dataapi_client
 from ..services.rate_limit import RateLimitConfig, rate_limiter
 
 router = APIRouter(tags=["news"])
@@ -55,17 +56,35 @@ async def get_news(
     rate_limiter.add_rate_limit_headers(response, rate_limit_info)
 
     try:
+        client = get_dataapi_client()
+        if client.is_configured:
+            data = await client.get_market_news(limit=limit)
+            raw_news = data.get("news", [])
+            items = [
+                {
+                    "id": i,
+                    "ticker": n.get("related_tickers") or None,
+                    "headline": n.get("headline") or n.get("title", ""),
+                    "summary": n.get("summary"),
+                    "source": n.get("source") or n.get("provider"),
+                    "url": n.get("url"),
+                    "published_at": n.get("published_at", ""),
+                    "sentiment_score": n.get("sentiment_score"),
+                }
+                for i, n in enumerate(raw_news)
+            ]
+            return {"items": items, "next_cursor": None}
+
         return {
             "items": [],
             "next_cursor": None,
-            "message": "News is available via Supabase news_articles table"
+            "message": "News is available via Supabase news_articles table",
         }
     except Exception as e:
-        # Log error but return empty results gracefully
         return {
             "items": [],
             "next_cursor": None,
-            "error": str(e) if os.getenv("ENVIRONMENT") != "production" else None
+            "error": str(e) if os.getenv("ENVIRONMENT") != "production" else None,
         }
     finally:
         rate_limiter.release_request(raw_request, user_id=verified_user_id)
