@@ -520,7 +520,7 @@
             "schema": {
               "type": "string",
               "description": "Data source: supabase, dataapi, or auto",
-              "default": "supabase",
+              "default": "auto",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -630,7 +630,7 @@
             "schema": {
               "type": "string",
               "description": "Data source: supabase, dataapi, or auto",
-              "default": "supabase",
+              "default": "auto",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -680,7 +680,7 @@
             "schema": {
               "type": "string",
               "description": "Data source: supabase, dataapi, or auto",
-              "default": "supabase",
+              "default": "auto",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -727,8 +727,11 @@
             "required": true,
             "schema": {
               "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "description": "Ticker symbol (e.g. AAPL, BRK.B)",
               "title": "Ticker"
-            }
+            },
+            "description": "Ticker symbol (e.g. AAPL, BRK.B)"
           },
           {
             "name": "source",
@@ -737,7 +740,7 @@
             "schema": {
               "type": "string",
               "description": "Data source: supabase, dataapi, or auto",
-              "default": "supabase",
+              "default": "auto",
               "title": "Source"
             },
             "description": "Data source: supabase, dataapi, or auto"
@@ -752,6 +755,1274 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Get Stock Price Api Stock Price  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/indicators/{ticker}/technical": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Technical Indicators",
+        "description": "Latest technical indicators for a ticker, sourced from TheEyeBetaDataAPI.",
+        "operationId": "get_technical_indicators_api_v1_indicators__ticker__technical_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter to a specific date (YYYY-MM-DD)",
+              "title": "Date"
+            },
+            "description": "Filter to a specific date (YYYY-MM-DD)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Technical Indicators Api V1 Indicators  Ticker  Technical Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/charting/{ticker}/prices": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Charting Prices",
+        "description": "OHLCV price history for charting, sourced from TheEyeBetaDataAPI.",
+        "operationId": "get_charting_prices_api_v1_charting__ticker__prices_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "start_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start Date"
+            }
+          },
+          {
+            "name": "end_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End Date"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Get Charting Prices Api V1 Charting  Ticker  Prices Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tickers": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Tickers",
+        "description": "List of tracked tickers, sourced from TheEyeBetaDataAPI advisor context.",
+        "operationId": "get_tickers_api_v1_tickers_get",
+        "parameters": [
+          {
+            "name": "active_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Active Only"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response Get Tickers Api V1 Tickers Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/portfolio": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Portfolio Summary",
+        "description": "Market summary in portfolio-summary shape, sourced from TheEyeBetaDataAPI.",
+        "operationId": "get_portfolio_summary_api_v1_ai_portfolio_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Portfolio Summary Api V1 Ai Portfolio Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/symbols/search": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Search Symbols",
+        "operationId": "search_symbols_api_v1_symbols_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Symbols Api V1 Symbols Search Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tickers/{ticker}/fundamentals": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Ticker Fundamentals",
+        "operationId": "get_ticker_fundamentals_api_v1_tickers__ticker__fundamentals_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Ticker Fundamentals Api V1 Tickers  Ticker  Fundamentals Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tickers/{ticker}/corporate-actions": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Corporate Actions",
+        "operationId": "get_corporate_actions_api_v1_tickers__ticker__corporate_actions_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Corporate Actions Api V1 Tickers  Ticker  Corporate Actions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/financials/{ticker}/income": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Financials Income",
+        "operationId": "get_financials_income_api_v1_financials__ticker__income_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 40,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Financials Income Api V1 Financials  Ticker  Income Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/financials/{ticker}/balance": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Financials Balance",
+        "operationId": "get_financials_balance_api_v1_financials__ticker__balance_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 40,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Financials Balance Api V1 Financials  Ticker  Balance Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/financials/{ticker}/cashflow": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Financials Cashflow",
+        "operationId": "get_financials_cashflow_api_v1_financials__ticker__cashflow_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 40,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Financials Cashflow Api V1 Financials  Ticker  Cashflow Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/financials/{ticker}/quality": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Financials Quality",
+        "operationId": "get_financials_quality_api_v1_financials__ticker__quality_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 40,
+              "minimum": 1,
+              "default": 12,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Financials Quality Api V1 Financials  Ticker  Quality Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/indicators/{ticker}/risk": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Risk Indicators",
+        "operationId": "get_risk_indicators_api_v1_indicators__ticker__risk_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Risk Indicators Api V1 Indicators  Ticker  Risk Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/indicators/{ticker}/valuation": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Valuation Indicators",
+        "operationId": "get_valuation_indicators_api_v1_indicators__ticker__valuation_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Valuation Indicators Api V1 Indicators  Ticker  Valuation Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/indicators/{ticker}/returns": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Returns Indicators",
+        "operationId": "get_returns_indicators_api_v1_indicators__ticker__returns_get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Returns Indicators Api V1 Indicators  Ticker  Returns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/news/ticker/{ticker}": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Ticker News",
+        "operationId": "get_ticker_news_api_v1_news_ticker__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Ticker News Api V1 News Ticker  Ticker  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reference/countries": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Reference Countries",
+        "operationId": "get_reference_countries_api_v1_reference_countries_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Reference Countries Api V1 Reference Countries Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reference/currencies": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Reference Currencies",
+        "operationId": "get_reference_currencies_api_v1_reference_currencies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Reference Currencies Api V1 Reference Currencies Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reference/exchanges": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Reference Exchanges",
+        "operationId": "get_reference_exchanges_api_v1_reference_exchanges_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Reference Exchanges Api V1 Reference Exchanges Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reference/sectors": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Reference Sectors",
+        "operationId": "get_reference_sectors_api_v1_reference_sectors_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Reference Sectors Api V1 Reference Sectors Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reference/industries": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Reference Industries",
+        "operationId": "get_reference_industries_api_v1_reference_industries_get",
+        "parameters": [
+          {
+            "name": "sector_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sector Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Reference Industries Api V1 Reference Industries Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/reference/calendar": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Reference Calendar",
+        "operationId": "get_reference_calendar_api_v1_reference_calendar_get",
+        "parameters": [
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 30,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Reference Calendar Api V1 Reference Calendar Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trades/orders": {
+      "post": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Place Trade Order",
+        "operationId": "place_trade_order_api_v1_trades_orders_post",
+        "parameters": [
+          {
+            "name": "idempotency_key",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Unique key to prevent duplicate orders",
+              "title": "Idempotency Key"
+            },
+            "description": "Unique key to prevent duplicate orders"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Place Trade Order Api V1 Trades Orders Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ai/ticker/{ticker}": {
+      "get": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Get Ticker Details",
+        "description": "Full ticker detail (snapshot + signals + price history), sourced from TheEyeBetaDataAPI.",
+        "operationId": "get_ticker_details_api_v1_ai_ticker__ticker__get",
+        "parameters": [
+          {
+            "name": "ticker",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "title": "Ticker"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Ticker Details Api V1 Ai Ticker  Ticker  Get"
                 }
               }
             }
@@ -864,8 +2135,11 @@
             "required": true,
             "schema": {
               "type": "string",
+              "pattern": "^[A-Z0-9.]{1,10}$",
+              "description": "Ticker symbol (e.g. AAPL, BRK.B)",
               "title": "Ticker"
-            }
+            },
+            "description": "Ticker symbol (e.g. AAPL, BRK.B)"
           }
         ],
         "responses": {
@@ -1157,6 +2431,65 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Trigger Meridian Refresh Api Admin Trigger Meridian Refresh Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/job-run-logs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Job Run Logs",
+        "description": "Return the last N run records for the given job from core.job_run_logs.",
+        "operationId": "job_run_logs_api_admin_job_run_logs_get",
+        "parameters": [
+          {
+            "name": "job_name",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "title": "Job Name"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 10,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Job Run Logs Api Admin Job Run Logs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
