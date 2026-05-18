@@ -20,10 +20,10 @@ logger = logging.getLogger("advisor.dataapi_client")
 # Configuration
 # ---------------------------------------------------------------------------
 
-DATAAPI_URL = os.getenv("DATAAPI_URL", "").rstrip("/")
-DATAAPI_CLIENT_ID = os.getenv("DATAAPI_CLIENT_ID", "")
-DATAAPI_CLIENT_SECRET = os.getenv("DATAAPI_CLIENT_SECRET", "")
-DATAAPI_ENABLED = os.getenv("DATAAPI_ENABLED", "false").lower() in ("true", "1", "yes")
+DATAAPI_URL = (os.getenv("DATA_API_BASE_URL") or os.getenv("DATAAPI_URL", "")).rstrip("/")
+DATAAPI_CLIENT_ID = os.getenv("SERVICE_CLIENT_ID") or os.getenv("DATAAPI_CLIENT_ID", "")
+DATAAPI_CLIENT_SECRET = os.getenv("SERVICE_CLIENT_SECRET") or os.getenv("DATAAPI_CLIENT_SECRET", "")
+_RAW_SCOPES = os.getenv("SERVICE_REQUESTED_SCOPES", "")
 
 # Refresh JWT when less than this many seconds remain before expiry.
 _TOKEN_REFRESH_MARGIN_SECONDS = 120
@@ -56,7 +56,7 @@ class DataAPIClient:
     base_url: str = field(default_factory=lambda: DATAAPI_URL)
     client_id: str = field(default_factory=lambda: DATAAPI_CLIENT_ID)
     client_secret: str = field(default_factory=lambda: DATAAPI_CLIENT_SECRET)
-    enabled: bool = field(default_factory=lambda: DATAAPI_ENABLED)
+    scopes: str = field(default_factory=lambda: _RAW_SCOPES)
     timeout: float = 15.0
 
     _cached_token: CachedToken | None = field(default=None, init=False, repr=False)
@@ -67,8 +67,8 @@ class DataAPIClient:
 
     @property
     def is_configured(self) -> bool:
-        """Return True if all required settings are present and feature is enabled."""
-        return bool(self.enabled and self.base_url and self.client_id and self.client_secret)
+        """Return True if credentials and base URL are present."""
+        return bool(self.base_url and self.client_id and self.client_secret)
 
     # ------------------------------------------------------------------
     # Authentication
@@ -81,10 +81,11 @@ class DataAPIClient:
 
         url = f"{self.base_url}/api/v1/auth/service-token"
         async with httpx.AsyncClient(timeout=self.timeout) as http:
+            requested = [s for s in self.scopes.split() if s] if self.scopes else []
             resp = await http.post(
                 url,
                 auth=(self.client_id, self.client_secret),
-                json={"requested_scopes": []},  # request all granted scopes
+                json={"requested_scopes": requested},
             )
             resp.raise_for_status()
 
