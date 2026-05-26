@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { healthCheck } from "@/services/healthCheck";
 import { analytics } from "@/services/analytics";
 import { AnalyticsPageTracker } from "@/components/AnalyticsPageTracker";
+import { StockDataBanner } from "@/components/StockDataBanner";
 
 const Landing = lazy(() => import("./pages/Landing"));
 const Advisor = lazy(() => import("./pages/Advisor"));
@@ -129,6 +130,7 @@ const App = () => {
             v7_relativeSplatPath: true,
           }}
         >
+          <StockDataBanner />
           <AnalyticsPageTracker />
           <OnboardingRouteGuard />
           <Suspense fallback={<RouteFallback />}>
