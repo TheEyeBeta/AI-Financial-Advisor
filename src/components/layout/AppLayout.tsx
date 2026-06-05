@@ -1,7 +1,6 @@
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "./AppSidebar";
 import { UserAuth } from "@/components/auth/UserAuth";
-import { StockDataBanner } from "@/components/StockDataBanner";
 
 interface AppLayoutProps {
   children: React.ReactNode;
@@ -13,7 +12,6 @@ export function AppLayout({ children, title }: AppLayoutProps) {
     <SidebarProvider>
       <AppSidebar />
       <SidebarInset style={{ "--app-layout-header-height": "3.5rem" } as React.CSSProperties}>
-        <StockDataBanner />
         <header
           className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-3 sm:gap-4 sm:px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60"
           style={{ height: "var(--app-layout-header-height)" }}
