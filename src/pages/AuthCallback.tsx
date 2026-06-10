@@ -63,8 +63,9 @@ export default function AuthCallback() {
         }
 
         if (session && isMounted) {
-          // User is authenticated, redirect to dashboard
-          navigate('/');
+          // User is authenticated — send them into the app (matches the
+          // SIGNED_IN listener below; ProtectedRoute handles onboarding).
+          navigate('/advisor');
           setLoading(false);
           return;
         }

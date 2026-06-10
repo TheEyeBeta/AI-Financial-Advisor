@@ -282,7 +282,11 @@ const ChatHistory = () => {
  
                           <div className="min-w-0 flex-1">
                             {editingChatId === chat.id ? (
-                              <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                              <div
+                                className="flex items-center gap-2"
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
+                              >
                                 <Input
                                   value={editTitle}
                                   onChange={(event) => setEditTitle(event.target.value)}
@@ -297,6 +301,8 @@ const ChatHistory = () => {
                                   size="icon"
                                   variant="ghost"
                                   className="h-9 w-9 shrink-0"
+                                  aria-label="Save title"
+                                  disabled={updateTitleMutation.isPending}
                                   onClick={() => handleSaveTitle(chat.id)}
                                 >
                                   <Check className="h-4 w-4 text-emerald-600" />
@@ -305,6 +311,8 @@ const ChatHistory = () => {
                                   size="icon"
                                   variant="ghost"
                                   className="h-9 w-9 shrink-0"
+                                  aria-label="Cancel editing"
+                                  disabled={updateTitleMutation.isPending}
                                   onClick={handleCancelEdit}
                                 >
                                   <X className="h-4 w-4 text-red-500" />

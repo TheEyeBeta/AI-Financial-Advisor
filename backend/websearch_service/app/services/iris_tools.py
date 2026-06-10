@@ -382,7 +382,7 @@ async def search_market_news_data(query: str) -> Dict[str, Any]:
         return {"error": "Search timed out", "query": query}
     except Exception as exc:
         logger.exception("Tavily search failed for query=%r", query[:80])
-        return {"error": str(exc), "query": query}
+        return {"error": f"Search failed ({type(exc).__name__})", "query": query}
 
 
 # ── Dispatcher ────────────────────────────────────────────────────────────────

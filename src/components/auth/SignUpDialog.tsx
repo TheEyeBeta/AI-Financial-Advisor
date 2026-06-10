@@ -134,7 +134,13 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (!nextOpen) resetForm();
+        onOpenChange(nextOpen);
+      }}
+    >
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-hidden flex flex-col p-0">
         <div className="flex-shrink-0 px-6 pt-6">
           <DialogHeader>
@@ -153,6 +159,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                 <Input
                   id="signup-first-name"
                   type="text"
+                  autoComplete="given-name"
                   placeholder="John"
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
@@ -164,6 +171,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                 <Input
                   id="signup-last-name"
                   type="text"
+                  autoComplete="family-name"
                   placeholder="Doe"
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
@@ -194,6 +202,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
               <Input
                 id="signup-email"
                 type="email"
+                autoComplete="email"
                 placeholder="your@email.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -206,6 +215,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
               <Input
                 id="signup-password"
                 type="password"
+                autoComplete="new-password"
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

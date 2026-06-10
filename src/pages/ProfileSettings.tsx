@@ -202,6 +202,7 @@ function GoalRow({
               type="button"
               variant="ghost"
               size="sm"
+              aria-label="Edit goal"
               onClick={() => setEditing(true)}
               className="h-8 w-8 rounded-full p-0"
             >
@@ -211,6 +212,7 @@ function GoalRow({
               type="button"
               variant="ghost"
               size="sm"
+              aria-label="Remove goal"
               onClick={() => onDeactivate(goal.id)}
               className="h-8 w-8 rounded-full p-0 text-muted-foreground hover:text-destructive"
             >
@@ -826,7 +828,7 @@ const ProfileSettings = () => {
 
           <CardContent className="space-y-5 pt-6">
             <SectionHeading
-              title="Risk &amp; capacity"
+              title="Risk & capacity"
               description="These fields directly shape how IRIS frames recommendations."
             />
 

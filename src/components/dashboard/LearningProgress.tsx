@@ -55,7 +55,7 @@ export function LearningProgress() {
             <BookOpen className="h-8 w-8 mx-auto mb-3 text-muted-foreground/30" />
             <p className="text-sm text-muted-foreground">No learning topics yet</p>
             <p className="text-xs text-muted-foreground/60 mt-1 mb-3">
-              Get started with personalized learning topics
+              Get started with personalised learning topics
             </p>
             <Button
               size="sm"

@@ -53,12 +53,16 @@ export function createStreamTimeout(
   const controller = new AbortController();
   const label = message.slice(0, 40);
 
-  console.log(`[TIMEOUT] message="${label}" timeout=${timeoutMs}ms ts=${Date.now()}`);
+  if (import.meta.env.DEV) {
+    console.log(`[TIMEOUT] message="${label}" timeout=${timeoutMs}ms ts=${Date.now()}`);
+  }
 
   let timeoutId: ReturnType<typeof setTimeout> | null =
     timeoutMs > 0
       ? setTimeout(() => {
-          console.log(`[TIMEOUT_FIRED] aborted after ${timeoutMs}ms message="${label}"`);
+          if (import.meta.env.DEV) {
+            console.log(`[TIMEOUT_FIRED] aborted after ${timeoutMs}ms message="${label}"`);
+          }
           controller.abort();
         }, timeoutMs)
       : null;

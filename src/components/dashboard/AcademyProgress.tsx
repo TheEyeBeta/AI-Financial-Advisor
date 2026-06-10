@@ -157,7 +157,7 @@ export function AcademyProgress() {
             <BookOpen className="mx-auto mb-3 h-8 w-8 text-muted-foreground/30" />
             <p className="text-sm font-medium">Your Academy progress will appear here.</p>
             <p className="mt-1 text-xs text-muted-foreground/60">
-              Start the Academy to unlock lessons, tiers, and personalized progress tracking.
+              Start the Academy to unlock lessons, tiers, and personalised progress tracking.
             </p>
           </div>
         ) : (

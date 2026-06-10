@@ -104,7 +104,19 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
+      <Dialog
+        open={open}
+        onOpenChange={(nextOpen) => {
+          if (!nextOpen) {
+            setEmail("");
+            setPassword("");
+            setShowPasswordReset(false);
+            setResetEmail("");
+            setResetSent(false);
+          }
+          onOpenChange(nextOpen);
+        }}
+      >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Sign In</DialogTitle>
@@ -120,6 +132,7 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
                 <Input
                   id="signin-email"
                   type="email"
+                  autoComplete="email"
                   placeholder="your@email.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -132,6 +145,7 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
                 <Input
                   id="signin-password"
                   type="password"
+                  autoComplete="current-password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}

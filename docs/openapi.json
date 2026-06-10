@@ -3211,6 +3211,8 @@
         "properties": {
           "user_id": {
             "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
             "title": "User Id"
           }
         },

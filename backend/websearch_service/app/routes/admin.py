@@ -139,7 +139,8 @@ async def _require_admin(request: Request) -> str:
         raise HTTPException(status_code=502, detail="Failed to verify admin status") from exc
 
     if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"User lookup failed: HTTP {resp.status_code}")
+        logger.warning("Supabase user lookup returned HTTP %d for user %s", resp.status_code, user_email)
+        raise HTTPException(status_code=502, detail="Failed to verify admin status")
 
     rows = resp.json()
     if not rows:
