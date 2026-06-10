@@ -9,44 +9,32 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Users, Shield, Database, MessageSquare, TrendingUp,
   Activity, Search, Download, Trash2, RefreshCw,
-  BarChart3, UserCheck, UserX, Clock, Heart, Server,
-  Wifi, WifiOff, Loader2, Play, Terminal, ArrowUpRight, Sparkles, ShieldCheck, AlertTriangle,
-  CheckCircle2, XCircle, MinusCircle, FileText
+  BarChart3, UserCheck, UserX, Clock, Server,
+  Wifi, WifiOff, Loader2, Play, Terminal, Sparkles,
+  ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
+  MinusCircle, FileText, Zap, Radio, Eye,
 } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { getPythonApiUrl } from "@/lib/env";
 import { supabase } from "@/lib/supabase";
 import { useState, useEffect, useCallback } from "react";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader,
+  AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
-import { SupabaseConnectionTest } from "@/utils/test-connection";
 import { format } from "date-fns";
 import { adminApi, type SchedulerJob, type JobRunLog } from "@/services/api";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 interface User {
   id: string;
@@ -54,56 +42,26 @@ interface User {
   email: string | null;
   first_name: string | null;
   last_name: string | null;
-  userType: 'User' | 'Admin';
+  userType: "User" | "Admin";
   is_verified: boolean | null;
   experience_level: string | null;
   risk_level: string | null;
   created_at: string;
 }
 
-interface ChatStats {
-  totalChats: number;
-  totalMessages: number;
-  activeToday: number;
-}
-
-interface TradingStats {
-  totalPositions: number;
-  totalTrades: number;
-  totalJournalEntries: number;
-}
-
-interface ActivityLog {
-  id: string;
-  user_email: string;
-  action: string;
-  timestamp: string;
-}
-
+interface ChatStats { totalChats: number; totalMessages: number; activeToday: number }
+interface TradingStats { totalPositions: number; totalTrades: number; totalJournalEntries: number }
+interface ActivityLog { id: string; user_email: string; action: string; timestamp: string }
 interface EngagementStats {
-  avgMessagesPerChat: number;
-  weeklyActiveChats: number;
-  lessonsStarted: number;
-  journalEntries: number;
-  quizAttempts: number;
-  retentionRate: number;
+  avgMessagesPerChat: number; weeklyActiveChats: number;
+  lessonsStarted: number; journalEntries: number;
+  quizAttempts: number; retentionRate: number;
 }
 
-const EXPERIENCE_STYLES: Record<string, string> = {
-  beginner: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
-  intermediate: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
-  advanced: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20",
-  default: "bg-slate-500/10 text-slate-700 dark:text-slate-300 border-slate-500/20",
-};
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const getExperienceStyle = (experienceLevel: string | null) => {
-  const normalizedExperienceLevel = experienceLevel?.trim().toLowerCase() || "default";
-  return EXPERIENCE_STYLES[normalizedExperienceLevel] || EXPERIENCE_STYLES.default;
-};
-
-const safeFormatDate = (timestamp: unknown, dateFormat: string, fallback = "Waiting for data") => {
+const safeFormatDate = (timestamp: unknown, dateFormat: string, fallback = "—") => {
   if (timestamp === null || timestamp === undefined || timestamp === "") return fallback;
-
   const date = timestamp instanceof Date ? timestamp : new Date(timestamp as string | number);
   return Number.isNaN(date.getTime()) ? fallback : format(date, dateFormat);
 };
@@ -112,47 +70,6 @@ const formatPercentage = (value: number, total: number) => {
   if (!total) return 0;
   return Math.round((value / total) * 100);
 };
-
-const getOverallTone = (overall?: string) => {
-  switch (overall) {
-    case "healthy":
-      return {
-        badgeClassName: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
-        panelClassName: "border-emerald-500/30 bg-emerald-500/5",
-        icon: Wifi,
-        label: "All systems operational",
-      };
-    case "degraded":
-      return {
-        badgeClassName: "bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20",
-        panelClassName: "border-amber-500/30 bg-amber-500/5",
-        icon: AlertTriangle,
-        label: "Degraded performance detected",
-      };
-    default:
-      return {
-        badgeClassName: "bg-rose-500/10 text-rose-700 dark:text-rose-300 border-rose-500/20",
-        panelClassName: "border-rose-500/30 bg-rose-500/5",
-        icon: WifiOff,
-        label: "Action required",
-      };
-  }
-};
-
-
-interface ScheduledJobDef {
-  id: string;
-  name: string;
-  schedule: string;
-  overdueSeconds: number | null;
-}
-
-const SCHEDULED_JOB_DEFS: ScheduledJobDef[] = [
-  { id: "ranking", name: "Ranking Engine", schedule: "Daily at 01:00 UTC", overdueSeconds: 90000 },
-  { id: "memory_extraction", name: "Memory Extraction", schedule: "Every 15 minutes", overdueSeconds: 1200 },
-  { id: "intelligence", name: "Intelligence Engine", schedule: "Every 6 hours", overdueSeconds: 25200 },
-  { id: "meridian_refresh", name: "Meridian Context Refresh", schedule: "On demand / cache miss", overdueSeconds: null },
-];
 
 const formatRelativeTime = (timestamp: string | null): string => {
   if (!timestamp) return "Never";
@@ -165,12 +82,172 @@ const formatRelativeTime = (timestamp: string | null): string => {
   return `${Math.floor(s / 86400)}d ago`;
 };
 
-const getJobHealth = (lastRun: string | null, overdueSeconds: number | null): "healthy" | "warning" | "unknown" => {
+const formatDuration = (startedAt: string, finishedAt: string | null): string => {
+  if (!finishedAt) return "—";
+  const ms = new Date(finishedAt).getTime() - new Date(startedAt).getTime();
+  if (ms < 1000) return `${ms}ms`;
+  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+  return `${Math.floor(ms / 60000)}m ${Math.floor((ms % 60000) / 1000)}s`;
+};
+
+const getJobHealth = (
+  lastRun: string | null,
+  overdueSeconds: number | null,
+): "healthy" | "warning" | "unknown" => {
   if (!lastRun) return "unknown";
   if (overdueSeconds === null) return "healthy";
-  const secondsAgo = (Date.now() - new Date(lastRun).getTime()) / 1000;
-  return secondsAgo <= overdueSeconds ? "healthy" : "warning";
+  return (Date.now() - new Date(lastRun).getTime()) / 1000 <= overdueSeconds
+    ? "healthy"
+    : "warning";
 };
+
+const getOverallTone = (overall?: string) => {
+  switch (overall) {
+    case "healthy":
+      return {
+        cls: "text-emerald-500",
+        badge: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+        panel: "border-emerald-500/20 bg-emerald-500/5",
+        icon: Wifi,
+        label: "All systems operational",
+      };
+    case "degraded":
+      return {
+        cls: "text-amber-500",
+        badge: "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20",
+        panel: "border-amber-500/20 bg-amber-500/5",
+        icon: AlertTriangle,
+        label: "Degraded performance",
+      };
+    default:
+      return {
+        cls: "text-rose-500",
+        badge: "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20",
+        panel: "border-rose-500/20 bg-rose-500/5",
+        icon: WifiOff,
+        label: "Action required",
+      };
+  }
+};
+
+// ─── Job definitions ──────────────────────────────────────────────────────────
+
+interface ScheduledJobDef {
+  id: string;
+  name: string;
+  description: string;
+  schedule: string;
+  overdueSeconds: number | null;
+  icon: React.ElementType;
+}
+
+const SCHEDULED_JOB_DEFS: ScheduledJobDef[] = [
+  {
+    id: "ranking",
+    name: "Ranking Engine",
+    description: "Scores all tickers using a 6-dimension composite algorithm and writes top 50 to trending_stocks.",
+    schedule: "Daily · 01:00 UTC",
+    overdueSeconds: 90000,
+    icon: TrendingUp,
+  },
+  {
+    id: "memory_extraction",
+    name: "Memory Extraction",
+    description: "Batch-processes unprocessed chats and extracts structured insights using GPT-4o mini.",
+    schedule: "Every 15 minutes",
+    overdueSeconds: 1200,
+    icon: Sparkles,
+  },
+  {
+    id: "intelligence",
+    name: "Intelligence Engine",
+    description: "Evaluates user Meridian data against market signals and generates proactive digests.",
+    schedule: "Every 6 hours",
+    overdueSeconds: 25200,
+    icon: Zap,
+  },
+  {
+    id: "meridian_refresh",
+    name: "Meridian Context Refresh",
+    description: "Refreshes the IRIS personalization context cache for all active users.",
+    schedule: "On demand · cache miss",
+    overdueSeconds: null,
+    icon: Radio,
+  },
+];
+
+const JOB_ID_TO_NAME: Record<string, string> = {
+  ranking: "ranking_engine",
+  memory_extraction: "memory_extraction",
+  intelligence: "intelligence_engine",
+  meridian_refresh: "meridian_refresh",
+};
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function PulsingDot({ health }: { health: "healthy" | "warning" | "unknown" }) {
+  if (health === "healthy") {
+    return (
+      <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-60" />
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500" />
+      </span>
+    );
+  }
+  if (health === "warning") {
+    return (
+      <span className="relative flex h-2.5 w-2.5 flex-shrink-0">
+        <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-60" />
+        <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+      </span>
+    );
+  }
+  return <span className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-slate-400/60" />;
+}
+
+function StatusBadge({ status }: { status: "success" | "error" | "skipped" | null }) {
+  if (status === "success") return (
+    <Badge className="rounded-md bg-emerald-500/10 px-2 py-0 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
+      success
+    </Badge>
+  );
+  if (status === "error") return (
+    <Badge className="rounded-md bg-rose-500/10 px-2 py-0 text-[10px] font-semibold uppercase tracking-wide text-rose-600 dark:text-rose-400 border-rose-500/20">
+      error
+    </Badge>
+  );
+  if (status === "skipped") return (
+    <Badge className="rounded-md bg-amber-500/10 px-2 py-0 text-[10px] font-semibold uppercase tracking-wide text-amber-600 dark:text-amber-400 border-amber-500/20">
+      skipped
+    </Badge>
+  );
+  return null;
+}
+
+function RunHistoryDots({ logs }: { logs: JobRunLog[] }) {
+  const recent = [...logs].reverse().slice(0, 8);
+  if (recent.length === 0) return <span className="text-xs text-muted-foreground">No runs yet</span>;
+  return (
+    <div className="flex items-center gap-1">
+      {recent.map((log) => (
+        <span
+          key={log.id}
+          title={`${safeFormatDate(log.started_at, "MMM d HH:mm")} · ${log.status}`}
+          className={`h-1.5 w-1.5 rounded-full ${
+            log.status === "success"
+              ? "bg-emerald-500"
+              : log.status === "error"
+              ? "bg-rose-500"
+              : "bg-amber-400"
+          }`}
+        />
+      ))}
+      <span className="ml-1 text-[10px] text-muted-foreground">recent runs</span>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Admin() {
   const { userProfile } = useAuth();
@@ -183,15 +260,11 @@ export default function Admin() {
   const [tradingStats, setTradingStats] = useState<TradingStats>({ totalPositions: 0, totalTrades: 0, totalJournalEntries: 0 });
   const [recentActivity, setRecentActivity] = useState<ActivityLog[]>([]);
   const [engagementStats, setEngagementStats] = useState<EngagementStats>({
-    avgMessagesPerChat: 0,
-    weeklyActiveChats: 0,
-    lessonsStarted: 0,
-    journalEntries: 0,
-    quizAttempts: 0,
-    retentionRate: 0,
+    avgMessagesPerChat: 0, weeklyActiveChats: 0,
+    lessonsStarted: 0, journalEntries: 0,
+    quizAttempts: 0, retentionRate: 0,
   });
 
-  // System Health state
   const [systemHealth, setSystemHealth] = useState<Record<string, unknown> | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
   const [queryInput, setQueryInput] = useState("");
@@ -207,42 +280,31 @@ export default function Admin() {
   const [jobRunLogs, setJobRunLogs] = useState<Record<string, JobRunLog[]>>({});
   const [jobLogsLoading, setJobLogsLoading] = useState<Record<string, boolean>>({});
   const [logsModalJobId, setLogsModalJobId] = useState<string | null>(null);
+  const [lastJobsRefresh, setLastJobsRefresh] = useState<Date | null>(null);
 
   const [purgeLoading, setPurgeLoading] = useState(false);
   const [purgeResult, setPurgeResult] = useState<{ deleted: number; failed: number } | null>(null);
 
   const BACKEND_URL = getPythonApiUrl();
-  /** Get the current Supabase access token for authenticated admin requests. */
+
   const getAuthHeaders = async (): Promise<HeadersInit> => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (!session?.access_token) {
-      throw new Error("Not authenticated — please sign in again");
-    }
-    return {
-      "Authorization": `Bearer ${session.access_token}`,
-      "Content-Type": "application/json",
-    };
+    if (!session?.access_token) throw new Error("Not authenticated — please sign in again");
+    return { "Authorization": `Bearer ${session.access_token}`, "Content-Type": "application/json" };
   };
+
+  // ── Data fetching ────────────────────────────────────────────────────────
 
   const fetchSystemHealth = async () => {
     setHealthLoading(true);
     try {
       const headers = await getAuthHeaders();
       const resp = await fetch(`${BACKEND_URL}/api/admin/system-health`, { headers });
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(body || `HTTP ${resp.status}`);
-      }
-      const data = await resp.json();
-      setSystemHealth(data);
-    } catch (err) {
-      console.error("System health check failed:", err);
-      // Backend unreachable — check Supabase directly so the status reflects
-      // reality rather than defaulting to a generic "error" with no timestamp.
+      if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+      setSystemHealth(await resp.json());
+    } catch {
       const { error: sbError } = await supabase
-        .schema("core")
-        .from("users")
-        .select("id", { count: "exact", head: true });
+        .schema("core").from("users").select("id", { count: "exact", head: true });
       setSystemHealth({
         overall: sbError ? "down" : "degraded",
         timestamp: new Date().toISOString(),
@@ -267,14 +329,10 @@ export default function Admin() {
       const headers = await getAuthHeaders();
       const resp = await fetch(
         `${BACKEND_URL}/api/admin/dataapi-query?q=${encodeURIComponent(q)}&limit=100`,
-        { headers }
+        { headers },
       );
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(body || `HTTP ${resp.status}`);
-      }
-      const data = await resp.json();
-      setQueryResults(data);
+      if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+      setQueryResults(await resp.json());
     } catch (err) {
       setQueryError(String(err));
     } finally {
@@ -282,56 +340,16 @@ export default function Admin() {
     }
   };
 
-  useEffect(() => {
-    if (searchQuery) {
-      const filtered = users.filter(
-        (u) =>
-          u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          u.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          u.last_name?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-      setFilteredUsers(filtered);
-    } else {
-      setFilteredUsers(users);
-    }
-  }, [searchQuery, users]);
-
-  const loadAllData = useCallback(async () => {
-    setLoading(true);
-    await Promise.all([
-      fetchUsers(),
-      fetchChatStats(),
-      fetchTradingStats(),
-      fetchEngagementStats(),
-      fetchSystemHealth(),
-    ]);
-    setLoading(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    loadAllData();
-  }, [loadAllData]);
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await loadAllData();
-    setRefreshing(false);
-    toast({ title: "Refreshed", description: "All data has been refreshed" });
-  };
-
   const fetchUsers = async () => {
     try {
       const { data, error } = await supabase
-        .schema("core")
-        .from("users")
+        .schema("core").from("users")
         .select("id, auth_id, email, first_name, last_name, userType, is_verified, experience_level, risk_level, created_at")
         .order("created_at", { ascending: false });
-
       if (error) throw error;
       setUsers(data || []);
       setFilteredUsers(data || []);
-    } catch (error: unknown) {
+    } catch (error) {
       console.error("Error fetching users:", error);
     }
   };
@@ -343,22 +361,22 @@ export default function Admin() {
         supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }),
         supabase.schema("ai").from("chat_messages").select("id", { count: "exact", head: true }),
         supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }).gte("updated_at", today),
-        supabase.schema("ai").from("chat_messages").select("id, user_id, role, created_at").order("created_at", { ascending: false }).limit(10),
+        supabase.schema("ai").from("chat_messages")
+          .select("id, user_id, role, created_at")
+          .order("created_at", { ascending: false }).limit(10),
       ]);
-
       setChatStats({
         totalChats: chatsResult.count ?? 0,
         totalMessages: messagesResult.count ?? 0,
         activeToday: activeTodayResult.count ?? 0,
       });
-
       setRecentActivity(
         (recentResult.data ?? []).map((msg) => ({
           id: msg.id as string,
           user_email: "User",
           action: msg.role === "user" ? "Sent message" : "Received AI response",
           timestamp: msg.created_at as string,
-        }))
+        })),
       );
     } catch (error) {
       console.error("Error fetching chat stats:", error);
@@ -372,7 +390,6 @@ export default function Admin() {
         supabase.schema("trading").from("trades").select("id", { count: "exact", head: true }),
         supabase.schema("trading").from("trade_journal").select("id", { count: "exact", head: true }),
       ]);
-
       setTradingStats({
         totalPositions: positionsResult.count || 0,
         totalTrades: tradesResult.count || 0,
@@ -386,7 +403,6 @@ export default function Admin() {
   const fetchEngagementStats = async () => {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-
       const [chatsRes, msgsRes, weeklyActiveRes, lessonProgressRes, journalRes, quizRes] = await Promise.all([
         supabase.schema("ai").from("chats").select("id", { count: "exact", head: true }),
         supabase.schema("ai").from("chat_messages").select("id", { count: "exact", head: true }),
@@ -395,95 +411,86 @@ export default function Admin() {
         supabase.schema("trading").from("trade_journal").select("id", { count: "exact", head: true }),
         supabase.schema("academy").from("quiz_attempts").select("id", { count: "exact", head: true }),
       ]);
-
       setEngagementStats({
         avgMessagesPerChat: chatsRes.count && msgsRes.count ? Math.round(msgsRes.count / chatsRes.count) : 0,
         weeklyActiveChats: weeklyActiveRes.count ?? 0,
         lessonsStarted: lessonProgressRes.count ?? 0,
         journalEntries: journalRes.count ?? 0,
         quizAttempts: quizRes.count ?? 0,
-        retentionRate: chatsRes.count ? Math.round(((weeklyActiveRes.count ?? 0) / chatsRes.count) * 100) : 0,
+        retentionRate: chatsRes.count
+          ? Math.round(((weeklyActiveRes.count ?? 0) / chatsRes.count) * 100)
+          : 0,
       });
     } catch (error) {
       console.error("Error fetching engagement stats:", error);
     }
   };
 
-  const toggleAdminStatus = async (userId: string, currentType: 'User' | 'Admin') => {
-    const newType = currentType === 'Admin' ? 'User' : 'Admin';
+  // ── Search filter ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (searchQuery) {
+      setFilteredUsers(users.filter((u) =>
+        u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.first_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        u.last_name?.toLowerCase().includes(searchQuery.toLowerCase()),
+      ));
+    } else {
+      setFilteredUsers(users);
+    }
+  }, [searchQuery, users]);
+
+  // ── Initial load ─────────────────────────────────────────────────────────
+
+  const loadAllData = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([
+      fetchUsers(), fetchChatStats(), fetchTradingStats(),
+      fetchEngagementStats(), fetchSystemHealth(),
+    ]);
+    setLoading(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => { loadAllData(); }, [loadAllData]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadAllData();
+    setRefreshing(false);
+    toast({ title: "Dashboard refreshed" });
+  };
+
+  // ── User actions ─────────────────────────────────────────────────────────
+
+  const toggleAdminStatus = async (userId: string, currentType: "User" | "Admin") => {
+    const newType = currentType === "Admin" ? "User" : "Admin";
     try {
-      const { error } = await supabase
-        .schema("core")
-        .from("users")
-        .update({ userType: newType })
-        .eq("id", userId);
-
+      const { error } = await supabase.schema("core").from("users")
+        .update({ userType: newType }).eq("id", userId);
       if (error) throw error;
-
-      toast({
-        title: "Success",
-        description: `User ${newType === 'Admin' ? "promoted to" : "demoted from"} admin`,
-      });
-
+      toast({ title: `User ${newType === "Admin" ? "promoted to" : "demoted from"} admin` });
       fetchUsers();
-    } catch (error: unknown) {
-      console.error("Error updating admin status:", error);
-      toast({
-        title: "Error",
-        description: getErrorMessage(error) || "Failed to update admin status",
-        variant: "destructive",
-      });
+    } catch (error) {
+      toast({ title: "Error", description: getErrorMessage(error) || "Failed to update role", variant: "destructive" });
     }
   };
 
   const deleteUser = async (userId: string, authId: string) => {
     try {
       if (BACKEND_URL && authId) {
-        // Delete via the Auth Admin API so the email is fully released.
-        // ON DELETE CASCADE propagates the deletion to core.users and all
-        // child tables (ai.chats, trading.*, etc.).
         const headers = await getAuthHeaders();
-        const resp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}`, {
-          method: "DELETE",
-          headers,
-        });
-        if (!resp.ok) {
-          const body = await resp.text();
-          throw new Error(body || `HTTP ${resp.status}`);
-        }
+        const resp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}`, { method: "DELETE", headers });
+        if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
       } else {
-        // Fallback when backend is not configured: direct Supabase deletion.
-        // This removes app data but does NOT release the email in Supabase Auth.
-        const { error: chatsError } = await supabase
-          .schema("ai")
-          .from("chats")
-          .delete()
-          .eq("user_id", userId);
-
-        if (chatsError) throw chatsError;
-
-        const { error } = await supabase
-          .schema("core")
-          .from("users")
-          .delete()
-          .eq("id", userId);
-
+        await supabase.schema("ai").from("chats").delete().eq("user_id", userId);
+        const { error } = await supabase.schema("core").from("users").delete().eq("id", userId);
         if (error) throw error;
       }
-
-      toast({
-        title: "User Deleted",
-        description: "User and all their data have been removed",
-      });
-
+      toast({ title: "User deleted" });
       fetchUsers();
-    } catch (error: unknown) {
-      console.error("Error deleting user:", error);
-      toast({
-        title: "Error",
-        description: getErrorMessage(error) || "Failed to delete user",
-        variant: "destructive",
-      });
+    } catch (error) {
+      toast({ title: "Error", description: getErrorMessage(error) || "Failed to delete user", variant: "destructive" });
     }
   };
 
@@ -492,26 +499,13 @@ export default function Admin() {
     setPurgeResult(null);
     try {
       const headers = await getAuthHeaders();
-      const resp = await fetch(`${BACKEND_URL}/api/admin/purge-orphaned-auth-users`, {
-        method: "POST",
-        headers,
-      });
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(body || `HTTP ${resp.status}`);
-      }
+      const resp = await fetch(`${BACKEND_URL}/api/admin/purge-orphaned-auth-users`, { method: "POST", headers });
+      if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
       const result = await resp.json() as { deleted: number; failed: number };
       setPurgeResult(result);
-      toast({
-        title: "Purge complete",
-        description: `${result.deleted} orphaned auth record${result.deleted !== 1 ? "s" : ""} removed. Those emails are now available for re-registration.`,
-      });
-    } catch (error: unknown) {
-      toast({
-        title: "Purge failed",
-        description: getErrorMessage(error) || "Failed to purge orphaned auth users",
-        variant: "destructive",
-      });
+      toast({ title: `Purge complete — ${result.deleted} records removed` });
+    } catch (error) {
+      toast({ title: "Purge failed", description: getErrorMessage(error), variant: "destructive" });
     } finally {
       setPurgeLoading(false);
     }
@@ -521,42 +515,50 @@ export default function Admin() {
     const csv = [
       ["ID", "Email", "First Name", "Last Name", "Verified", "Admin", "Experience", "Risk Level", "Created"],
       ...users.map((u) => [
-        u.id,
-        u.email || "",
-        u.first_name || "",
-        u.last_name || "",
-        u.is_verified ? "Yes" : "No",
-        u.userType === 'Admin' ? "Yes" : "No",
-        u.experience_level || "",
-        u.risk_level || "",
-        new Date(u.created_at).toISOString(),
+        u.id, u.email || "", u.first_name || "", u.last_name || "",
+        u.is_verified ? "Yes" : "No", u.userType === "Admin" ? "Yes" : "No",
+        u.experience_level || "", u.risk_level || "", new Date(u.created_at).toISOString(),
       ]),
-    ]
-      .map((row) => row.join(","))
-      .join("\n");
-
+    ].map((row) => row.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `users-export-${new Date().toISOString().split("T")[0]}.csv`;
+    a.download = `users-${new Date().toISOString().split("T")[0]}.csv`;
     a.click();
     URL.revokeObjectURL(url);
-
-    toast({ title: "Exported", description: "User data exported to CSV" });
+    toast({ title: "Exported" });
   };
+
+  // ── Scheduler / jobs ─────────────────────────────────────────────────────
 
   const fetchSchedulerStatus = useCallback(async () => {
     setSchedulerLoading(true);
     try {
       const data = await adminApi.getSchedulerStatus();
       setSchedulerJobs(data.jobs ?? []);
+      setLastJobsRefresh(new Date());
     } catch (err) {
       console.error("Scheduler status fetch failed:", err);
     } finally {
       setSchedulerLoading(false);
     }
   }, []);
+
+  // Always fetches fresh — no cache bypass
+  const fetchJobLogs = async (jobId: string) => {
+    setJobLogsLoading((prev) => ({ ...prev, [jobId]: true }));
+    try {
+      const jobName = JOB_ID_TO_NAME[jobId] ?? jobId;
+      const data = await adminApi.getJobRunLogs(jobName, 10);
+      setJobRunLogs((prev) => ({ ...prev, [jobId]: data.logs ?? [] }));
+    } catch (err) {
+      console.error(`Failed to fetch logs for ${jobId}:`, err);
+      setJobRunLogs((prev) => ({ ...prev, [jobId]: [] }));
+    } finally {
+      setJobLogsLoading((prev) => ({ ...prev, [jobId]: false }));
+    }
+  };
 
   const triggerJob = async (jobId: string) => {
     setJobStatuses((prev) => ({ ...prev, [jobId]: "running" }));
@@ -571,59 +573,35 @@ export default function Admin() {
       setJobStatuses((prev) => ({ ...prev, [jobId]: "success" }));
       setJobMessages((prev) => ({ ...prev, [jobId]: `Completed at ${time}` }));
     } catch (err) {
-      console.error(`Failed to trigger job ${jobId}:`, err);
       const msg = err instanceof Error ? err.message : "Unknown error";
       setJobStatuses((prev) => ({ ...prev, [jobId]: "error" }));
-      setJobMessages((prev) => ({ ...prev, [jobId]: `Failed: ${msg}` }));
+      setJobMessages((prev) => ({ ...prev, [jobId]: msg }));
+    } finally {
+      // Always refresh both scheduler status and logs after a run attempt
+      await Promise.all([fetchSchedulerStatus(), fetchJobLogs(jobId)]);
     }
-  };
-
-  const JOB_ID_TO_NAME: Record<string, string> = {
-    ranking: "ranking_engine",
-    memory_extraction: "memory_extraction",
-    intelligence: "intelligence_engine",
-    meridian_refresh: "meridian_refresh",
   };
 
   const openJobLogs = async (jobId: string) => {
     setLogsModalJobId(jobId);
-    if (jobRunLogs[jobId]) return; // already loaded
-    setJobLogsLoading((prev) => ({ ...prev, [jobId]: true }));
-    try {
-      const jobName = JOB_ID_TO_NAME[jobId] ?? jobId;
-      const data = await adminApi.getJobRunLogs(jobName, 10);
-      setJobRunLogs((prev) => ({ ...prev, [jobId]: data.logs ?? [] }));
-    } catch (err) {
-      console.error(`Failed to fetch logs for ${jobId}:`, err);
-      setJobRunLogs((prev) => ({ ...prev, [jobId]: [] }));
-    } finally {
-      setJobLogsLoading((prev) => ({ ...prev, [jobId]: false }));
-    }
+    await fetchJobLogs(jobId); // always fresh on open
   };
 
-  const refreshJobLogs = async (jobId: string) => {
-    setJobLogsLoading((prev) => ({ ...prev, [jobId]: true }));
-    try {
-      const jobName = JOB_ID_TO_NAME[jobId] ?? jobId;
-      const data = await adminApi.getJobRunLogs(jobName, 10);
-      setJobRunLogs((prev) => ({ ...prev, [jobId]: data.logs ?? [] }));
-    } catch (err) {
-      console.error(`Failed to refresh logs for ${jobId}:`, err);
-    } finally {
-      setJobLogsLoading((prev) => ({ ...prev, [jobId]: false }));
-    }
-  };
-
+  // Pre-load job logs and status when the tab becomes active
   useEffect(() => {
     if (activeTab !== "scheduled-jobs") return;
     void fetchSchedulerStatus();
+    SCHEDULED_JOB_DEFS.forEach((def) => { void fetchJobLogs(def.id); });
     const interval = setInterval(() => { void fetchSchedulerStatus(); }, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, fetchSchedulerStatus]);
+
+  // ── Computed values ───────────────────────────────────────────────────────
 
   const stats = {
     totalUsers: users.length,
-    adminUsers: users.filter((u) => u.userType === 'Admin').length,
+    adminUsers: users.filter((u) => u.userType === "Admin").length,
     verifiedUsers: users.filter((u) => u.is_verified).length,
     beginners: users.filter((u) => u.experience_level === "beginner").length,
     intermediate: users.filter((u) => u.experience_level === "intermediate").length,
@@ -631,484 +609,451 @@ export default function Admin() {
   };
 
   const verificationRate = formatPercentage(stats.verifiedUsers, stats.totalUsers);
-  const adminCoverage = formatPercentage(stats.adminUsers, stats.totalUsers);
-  const overallTone = getOverallTone(systemHealth?.overall);
+  const overallTone = getOverallTone(systemHealth?.overall as string | undefined);
   const OverallStatusIcon = overallTone.icon;
-  const latestActivity = recentActivity[0];
+
   const userMix = [
-    { label: "Beginner", value: stats.beginners, color: "bg-emerald-500" },
-    { label: "Intermediate", value: stats.intermediate, color: "bg-amber-500" },
-    { label: "Advanced", value: stats.advanced, color: "bg-rose-500" },
+    { label: "Beginner", value: stats.beginners, color: "bg-emerald-500", text: "text-emerald-600 dark:text-emerald-400" },
+    { label: "Intermediate", value: stats.intermediate, color: "bg-amber-500", text: "text-amber-600 dark:text-amber-400" },
+    { label: "Advanced", value: stats.advanced, color: "bg-rose-500", text: "text-rose-600 dark:text-rose-400" },
   ];
 
+  // ── Render ────────────────────────────────────────────────────────────────
+
   return (
-    <AppLayout title="Admin Panel">
-      <div className="min-w-0 space-y-6">
-        <section className="relative overflow-hidden rounded-3xl border bg-gradient-to-br from-background via-background to-muted/40 p-6 shadow-sm sm:p-8">
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.14),transparent_38%)]" />
-          <div className="relative flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
-            <div className="max-w-3xl space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline" className="gap-1.5 rounded-full px-3 py-1 text-xs font-medium">
-                  <ShieldCheck className="h-3.5 w-3.5" />
-                  Admin workspace
+    <AppLayout title="Admin">
+      <div className="min-w-0 space-y-6 pb-10">
+
+        {/* ── Page header ── */}
+        <header className="flex flex-col gap-5 border-b border-border/60 pb-6 pt-1 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline" className="gap-1.5 rounded-full border-primary/30 bg-primary/5 px-3 py-1 text-xs font-medium text-primary">
+                <ShieldCheck className="h-3 w-3" />
+                Admin workspace
+              </Badge>
+              {systemHealth && (
+                <Badge variant="outline" className={`gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${overallTone.badge}`}>
+                  <OverallStatusIcon className="h-3 w-3" />
+                  {overallTone.label}
                 </Badge>
-                {systemHealth && (
-                  <Badge variant="outline" className={`gap-1.5 rounded-full px-3 py-1 text-xs font-medium ${overallTone.badgeClassName}`}>
-                    <OverallStatusIcon className="h-3.5 w-3.5" />
-                    {overallTone.label}
-                  </Badge>
-                )}
-              </div>
-
-              <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Admin command center</h1>
-                <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-                  A cleaner operations view for managing members, monitoring product health, and checking platform activity without hopping between tools.
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-3">
-                <div className="rounded-2xl border bg-background/80 p-4 backdrop-blur-sm">
-                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Verification rate</p>
-                  <div className="mt-3 flex items-end justify-between gap-3">
-                    <div>
-                      <p className="text-2xl font-semibold">{verificationRate}%</p>
-                      <p className="text-xs text-muted-foreground">{stats.verifiedUsers} of {stats.totalUsers || 0} users verified</p>
-                    </div>
-                    <UserCheck className="h-8 w-8 text-primary/70" />
-                  </div>
-                </div>
-                <div className="rounded-2xl border bg-background/80 p-4 backdrop-blur-sm">
-                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Admin coverage</p>
-                  <div className="mt-3 flex items-end justify-between gap-3">
-                    <div>
-                      <p className="text-2xl font-semibold">{adminCoverage}%</p>
-                      <p className="text-xs text-muted-foreground">{stats.adminUsers} admins available</p>
-                    </div>
-                    <Shield className="h-8 w-8 text-primary/70" />
-                  </div>
-                </div>
-                <div className="rounded-2xl border bg-background/80 p-4 backdrop-blur-sm">
-                  <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Latest activity</p>
-                  <div className="mt-3 flex items-end justify-between gap-3">
-                    <div>
-                      <p className="line-clamp-1 text-sm font-semibold">{latestActivity?.action || "No recent events"}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {safeFormatDate(latestActivity?.timestamp, "MMM d, h:mm a", "—")}
-                      </p>
-                    </div>
-                    <Sparkles className="h-8 w-8 text-primary/70" />
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:w-[320px] xl:grid-cols-1">
-              <Button onClick={handleRefresh} disabled={refreshing} className="w-full gap-2 rounded-xl px-4 shadow-sm sm:w-auto">
-                <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-                Refresh dashboard
-              </Button>
-              <Button onClick={exportUsers} variant="outline" className="w-full gap-2 rounded-xl px-4 sm:w-auto">
-                <Download className="h-4 w-4" />
-                Export users
-              </Button>
-              <div className="rounded-2xl border bg-background/80 p-4 text-sm backdrop-blur-sm sm:col-span-2 xl:col-span-1">
-                <div className="flex items-center gap-2 font-medium">
-                  <ArrowUpRight className="h-4 w-4 text-primary" />
-                  Recommended focus
-                </div>
-                <p className="mt-2 text-muted-foreground">
-                  Review verification gaps, spot activity drops, and check system health before making account-level changes.
-                </p>
-              </div>
-            </div>
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Operations Console</h1>
+            <p className="text-sm text-muted-foreground">
+              Manage users, monitor infrastructure, and orchestrate background jobs from one place.
+            </p>
           </div>
-        </section>
+          <div className="flex flex-shrink-0 flex-wrap gap-2 sm:flex-col sm:items-end">
+            <Button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              size="sm"
+              className="gap-2 rounded-lg"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+            <Button onClick={exportUsers} variant="outline" size="sm" className="gap-2 rounded-lg">
+              <Download className="h-3.5 w-3.5" />
+              Export users
+            </Button>
+          </div>
+        </header>
 
-        <SupabaseConnectionTest />
-
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        {/* ── KPI strip ── */}
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           {[
             {
-              title: "Total users",
-              value: stats.totalUsers,
-              description: `${verificationRate}% verified accounts`,
               icon: Users,
+              label: "Total users",
+              value: stats.totalUsers,
+              sub: `${verificationRate}% verified`,
+              accent: "border-l-primary",
             },
             {
-              title: "Chats",
-              value: chatStats.totalChats,
-              description: `${chatStats.totalMessages} messages · ${chatStats.activeToday} active today`,
               icon: MessageSquare,
+              label: "Conversations",
+              value: chatStats.totalChats,
+              sub: `${chatStats.totalMessages} messages · ${chatStats.activeToday} today`,
+              accent: "border-l-[hsl(var(--chart-5))]",
             },
             {
-              title: "Trading activity",
-              value: tradingStats.totalTrades + tradingStats.totalJournalEntries,
-              description: `${tradingStats.totalTrades} trades · ${tradingStats.totalJournalEntries} journal logs`,
               icon: TrendingUp,
+              label: "Trading activity",
+              value: tradingStats.totalTrades + tradingStats.totalJournalEntries,
+              sub: `${tradingStats.totalTrades} trades · ${tradingStats.totalJournalEntries} journal logs`,
+              accent: "border-l-emerald-500",
             },
             {
-              title: "Admins",
-              value: stats.adminUsers,
-              description: "Permissioned operators",
               icon: Shield,
+              label: "Admins",
+              value: stats.adminUsers,
+              sub: "Permissioned operators",
+              accent: "border-l-amber-500",
             },
           ].map((item) => (
-            <Card key={item.title} className="rounded-2xl border-border/60 shadow-sm">
-              <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-                <div className="space-y-1">
-                  <CardDescription>{item.title}</CardDescription>
-                  <CardTitle className="text-3xl">{item.value}</CardTitle>
-                </div>
-                <div className="rounded-xl bg-primary/10 p-2 text-primary">
-                  <item.icon className="h-5 w-5" />
-                </div>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{item.description}</p>
-              </CardContent>
-            </Card>
+            <div
+              key={item.label}
+              className={`relative overflow-hidden rounded-2xl border border-l-4 bg-card p-5 ${item.accent}`}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+                  {item.label}
+                </p>
+                <item.icon className="h-4 w-4 text-muted-foreground/50" />
+              </div>
+              <p className="text-3xl font-bold tabular-nums tracking-tight">{item.value}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{item.sub}</p>
+            </div>
           ))}
         </section>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid h-auto w-full grid-cols-2 gap-2 rounded-2xl bg-muted/60 p-1 md:grid-cols-5">
-            <TabsTrigger value="users" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
-              <Users className="h-4 w-4" />
-              Users
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
-              <BarChart3 className="h-4 w-4" />
-              Analytics
-            </TabsTrigger>
-            <TabsTrigger value="activity" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
-              <Activity className="h-4 w-4" />
-              Activity
-            </TabsTrigger>
-            <TabsTrigger value="scheduled-jobs" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
-              <Clock className="h-4 w-4" />
-              Scheduled Jobs
-            </TabsTrigger>
-            <TabsTrigger value="system-health" className="min-h-[3.25rem] gap-2 rounded-xl px-2 py-2.5 text-center text-xs leading-tight whitespace-normal sm:min-h-0 sm:px-3 sm:text-sm sm:whitespace-nowrap">
-              <Heart className="h-4 w-4" />
-              System Health
-            </TabsTrigger>
+        {/* ── Tabs ── */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-5">
+          <TabsList className="h-auto w-full rounded-xl border border-border/60 bg-muted/40 p-1">
+            <div className="flex w-full flex-wrap gap-0.5">
+              {[
+                { value: "users", icon: Users, label: "Users" },
+                { value: "analytics", icon: BarChart3, label: "Analytics" },
+                { value: "activity", icon: Activity, label: "Activity" },
+                { value: "scheduled-jobs", icon: Clock, label: "Jobs" },
+                { value: "system-health", icon: Server, label: "Infrastructure" },
+              ].map((tab) => (
+                <TabsTrigger
+                  key={tab.value}
+                  value={tab.value}
+                  className="flex-1 gap-1.5 rounded-lg py-2.5 text-xs font-medium data-[state=active]:bg-background data-[state=active]:shadow-sm sm:text-sm"
+                >
+                  <tab.icon className="h-3.5 w-3.5" />
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </div>
           </TabsList>
 
+          {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ USERS TAB */}
           <TabsContent value="users" className="space-y-4">
-            <Card className="rounded-3xl border-border/60 shadow-sm">
-              <CardHeader className="space-y-5">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="space-y-1">
-                    <CardTitle>User management</CardTitle>
-                    <CardDescription>
-                      Search, review, and update account roles from a denser but more readable table.
+            <Card className="rounded-2xl border-border/60">
+              <CardHeader className="border-b border-border/40 pb-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <CardTitle className="text-base">User management</CardTitle>
+                    <CardDescription className="mt-0.5">
+                      {stats.totalUsers} members · {stats.verifiedUsers} verified · {stats.adminUsers} admins
                     </CardDescription>
                   </div>
-                  <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
-                    <div className="relative w-full sm:w-[280px]">
-                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <div className="flex gap-2">
+                    <div className="relative w-full sm:w-72">
+                      <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                       <Input
-                        placeholder="Search by name or email"
+                        placeholder="Search name or email…"
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
-                        className="h-10 rounded-xl border-border/70 bg-background pl-9"
+                        className="h-9 rounded-lg border-border/70 pl-9 text-sm"
                       />
                     </div>
-                    <Button onClick={exportUsers} variant="outline" className="w-full flex-shrink-0 gap-2 rounded-xl sm:w-auto">
-                      <Download className="h-4 w-4" />
-                      Export CSV
+                    <Button onClick={exportUsers} variant="outline" size="sm" className="gap-2 rounded-lg">
+                      <Download className="h-3.5 w-3.5" />
+                      CSV
                     </Button>
                   </div>
                 </div>
 
-                <div className="grid gap-3 md:grid-cols-3">
-                  <div className="rounded-2xl border bg-muted/20 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Verified</p>
-                    <p className="mt-2 text-2xl font-semibold">{stats.verifiedUsers}</p>
-                    <p className="text-xs text-muted-foreground">Accounts ready for feature access</p>
-                  </div>
-                  <div className="rounded-2xl border bg-muted/20 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Unverified</p>
-                    <p className="mt-2 text-2xl font-semibold">{stats.totalUsers - stats.verifiedUsers}</p>
-                    <p className="text-xs text-muted-foreground">Candidates for onboarding outreach</p>
-                  </div>
-                  <div className="rounded-2xl border bg-muted/20 p-4">
-                    <p className="text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground">Search results</p>
-                    <p className="mt-2 text-2xl font-semibold">{filteredUsers.length}</p>
-                    <p className="text-xs text-muted-foreground">Visible records in the current view</p>
-                  </div>
+                {/* Mini stat row */}
+                <div className="mt-4 grid grid-cols-3 gap-3">
+                  {[
+                    { label: "Verified", value: stats.verifiedUsers, sub: "ready for full access" },
+                    { label: "Unverified", value: stats.totalUsers - stats.verifiedUsers, sub: "pending onboarding" },
+                    { label: "Showing", value: filteredUsers.length, sub: searchQuery ? "matching your search" : "all accounts" },
+                  ].map((s) => (
+                    <div key={s.label} className="rounded-xl border bg-muted/20 px-4 py-3">
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{s.label}</p>
+                      <p className="mt-1 text-xl font-bold">{s.value}</p>
+                      <p className="text-[11px] text-muted-foreground">{s.sub}</p>
+                    </div>
+                  ))}
                 </div>
               </CardHeader>
-              <CardContent className="space-y-4">
+              <CardContent className="p-0">
                 {loading ? (
-                  <div className="rounded-2xl border border-dashed p-8 text-sm text-muted-foreground">Loading users…</div>
+                  <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Loading users…
+                  </div>
                 ) : (
-                  <>
-                    <div className="overflow-hidden rounded-2xl border">
-                      <div className="overflow-x-auto">
-                        <Table className="min-w-[900px]">
-                          <TableHeader>
-                            <TableRow className="bg-muted/30">
-                              <TableHead className="w-[16rem]">User</TableHead>
-                              <TableHead className="hidden w-[18rem] md:table-cell">Email</TableHead>
-                              <TableHead className="hidden w-[9rem] lg:table-cell">Experience</TableHead>
-                              <TableHead className="w-[8rem]">Status</TableHead>
-                              <TableHead className="w-[7rem]">Role</TableHead>
-                              <TableHead className="hidden w-[8rem] xl:table-cell">Joined</TableHead>
-                              <TableHead className="w-[10rem] text-right">Actions</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {filteredUsers.length === 0 ? (
-                              <TableRow>
-                                <TableCell colSpan={7} className="py-12 text-center text-muted-foreground">
-                                  {searchQuery ? "No users match your search." : "No users found yet."}
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[820px]">
+                      <TableHeader>
+                        <TableRow className="border-b border-border/40 bg-muted/30 hover:bg-muted/30">
+                          <TableHead className="pl-6 text-xs font-semibold uppercase tracking-wider text-muted-foreground">User</TableHead>
+                          <TableHead className="hidden text-xs font-semibold uppercase tracking-wider text-muted-foreground md:table-cell">Email</TableHead>
+                          <TableHead className="hidden text-xs font-semibold uppercase tracking-wider text-muted-foreground lg:table-cell">Level</TableHead>
+                          <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</TableHead>
+                          <TableHead className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Role</TableHead>
+                          <TableHead className="hidden text-xs font-semibold uppercase tracking-wider text-muted-foreground xl:table-cell">Joined</TableHead>
+                          <TableHead className="pr-6 text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredUsers.length === 0 ? (
+                          <TableRow>
+                            <TableCell colSpan={7} className="py-16 text-center text-sm text-muted-foreground">
+                              {searchQuery ? "No users match your search." : "No users yet."}
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          filteredUsers.map((user) => {
+                            const fullName = user.first_name || user.last_name
+                              ? `${user.first_name || ""} ${user.last_name || ""}`.trim()
+                              : "No name";
+                            const initials = (user.first_name?.[0] ?? "") + (user.last_name?.[0] ?? "");
+
+                            return (
+                              <TableRow key={user.id} className="border-b border-border/30 hover:bg-muted/20">
+                                <TableCell className="py-3 pl-6">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                                      {initials || "?"}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="truncate font-medium text-sm">{fullName}</p>
+                                      <p className="truncate text-[11px] text-muted-foreground md:hidden">{user.email || "—"}</p>
+                                    </div>
+                                  </div>
+                                </TableCell>
+                                <TableCell className="hidden py-3 md:table-cell">
+                                  <span className="font-mono text-xs text-muted-foreground">{user.email || "—"}</span>
+                                </TableCell>
+                                <TableCell className="hidden py-3 lg:table-cell">
+                                  <Badge variant="outline" className={`text-xs capitalize ${
+                                    user.experience_level === "beginner"
+                                      ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                      : user.experience_level === "intermediate"
+                                      ? "border-amber-500/20 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                      : user.experience_level === "advanced"
+                                      ? "border-rose-500/20 bg-rose-500/10 text-rose-600 dark:text-rose-400"
+                                      : "border-border/60 bg-muted/40 text-muted-foreground"
+                                  }`}>
+                                    {user.experience_level || "unknown"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="py-3">
+                                  {user.is_verified ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                      <CheckCircle2 className="h-3 w-3" /> Verified
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                      <MinusCircle className="h-3 w-3" /> Pending
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="py-3">
+                                  {user.userType === "Admin" ? (
+                                    <span className="inline-flex items-center gap-1 text-xs font-medium text-primary">
+                                      <Shield className="h-3 w-3" /> Admin
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">User</span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="hidden py-3 text-xs text-muted-foreground xl:table-cell">
+                                  {safeFormatDate(user.created_at, "MMM d, yyyy")}
+                                </TableCell>
+                                <TableCell className="py-3 pr-6 text-right">
+                                  {user.id !== userProfile?.id && (
+                                    <div className="flex justify-end gap-1.5">
+                                      <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 rounded-md px-2.5 text-xs"
+                                        onClick={() => toggleAdminStatus(user.id, user.userType)}
+                                      >
+                                        {user.userType === "Admin" ? "Demote" : "Promote"}
+                                      </Button>
+                                      <AlertDialog>
+                                        <AlertDialogTrigger asChild>
+                                          <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-7 w-7 rounded-md p-0 text-muted-foreground hover:bg-rose-500/10 hover:text-rose-500"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </AlertDialogTrigger>
+                                        <AlertDialogContent>
+                                          <AlertDialogHeader>
+                                            <AlertDialogTitle>Delete user?</AlertDialogTitle>
+                                            <AlertDialogDescription>
+                                              This permanently removes {user.email || "this user"} and all associated data — chats, trades, and journal entries.
+                                            </AlertDialogDescription>
+                                          </AlertDialogHeader>
+                                          <AlertDialogFooter>
+                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                            <AlertDialogAction
+                                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                              onClick={() => deleteUser(user.id, user.auth_id)}
+                                            >
+                                              Delete permanently
+                                            </AlertDialogAction>
+                                          </AlertDialogFooter>
+                                        </AlertDialogContent>
+                                      </AlertDialog>
+                                    </div>
+                                  )}
                                 </TableCell>
                               </TableRow>
-                            ) : (
-                              filteredUsers.map((user) => {
-                                const fullName = user.first_name || user.last_name
-                                  ? `${user.first_name || ""} ${user.last_name || ""}`.trim()
-                                  : "No name";
-
-                                return (
-                                  <TableRow key={user.id} className="hover:bg-muted/20">
-                                    <TableCell className="align-top">
-                                      <div className="min-w-0 space-y-1">
-                                        <div className="truncate font-medium">{fullName}</div>
-                                        <div className="truncate text-xs text-muted-foreground md:hidden">
-                                          {user.email || "N/A"}
-                                        </div>
-                                        <div className="text-xs text-muted-foreground">ID: {user.id.slice(0, 8)}…</div>
-                                      </div>
-                                    </TableCell>
-                                    <TableCell className="hidden align-top md:table-cell">
-                                      <span className="block truncate font-mono text-sm">{user.email || "N/A"}</span>
-                                    </TableCell>
-                                    <TableCell className="hidden align-top lg:table-cell">
-                                      <Badge variant="outline" className={`capitalize ${getExperienceStyle(user.experience_level)}`}>
-                                        {user.experience_level || "unknown"}
-                                      </Badge>
-                                    </TableCell>
-                                    <TableCell className="align-top">
-                                      {user.is_verified ? (
-                                        <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
-                                          <UserCheck className="mr-1 h-3 w-3" />
-                                          Verified
-                                        </Badge>
-                                      ) : (
-                                        <Badge variant="secondary">
-                                          <UserX className="mr-1 h-3 w-3" />
-                                          Unverified
-                                        </Badge>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="align-top">
-                                      {user.userType === 'Admin' ? (
-                                        <Badge className="bg-blue-500/10 text-blue-700 dark:text-blue-300">
-                                          <Shield className="mr-1 h-3 w-3" />
-                                          Admin
-                                        </Badge>
-                                      ) : (
-                                        <Badge variant="outline">User</Badge>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="hidden align-top text-sm text-muted-foreground xl:table-cell">
-                                      {safeFormatDate(user.created_at, "MMM d, yyyy")}
-                                    </TableCell>
-                                    <TableCell className="align-top text-right">
-                                      <div className="flex flex-wrap justify-end gap-2">
-                                        {user.id !== userProfile?.id && (
-                                          <>
-                                            <Button
-                                              variant="outline"
-                                              size="sm"
-                                              className="rounded-lg"
-                                              onClick={() => toggleAdminStatus(user.id, user.userType)}
-                                            >
-                                              {user.userType === 'Admin' ? "Demote" : "Promote"}
-                                            </Button>
-                                            <AlertDialog>
-                                              <AlertDialogTrigger asChild>
-                                                <Button
-                                                  variant="destructive"
-                                                  size="sm"
-                                                  className="rounded-lg"
-                                                  aria-label={`Delete user ${user.email || fullName}`}
-                                                  title={`Delete user ${user.email || fullName}`}
-                                                >
-                                                  <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                              </AlertDialogTrigger>
-                                              <AlertDialogContent>
-                                                <AlertDialogHeader>
-                                                  <AlertDialogTitle>Delete user?</AlertDialogTitle>
-                                                  <AlertDialogDescription>
-                                                    This permanently deletes {user.email || "this user"} and all related chats, trades, and journal entries.
-                                                  </AlertDialogDescription>
-                                                </AlertDialogHeader>
-                                                <AlertDialogFooter>
-                                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                  <AlertDialogAction onClick={() => deleteUser(user.id, user.auth_id)}>
-                                                    Delete
-                                                  </AlertDialogAction>
-                                                </AlertDialogFooter>
-                                              </AlertDialogContent>
-                                            </AlertDialog>
-                                          </>
-                                        )}
-                                      </div>
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })
-                            )}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Tip: use search to narrow the list before applying role changes or deletions.
-                    </p>
-                  </>
+                            );
+                          })
+                        )}
+                      </TableBody>
+                    </Table>
+                  </div>
                 )}
               </CardContent>
             </Card>
           </TabsContent>
 
+          {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ANALYTICS TAB */}
           <TabsContent value="analytics" className="space-y-4">
-            <div className="grid gap-4 xl:grid-cols-[1.1fr_0.9fr]">
-              <Card className="rounded-3xl border-border/60 shadow-sm">
-                <CardHeader>
-                  <CardTitle>User experience mix</CardTitle>
-                  <CardDescription>How your member base is distributed across skill levels.</CardDescription>
+            <div className="grid gap-4 xl:grid-cols-2">
+
+              {/* User mix */}
+              <Card className="rounded-2xl border-border/60">
+                <CardHeader className="border-b border-border/40 pb-4">
+                  <CardTitle className="text-base">Experience distribution</CardTitle>
+                  <CardDescription>Member base breakdown by skill level</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-5">
-                  {userMix.map((segment) => (
-                    <div key={segment.label} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 text-sm font-medium">
-                          <div className={`h-3 w-3 rounded-full ${segment.color}`} />
-                          {segment.label}
+                <CardContent className="space-y-5 pt-5">
+                  {userMix.map((seg) => {
+                    const pct = formatPercentage(seg.value, stats.totalUsers);
+                    return (
+                      <div key={seg.label}>
+                        <div className="mb-2 flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className={`h-2 w-2 rounded-full ${seg.color}`} />
+                            <span className="text-sm font-medium">{seg.label}</span>
+                          </div>
+                          <div className="flex items-center gap-3 tabular-nums">
+                            <span className={`text-sm font-bold ${seg.text}`}>{pct}%</span>
+                            <span className="w-8 text-right text-sm text-muted-foreground">{seg.value}</span>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <span className="text-sm font-semibold">{segment.value}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">{formatPercentage(segment.value, stats.totalUsers)}%</span>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                          <div
+                            className={`h-full rounded-full transition-all duration-700 ${seg.color}`}
+                            style={{ width: `${pct}%` }}
+                          />
                         </div>
                       </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-muted">
-                        <div
-                          className={`h-full rounded-full ${segment.color}`}
-                          style={{ width: `${formatPercentage(segment.value, stats.totalUsers)}%` }}
-                        />
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   <Separator />
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border bg-muted/20 p-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Verified users</p>
-                      <p className="mt-2 text-2xl font-semibold">{stats.verifiedUsers}</p>
-                    </div>
-                    <div className="rounded-2xl border bg-muted/20 p-4">
-                      <p className="text-xs uppercase tracking-[0.18em] text-muted-foreground">Active chatters today</p>
-                      <p className="mt-2 text-2xl font-semibold">{chatStats.activeToday}</p>
-                    </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { label: "Verified", value: stats.verifiedUsers },
+                      { label: "Active today", value: chatStats.activeToday },
+                    ].map((s) => (
+                      <div key={s.label} className="rounded-xl border bg-muted/20 p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{s.label}</p>
+                        <p className="mt-1.5 text-2xl font-bold">{s.value}</p>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>
 
-              <Card className="rounded-3xl border-border/60 shadow-sm">
-                <CardHeader>
-                  <CardTitle>Platform pulse</CardTitle>
-                  <CardDescription>Snapshot of the highest-signal operational metrics.</CardDescription>
+              {/* Platform pulse */}
+              <Card className="rounded-2xl border-border/60">
+                <CardHeader className="border-b border-border/40 pb-4">
+                  <CardTitle className="text-base">Platform pulse</CardTitle>
+                  <CardDescription>Highest-signal operational metrics</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
+                <CardContent className="divide-y divide-border/30 pt-0">
                   {[
-                    { icon: MessageSquare, label: "Total conversations", subtext: "AI chat sessions", value: chatStats.totalChats },
-                    { icon: Activity, label: "Total messages", subtext: "User and AI exchanges", value: chatStats.totalMessages },
-                    { icon: TrendingUp, label: "Open positions", subtext: "Active paper trades", value: tradingStats.totalPositions },
-                    { icon: Database, label: "Journal entries", subtext: "Trade documentation", value: tradingStats.totalJournalEntries },
+                    { icon: MessageSquare, label: "Total conversations", sub: "AI chat sessions", value: chatStats.totalChats },
+                    { icon: Activity, label: "Total messages", sub: "User and AI exchanges", value: chatStats.totalMessages },
+                    { icon: TrendingUp, label: "Open positions", sub: "Active paper trades", value: tradingStats.totalPositions },
+                    { icon: Database, label: "Journal entries", sub: "Trade documentation", value: tradingStats.totalJournalEntries },
                   ].map((item) => (
-                    <div key={item.label} className="flex flex-col gap-4 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="rounded-xl bg-primary/10 p-2 text-primary">
-                          <item.icon className="h-5 w-5" />
+                    <div key={item.label} className="flex items-center justify-between py-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                          <item.icon className="h-4 w-4" />
                         </div>
-                        <div className="min-w-0">
-                          <div className="font-medium">{item.label}</div>
-                          <div className="text-xs text-muted-foreground">{item.subtext}</div>
+                        <div>
+                          <p className="text-sm font-medium">{item.label}</p>
+                          <p className="text-xs text-muted-foreground">{item.sub}</p>
                         </div>
                       </div>
-                      <div className="text-left text-2xl font-semibold sm:text-right">{item.value}</div>
+                      <span className="text-2xl font-bold tabular-nums">{item.value}</span>
                     </div>
                   ))}
                 </CardContent>
               </Card>
 
-              <Card className="rounded-3xl border-border/60 shadow-sm">
-                <CardHeader>
-                  <CardTitle>Engagement metrics</CardTitle>
-                  <CardDescription>Computed from live platform activity.</CardDescription>
+              {/* Engagement */}
+              <Card className="rounded-2xl border-border/60 xl:col-span-2">
+                <CardHeader className="border-b border-border/40 pb-4">
+                  <CardTitle className="text-base">Engagement metrics</CardTitle>
+                  <CardDescription>Computed from live platform activity</CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {[
-                    { icon: MessageSquare, label: "Avg messages per chat", subtext: "Engagement depth per session", value: engagementStats.avgMessagesPerChat },
-                    { icon: Activity, label: "Weekly active chats", subtext: "Sessions updated in last 7 days", value: engagementStats.weeklyActiveChats },
-                    { icon: TrendingUp, label: "7-day retention rate", subtext: "Active chats vs total", value: `${engagementStats.retentionRate}%` },
-                    { icon: BarChart3, label: "Lessons started", subtext: "Academy lesson progress rows", value: engagementStats.lessonsStarted },
-                    { icon: Shield, label: "Quiz attempts", subtext: "Academy quiz submissions", value: engagementStats.quizAttempts },
-                    { icon: Database, label: "Journal entries", subtext: "Trade documentation records", value: engagementStats.journalEntries },
-                  ].map((item) => (
-                    <div key={item.label} className="flex flex-col gap-4 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="rounded-xl bg-primary/10 p-2 text-primary">
-                          <item.icon className="h-5 w-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-medium">{item.label}</div>
-                          <div className="text-xs text-muted-foreground">{item.subtext}</div>
-                        </div>
+                <CardContent className="pt-5">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    {[
+                      { label: "Avg messages / chat", value: engagementStats.avgMessagesPerChat, sub: "Engagement depth" },
+                      { label: "Weekly active chats", value: engagementStats.weeklyActiveChats, sub: "Updated in last 7d" },
+                      { label: "7-day retention", value: `${engagementStats.retentionRate}%`, sub: "Active vs total chats" },
+                      { label: "Lessons started", value: engagementStats.lessonsStarted, sub: "Academy progress rows" },
+                      { label: "Quiz attempts", value: engagementStats.quizAttempts, sub: "Academy submissions" },
+                      { label: "Journal entries", value: engagementStats.journalEntries, sub: "Trade documentation" },
+                    ].map((m) => (
+                      <div key={m.label} className="rounded-xl border bg-muted/20 p-4">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{m.label}</p>
+                        <p className="mt-1.5 text-3xl font-bold tabular-nums">{m.value}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">{m.sub}</p>
                       </div>
-                      <div className="text-left text-2xl font-semibold sm:text-right">{item.value}</div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </CardContent>
               </Card>
             </div>
           </TabsContent>
 
+          {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ACTIVITY TAB */}
           <TabsContent value="activity" className="space-y-4">
-            <Card className="rounded-3xl border-border/60 shadow-sm">
-              <CardHeader>
-                <CardTitle>Recent activity</CardTitle>
-                <CardDescription>Most recent platform events, ordered by time.</CardDescription>
+            <Card className="rounded-2xl border-border/60">
+              <CardHeader className="border-b border-border/40 pb-4">
+                <CardTitle className="text-base">Recent activity</CardTitle>
+                <CardDescription>Most recent platform events, ordered by time</CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="pt-4">
                 {recentActivity.length === 0 ? (
-                  <div className="rounded-2xl border border-dashed p-10 text-center text-muted-foreground">
-                    No recent activity.
+                  <div className="flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed py-16 text-center">
+                    <Activity className="h-8 w-8 text-muted-foreground/30" />
+                    <p className="text-sm text-muted-foreground">No recent activity</p>
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className="relative space-y-0">
+                    {/* Timeline line */}
+                    <div className="absolute left-[19px] top-3 bottom-3 w-px bg-border/50" />
                     {recentActivity.map((activity, index) => (
-                      <div key={activity.id} className="flex flex-col gap-3 rounded-2xl border bg-muted/20 p-4 sm:flex-row sm:items-start">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                          <MessageSquare className="h-5 w-5" />
+                      <div key={activity.id} className="relative flex gap-4 pb-4">
+                        <div className="relative z-10 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-border/60 bg-background shadow-sm">
+                          <MessageSquare className="h-4 w-4 text-primary/70" />
                         </div>
-                        <div className="min-w-0 flex-1 space-y-1">
+                        <div className="min-w-0 flex-1 rounded-xl border border-border/40 bg-muted/20 px-4 py-3">
                           <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                            <p className="break-words font-medium">{activity.action}</p>
-                            <Badge variant="outline" className="w-fit rounded-full px-2.5 text-[11px]">
-                              Event {index + 1}
+                            <p className="text-sm font-medium">{activity.action}</p>
+                            <Badge variant="outline" className="w-fit rounded-full px-2 py-0 text-[10px] tabular-nums">
+                              #{index + 1}
                             </Badge>
                           </div>
-                          <p className="break-all text-sm text-muted-foreground">{activity.user_email}</p>
-                          <p className="text-xs text-muted-foreground">{safeFormatDate(activity.timestamp, "MMM d, yyyy 'at' h:mm a")}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">
+                            {safeFormatDate(activity.timestamp, "MMM d, yyyy 'at' h:mm a")}
+                          </p>
                         </div>
-                        <Clock className="mt-0.5 h-4 w-4 self-end text-muted-foreground sm:self-auto" />
                       </div>
                     ))}
                   </div>
@@ -1117,661 +1062,630 @@ export default function Admin() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="scheduled-jobs" className="space-y-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ SCHEDULED JOBS TAB */}
+          <TabsContent value="scheduled-jobs" className="space-y-5">
+
+            {/* Section header */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">Scheduled Jobs</h2>
+                <h2 className="text-base font-semibold">Job Orchestration</h2>
                 <p className="text-sm text-muted-foreground">
-                  Manually trigger background jobs that normally run on a schedule.
+                  {lastJobsRefresh
+                    ? `Status refreshed ${formatRelativeTime(lastJobsRefresh.toISOString())}`
+                    : "Fetching scheduler status…"}
                 </p>
               </div>
               <Button
-                type="button"
                 onClick={() => { void fetchSchedulerStatus(); }}
                 disabled={schedulerLoading}
                 variant="outline"
                 size="sm"
-                className="w-full gap-2 rounded-xl sm:w-auto"
+                className="gap-2 rounded-lg"
               >
-                <RefreshCw className={`h-4 w-4 ${schedulerLoading ? "animate-spin" : ""}`} />
-                Refresh
+                <RefreshCw className={`h-3.5 w-3.5 ${schedulerLoading ? "animate-spin" : ""}`} />
+                Refresh status
               </Button>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            {/* Job cards grid */}
+            <div className="grid gap-4 lg:grid-cols-2">
               {SCHEDULED_JOB_DEFS.map((def) => {
                 const job = schedulerJobs.find((j) => j.id === def.id);
                 const lastRun = job?.last_run ?? null;
                 const jobStatus = jobStatuses[def.id] ?? "idle";
                 const jobMessage = jobMessages[def.id] ?? "";
                 const health = getJobHealth(lastRun, def.overdueSeconds);
-                const lastLog = (jobRunLogs[def.id] ?? [])[0] ?? null;
-                const lastLogStatus = lastLog?.status ?? null;
+                const logs = jobRunLogs[def.id] ?? [];
+                const lastLog = logs[0] ?? null;
+                const logsLoading = jobLogsLoading[def.id] ?? false;
+                const Icon = def.icon;
 
                 return (
-                  <Card key={def.id} className="rounded-3xl border-border/60 shadow-sm">
-                    <CardHeader className="flex flex-row items-start justify-between space-y-0 pb-3">
-                      <div className="space-y-1">
-                        <CardTitle className="text-base">{def.name}</CardTitle>
-                        <CardDescription>{def.schedule}</CardDescription>
+                  <div
+                    key={def.id}
+                    className={`rounded-2xl border bg-card transition-all ${
+                      jobStatus === "running"
+                        ? "border-primary/40 shadow-md shadow-primary/5"
+                        : jobStatus === "success"
+                        ? "border-emerald-500/30"
+                        : jobStatus === "error"
+                        ? "border-rose-500/30"
+                        : "border-border/60"
+                    }`}
+                  >
+                    {/* Card header */}
+                    <div className="flex items-start justify-between border-b border-border/40 px-5 py-4">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl border border-border/60 bg-muted/30">
+                          <Icon className="h-4 w-4 text-primary" />
+                        </div>
+                        <div>
+                          <p className="font-semibold text-sm leading-tight">{def.name}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{def.schedule}</p>
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {lastLogStatus === "success" && (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                        )}
-                        {lastLogStatus === "error" && (
-                          <XCircle className="h-4 w-4 text-red-500" />
-                        )}
-                        {lastLogStatus === "skipped" && (
-                          <MinusCircle className="h-4 w-4 text-amber-400" />
-                        )}
-                        <div
-                          className={`mt-0.5 h-3 w-3 rounded-full ${
-                            health === "healthy"
-                              ? "bg-emerald-500"
-                              : health === "warning"
-                              ? "bg-amber-500"
-                              : "bg-slate-400"
-                          }`}
-                        />
+                        {lastLog && <StatusBadge status={lastLog.status} />}
+                        <PulsingDot health={health} />
                       </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-muted-foreground">Last run:</span>
-                        <span
-                          className={`font-medium ${
+                    </div>
+
+                    {/* Card body */}
+                    <div className="space-y-4 px-5 py-4">
+                      {/* Stats row */}
+                      <div className="flex flex-wrap gap-x-5 gap-y-1">
+                        <div>
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Last run</p>
+                          <p className={`mt-0.5 text-sm font-semibold tabular-nums ${
                             health === "warning" ? "text-amber-600 dark:text-amber-400" : ""
-                          }`}
-                        >
-                          {schedulerLoading ? "Loading…" : formatRelativeTime(lastRun)}
-                        </span>
+                          }`}>
+                            {schedulerLoading ? "…" : formatRelativeTime(lastRun)}
+                          </p>
+                        </div>
+                        {lastLog?.finished_at && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Duration</p>
+                            <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                              {formatDuration(lastLog.started_at, lastLog.finished_at)}
+                            </p>
+                          </div>
+                        )}
+                        {lastLog?.records_processed != null && (
+                          <div>
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Records</p>
+                            <p className="mt-0.5 text-sm font-semibold tabular-nums">
+                              {lastLog.records_processed.toLocaleString()}
+                            </p>
+                          </div>
+                        )}
                       </div>
+
+                      {/* Run history dots */}
+                      {logsLoading ? (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <Loader2 className="h-3 w-3 animate-spin" />
+                          Loading history…
+                        </div>
+                      ) : (
+                        <RunHistoryDots logs={logs} />
+                      )}
+
+                      {/* Last summary */}
                       {lastLog?.summary && (
-                        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
+                        <p className="text-xs leading-relaxed text-muted-foreground line-clamp-2">
                           {lastLog.summary}
                         </p>
                       )}
-                      <div className="flex gap-2">
+                      {lastLog?.error && (
+                        <p className="rounded-lg border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-xs text-rose-600 dark:text-rose-400 line-clamp-2">
+                          {lastLog.error}
+                        </p>
+                      )}
+
+                      {/* Status message */}
+                      {jobStatus !== "idle" && (
+                        <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium ${
+                          jobStatus === "running"
+                            ? "border-primary/20 bg-primary/5 text-primary"
+                            : jobStatus === "success"
+                            ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                            : "border-rose-500/20 bg-rose-500/5 text-rose-600 dark:text-rose-400"
+                        }`}>
+                          {jobStatus === "running" ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : jobStatus === "success" ? (
+                            <CheckCircle2 className="h-3 w-3" />
+                          ) : (
+                            <XCircle className="h-3 w-3" />
+                          )}
+                          {jobStatus === "running" ? "Running — do not close this page…" : jobMessage}
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-1">
                         <Button
                           size="sm"
-                          className="flex-1 gap-2 rounded-xl"
-                          variant="outline"
+                          className="flex-1 gap-2 rounded-lg"
                           disabled={jobStatus === "running"}
                           onClick={() => { void triggerJob(def.id); }}
                         >
                           {jobStatus === "running" ? (
-                            <>
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                              Running…
-                            </>
+                            <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Running…</>
                           ) : (
-                            <>
-                              <Play className="h-4 w-4" />
-                              Run Now
-                            </>
+                            <><Play className="h-3.5 w-3.5" /> Run now</>
                           )}
                         </Button>
                         <Button
                           size="sm"
                           variant="outline"
-                          className="gap-2 rounded-xl"
+                          className="gap-2 rounded-lg"
                           onClick={() => { void openJobLogs(def.id); }}
                         >
-                          <FileText className="h-4 w-4" />
-                          View Logs
+                          <Eye className="h-3.5 w-3.5" />
+                          Logs
                         </Button>
                       </div>
-                      {jobStatus !== "idle" && (
-                        <p
-                          className={`text-xs ${
-                            jobStatus === "running"
-                              ? "text-muted-foreground"
-                              : jobStatus === "success"
-                              ? "text-emerald-600 dark:text-emerald-400"
-                              : "text-red-600 dark:text-red-400"
-                          }`}
-                        >
-                          {jobStatus === "running" ? "Running..." : jobMessage}
-                        </p>
-                      )}
-                    </CardContent>
-                  </Card>
+                    </div>
+                  </div>
                 );
               })}
             </div>
 
-            {/* Job run logs modal */}
+            {/* Job logs modal */}
             <Dialog open={logsModalJobId !== null} onOpenChange={(open) => { if (!open) setLogsModalJobId(null); }}>
-              <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
-                <DialogHeader>
+              <DialogContent className="max-h-[85vh] max-w-4xl overflow-hidden p-0">
+                <DialogHeader className="border-b border-border/60 px-6 py-4">
                   <DialogTitle className="flex items-center justify-between gap-3">
-                    <span>
-                      {logsModalJobId
-                        ? (SCHEDULED_JOB_DEFS.find((d) => d.id === logsModalJobId)?.name ?? logsModalJobId)
-                        : ""}{" "}
-                      — Last 10 Runs
-                    </span>
+                    <div className="flex items-center gap-2.5">
+                      <Terminal className="h-4 w-4 text-primary" />
+                      <span className="text-base font-semibold">
+                        {logsModalJobId
+                          ? SCHEDULED_JOB_DEFS.find((d) => d.id === logsModalJobId)?.name
+                          : ""}{" "}
+                        — Run History
+                      </span>
+                    </div>
                     {logsModalJobId && (
                       <Button
                         size="sm"
                         variant="outline"
-                        className="gap-2 rounded-xl"
+                        className="gap-2 rounded-lg text-xs"
                         disabled={jobLogsLoading[logsModalJobId] ?? false}
-                        onClick={() => { if (logsModalJobId) void refreshJobLogs(logsModalJobId); }}
+                        onClick={() => { if (logsModalJobId) void fetchJobLogs(logsModalJobId); }}
                       >
-                        <RefreshCw className={`h-3.5 w-3.5 ${(jobLogsLoading[logsModalJobId] ?? false) ? "animate-spin" : ""}`} />
+                        <RefreshCw className={`h-3 w-3 ${(jobLogsLoading[logsModalJobId] ?? false) ? "animate-spin" : ""}`} />
                         Refresh
                       </Button>
                     )}
                   </DialogTitle>
                 </DialogHeader>
-                {logsModalJobId && (jobLogsLoading[logsModalJobId] ?? false) && (
-                  <div className="flex items-center justify-center py-10 text-muted-foreground">
-                    <Loader2 className="h-5 w-5 animate-spin mr-2" />
-                    Loading logs…
-                  </div>
-                )}
-                {logsModalJobId && !(jobLogsLoading[logsModalJobId] ?? false) && (
-                  (() => {
+
+                <div className="overflow-y-auto">
+                  {logsModalJobId && (jobLogsLoading[logsModalJobId] ?? false) && (
+                    <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading logs…
+                    </div>
+                  )}
+
+                  {logsModalJobId && !(jobLogsLoading[logsModalJobId] ?? false) && (() => {
                     const logs = jobRunLogs[logsModalJobId] ?? [];
                     if (logs.length === 0) {
                       return (
-                        <p className="py-8 text-center text-sm text-muted-foreground">
-                          No run records yet. Logs appear after the first job execution.
-                        </p>
+                        <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+                          <FileText className="h-8 w-8 text-muted-foreground/30" />
+                          <p className="text-sm text-muted-foreground">
+                            No run records yet. Logs appear after the first execution.
+                          </p>
+                        </div>
                       );
                     }
                     return (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Started</TableHead>
-                            <TableHead>Duration</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Records</TableHead>
-                            <TableHead>Summary</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {logs.map((log) => {
-                            const durationMs = log.finished_at
-                              ? new Date(log.finished_at).getTime() - new Date(log.started_at).getTime()
-                              : null;
-                            const durationLabel = durationMs !== null
-                              ? durationMs < 1000
-                                ? `${durationMs}ms`
-                                : `${(durationMs / 1000).toFixed(1)}s`
-                              : "—";
-                            return (
-                              <TableRow key={log.id}>
-                                <TableCell className="text-xs whitespace-nowrap">
-                                  {safeFormatDate(log.started_at, "MMM d, HH:mm:ss")}
-                                </TableCell>
-                                <TableCell className="text-xs">{durationLabel}</TableCell>
-                                <TableCell>
-                                  {log.status === "success" && (
-                                    <Badge className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20 rounded-full text-xs">
-                                      success
-                                    </Badge>
-                                  )}
-                                  {log.status === "error" && (
-                                    <Badge className="bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20 rounded-full text-xs">
-                                      error
-                                    </Badge>
-                                  )}
-                                  {log.status === "skipped" && (
-                                    <Badge className="bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20 rounded-full text-xs">
-                                      skipped
-                                    </Badge>
-                                  )}
-                                </TableCell>
-                                <TableCell className="text-xs">
-                                  {log.records_processed ?? "—"}
-                                </TableCell>
-                                <TableCell className="text-xs text-muted-foreground max-w-xs">
-                                  {log.error
-                                    ? <span className="text-red-600 dark:text-red-400">{log.error}</span>
-                                    : (log.summary ?? "—")}
-                                </TableCell>
-                              </TableRow>
-                            );
-                          })}
-                        </TableBody>
-                      </Table>
+                      <div className="divide-y divide-border/40">
+                        {logs.map((log, idx) => (
+                          <div key={log.id} className="px-6 py-4">
+                            <div className="mb-2 flex flex-wrap items-center gap-3">
+                              <span className="text-xs text-muted-foreground tabular-nums">
+                                #{logs.length - idx}
+                              </span>
+                              <StatusBadge status={log.status} />
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {safeFormatDate(log.started_at, "MMM d, yyyy · HH:mm:ss")}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {formatDuration(log.started_at, log.finished_at)}
+                              </span>
+                              {log.records_processed != null && (
+                                <span className="text-xs text-muted-foreground">
+                                  {log.records_processed.toLocaleString()} records
+                                </span>
+                              )}
+                            </div>
+                            {log.error && (
+                              <p className="mt-1 rounded-md border border-rose-500/20 bg-rose-500/5 px-3 py-2 font-mono text-xs text-rose-600 dark:text-rose-400">
+                                {log.error}
+                              </p>
+                            )}
+                            {log.summary && (
+                              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                                {log.summary}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     );
-                  })()
-                )}
+                  })()}
+                </div>
               </DialogContent>
             </Dialog>
           </TabsContent>
 
+          {/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ HEALTH TAB */}
           <TabsContent value="system-health" className="space-y-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold">System health monitor</h2>
-                <p className="text-sm text-muted-foreground">Live connection status for Supabase, DataAPI, and the backend API.</p>
+                <h2 className="text-base font-semibold">Infrastructure</h2>
+                <p className="text-sm text-muted-foreground">Live connection status for all platform services</p>
               </div>
-              <Button type="button" onClick={(e) => { e.preventDefault(); void fetchSystemHealth(); }} disabled={healthLoading} variant="outline" size="sm" className="w-full gap-2 rounded-xl sm:w-auto">
-                <RefreshCw className={`h-4 w-4 ${healthLoading ? "animate-spin" : ""}`} />
+              <Button
+                onClick={() => { void fetchSystemHealth(); }}
+                disabled={healthLoading}
+                variant="outline"
+                size="sm"
+                className="gap-2 rounded-lg"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${healthLoading ? "animate-spin" : ""}`} />
                 Check health
               </Button>
             </div>
 
+            {/* Overall status banner */}
             {systemHealth && (
-              <div className={`rounded-3xl border p-5 ${overallTone.panelClassName}`}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="rounded-2xl bg-background/80 p-2.5">
-                      <OverallStatusIcon className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <p className="font-semibold capitalize">System {systemHealth.overall}</p>
-                      <p className="text-sm text-muted-foreground">Last checked: {systemHealth.timestamp ? new Date(systemHealth.timestamp).toLocaleString() : "Never"}</p>
-                    </div>
+              <div className={`flex items-center justify-between rounded-2xl border p-4 ${overallTone.panel}`}>
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-current/20 bg-background/60">
+                    <OverallStatusIcon className={`h-5 w-5 ${overallTone.cls}`} />
                   </div>
-                  <Badge variant="outline" className={`w-fit rounded-full px-3 py-1 ${overallTone.badgeClassName}`}>
-                    {overallTone.label}
-                  </Badge>
+                  <div>
+                    <p className="font-semibold capitalize text-sm">System {String(systemHealth.overall)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {systemHealth.timestamp
+                        ? `Checked ${new Date(systemHealth.timestamp as string).toLocaleTimeString()}`
+                        : "Not checked yet"}
+                    </p>
+                  </div>
                 </div>
+                <Badge variant="outline" className={`rounded-full px-3 ${overallTone.badge}`}>
+                  {overallTone.label}
+                </Badge>
               </div>
             )}
 
+            {/* Service cards */}
             <div className="grid gap-4 md:grid-cols-3">
-              {/* Supabase */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Supabase</CardTitle>
-                  <Database className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
+              {[
+                {
+                  label: "Supabase",
+                  icon: Database,
+                  data: systemHealth?.services?.supabase,
+                },
+                {
+                  label: "DataAPI Server",
+                  icon: Server,
+                  data: systemHealth?.services?.dataapi,
+                },
+                {
+                  label: "Railway Backend",
+                  icon: Activity,
+                  data: systemHealth?.services?.backend,
+                },
+              ].map((svc) => (
+                <div key={svc.label} className="rounded-2xl border border-border/60 bg-card p-5">
+                  <div className="mb-4 flex items-center justify-between">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{svc.label}</p>
+                    <svc.icon className="h-4 w-4 text-muted-foreground/50" />
+                  </div>
                   {healthLoading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Checking...
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Checking…
                     </div>
-                  ) : systemHealth?.services?.supabase ? (
+                  ) : svc.data ? (
                     <div className="space-y-2">
                       <div className="flex items-center gap-2">
-                        <div className={`h-3 w-3 rounded-full ${
-                          systemHealth.services.supabase.status === "connected" ? "bg-green-500" : "bg-red-500"
+                        <div className={`h-2.5 w-2.5 rounded-full ${
+                          String(svc.data.status) === "connected" ? "bg-emerald-500" :
+                          String(svc.data.status) === "not_configured" ? "bg-amber-500" : "bg-rose-500"
                         }`} />
-                        <span className="font-medium capitalize">{systemHealth.services.supabase.status}</span>
+                        <span className="text-sm font-semibold capitalize">{String(svc.data.status)}</span>
                       </div>
-                      {systemHealth.services.supabase.url && (
-                        <p className="text-xs text-muted-foreground truncate">{systemHealth.services.supabase.url}</p>
-                      )}
-                      {systemHealth.services.supabase.message && (
-                        <p className="text-xs text-red-400">{systemHealth.services.supabase.message}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Not checked yet</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* DataAPI */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">DataAPI Server</CardTitle>
-                  <Server className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  {healthLoading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Checking...
-                    </div>
-                  ) : systemHealth?.services?.dataapi ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className={`h-3 w-3 rounded-full ${
-                          systemHealth.services.dataapi.status === "connected" ? "bg-green-500" :
-                          systemHealth.services.dataapi.status === "not_configured" ? "bg-yellow-500" : "bg-red-500"
-                        }`} />
-                        <span className="font-medium capitalize">{systemHealth.services.dataapi.status}</span>
-                      </div>
-                      {systemHealth.services.dataapi.database !== undefined && (
-                        <p className="text-xs">
-                          Database: <Badge variant={systemHealth.services.dataapi.database ? "default" : "destructive"} className="text-xs">
-                            {systemHealth.services.dataapi.database ? "Connected" : "Disconnected"}
-                          </Badge>
+                      {svc.data.url && (
+                        <p className="truncate font-mono text-[11px] text-muted-foreground">
+                          {String(svc.data.url)}
                         </p>
                       )}
-                      {systemHealth.services.dataapi.url && (
-                        <p className="text-xs text-muted-foreground truncate">{systemHealth.services.dataapi.url}</p>
-                      )}
-                      {systemHealth.services.dataapi.message && (
-                        <p className="text-xs text-red-400">{systemHealth.services.dataapi.message}</p>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Not checked yet</p>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Backend */}
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium">Railway Backend</CardTitle>
-                  <Activity className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  {healthLoading ? (
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Checking...
-                    </div>
-                  ) : systemHealth?.services?.backend ? (
-                    <div className="space-y-2">
-                      <div className="flex items-center gap-2">
-                        <div className={`h-3 w-3 rounded-full ${
-                          systemHealth.services.backend.status === "connected" ? "bg-green-500" : "bg-red-500"
-                        }`} />
-                        <span className="font-medium capitalize">{systemHealth.services.backend.status}</span>
-                      </div>
-                      {systemHealth.services.backend.uptime_seconds && (
+                      {svc.data.uptime_seconds != null && (
                         <p className="text-xs text-muted-foreground">
-                          Uptime: {Math.round(systemHealth.services.backend.uptime_seconds / 60)}m
+                          Uptime: {Math.round(Number(svc.data.uptime_seconds) / 60)}m
                         </p>
+                      )}
+                      {svc.data.message && (
+                        <p className="text-xs text-rose-500">{String(svc.data.message)}</p>
                       )}
                     </div>
                   ) : (
-                    <p className="text-sm text-muted-foreground">Not checked yet</p>
+                    <p className="text-xs text-muted-foreground">No data — press Check health</p>
                   )}
-                </CardContent>
-              </Card>
+                </div>
+              ))}
             </div>
 
-            {/* DataAPI Dashboard Data */}
-            {systemHealth?.dataapi_dashboard && !systemHealth.dataapi_dashboard.error && (
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Engine API Info */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">DataAPI Info</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-2 text-sm">
-                    {systemHealth.dataapi_dashboard.api && (
-                      <>
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          <span className="text-muted-foreground">Name</span>
-                          <span className="font-medium break-words sm:text-right">{systemHealth.dataapi_dashboard.api.name}</span>
+            {/* DataAPI dashboard data */}
+            {systemHealth?.dataapi_dashboard && !(systemHealth.dataapi_dashboard as Record<string, unknown>).error && (() => {
+              const dash = systemHealth.dataapi_dashboard as Record<string, unknown>;
+              return (
+                <div className="grid gap-4 md:grid-cols-2">
+                  {/* API Info */}
+                  <Card className="rounded-2xl border-border/60">
+                    <CardHeader className="border-b border-border/40 pb-3">
+                      <CardTitle className="text-sm">DataAPI Info</CardTitle>
+                    </CardHeader>
+                    <CardContent className="divide-y divide-border/30 pt-0">
+                      {[
+                        { label: "Name", value: (dash.api as Record<string, string>)?.name },
+                        { label: "Version", value: (dash.api as Record<string, string>)?.version },
+                        { label: "Environment", value: (dash.api as Record<string, string>)?.environment },
+                        { label: "Active Tickers", value: String(dash.active_tickers ?? "—") },
+                      ].filter((r) => r.value).map((row) => (
+                        <div key={row.label} className="flex items-center justify-between py-2.5">
+                          <span className="text-xs text-muted-foreground">{row.label}</span>
+                          <span className="font-mono text-xs font-medium">{row.value}</span>
                         </div>
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          <span className="text-muted-foreground">Version</span>
-                          <span className="font-medium break-words sm:text-right">{systemHealth.dataapi_dashboard.api.version}</span>
-                        </div>
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          <span className="text-muted-foreground">Environment</span>
-                          <Badge variant="outline" className="w-fit">{systemHealth.dataapi_dashboard.api.environment}</Badge>
-                        </div>
-                      </>
-                    )}
-                    {systemHealth.dataapi_dashboard.database && (
-                      <>
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                          <span className="text-muted-foreground">DB Connected</span>
-                          <Badge variant={systemHealth.dataapi_dashboard.database.connected ? "default" : "destructive"} className="w-fit">
-                            {systemHealth.dataapi_dashboard.database.connected ? "Yes" : "No"}
+                      ))}
+                      {(dash.database as Record<string, unknown>)?.connected !== undefined && (
+                        <div className="flex items-center justify-between py-2.5">
+                          <span className="text-xs text-muted-foreground">DB Connected</span>
+                          <Badge variant={
+                            (dash.database as Record<string, boolean>).connected ? "default" : "destructive"
+                          } className="text-[10px]">
+                            {(dash.database as Record<string, boolean>).connected ? "Yes" : "No"}
                           </Badge>
                         </div>
-                        <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
-                          <span className="text-muted-foreground">DB URL</span>
-                          <span className="max-w-full break-all text-left text-xs font-mono sm:max-w-[200px] sm:text-right">{systemHealth.dataapi_dashboard.database.url_masked}</span>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* Table counts */}
+                  <Card className="rounded-2xl border-border/60">
+                    <CardHeader className="border-b border-border/40 pb-3">
+                      <CardTitle className="text-sm">Engine Database Tables</CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {(dash.tables as { table: string; row_count: number }[])?.length > 0 ? (
+                        <div className="max-h-48 overflow-y-auto">
+                          {(dash.tables as { table: string; row_count: number }[]).map((t) => (
+                            <div
+                              key={t.table}
+                              className="flex items-center justify-between border-b border-border/30 px-4 py-2 last:border-b-0 hover:bg-muted/20"
+                            >
+                              <span className="max-w-[180px] truncate font-mono text-xs">{t.table}</span>
+                              <span className="tabular-nums text-xs font-semibold">
+                                {t.row_count >= 0 ? t.row_count.toLocaleString() : "—"}
+                              </span>
+                            </div>
+                          ))}
                         </div>
-                      </>
-                    )}
-                    {systemHealth.dataapi_dashboard.active_tickers !== undefined && (
-                      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-                        <span className="text-muted-foreground">Active Tickers</span>
-                        <span className="font-medium sm:text-right">{systemHealth.dataapi_dashboard.active_tickers}</span>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Table Row Counts */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">Engine Database Tables</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {systemHealth.dataapi_dashboard.tables?.length > 0 ? (
-                      <div className="max-w-full overflow-x-auto">
-                        <Table className="min-w-[320px]">
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-xs">Table</TableHead>
-                            <TableHead className="text-xs text-right">Rows</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {systemHealth.dataapi_dashboard.tables.map((t: { table: string; row_count: number }) => (
-                            <TableRow key={t.table}>
-                              <TableCell className="max-w-[14rem] truncate text-xs font-mono">{t.table}</TableCell>
-                              <TableCell className="text-xs text-right">
-                                {t.row_count >= 0 ? t.row_count.toLocaleString() : (
-                                  <span className="text-red-400">N/A</span>
-                                )}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                        </Table>
-                      </div>
-                    ) : (
-                      <p className="text-sm text-muted-foreground">No table data</p>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Engine Workers */}
-                {systemHealth.dataapi_dashboard.engine_workers?.length > 0 && (
-                  <Card className="md:col-span-2">
-                    <CardHeader>
-                      <CardTitle className="text-sm">Engine Worker Heartbeats</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="max-w-full overflow-x-auto">
-                        <Table className="min-w-[560px]">
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-xs">Worker</TableHead>
-                            <TableHead className="text-xs">Status</TableHead>
-                            <TableHead className="text-xs">Last Heartbeat</TableHead>
-                            <TableHead className="text-xs">Ago</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {systemHealth.dataapi_dashboard.engine_workers.map(
-                            (w: { worker_name: string; status: string; last_heartbeat: string | null; seconds_ago: number | null }) => (
-                            <TableRow key={w.worker_name}>
-                              <TableCell className="max-w-[14rem] truncate text-xs font-mono">{w.worker_name}</TableCell>
-                              <TableCell>
-                                <Badge variant={w.status === "running" ? "default" : "secondary"} className="text-xs">
-                                  {w.status}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-xs text-muted-foreground">{w.last_heartbeat || "—"}</TableCell>
-                              <TableCell className="text-xs">
-                                {w.seconds_ago !== null ? (
-                                  w.seconds_ago < 60 ? `${w.seconds_ago}s` : `${Math.round(w.seconds_ago / 60)}m`
-                                ) : "—"}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                        </Table>
-                      </div>
+                      ) : (
+                        <p className="px-4 py-6 text-xs text-muted-foreground">No table data</p>
+                      )}
                     </CardContent>
                   </Card>
-                )}
 
-                {/* Service Clients */}
-                {systemHealth.dataapi_dashboard.service_clients?.length > 0 && (
-                  <Card className="md:col-span-2">
-                    <CardHeader>
-                      <CardTitle className="text-sm">Service Clients (IAM)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="max-w-full overflow-x-auto">
+                  {/* Engine workers */}
+                  {(dash.engine_workers as unknown[])?.length > 0 && (
+                    <Card className="rounded-2xl border-border/60 md:col-span-2">
+                      <CardHeader className="border-b border-border/40 pb-3">
+                        <CardTitle className="text-sm">Engine Worker Heartbeats</CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0 overflow-x-auto">
                         <Table className="min-w-[560px]">
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-xs">Client ID</TableHead>
-                            <TableHead className="text-xs">Name</TableHead>
-                            <TableHead className="text-xs">Active</TableHead>
-                            <TableHead className="text-xs">Scopes</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {systemHealth.dataapi_dashboard.service_clients.map(
-                            (c: { client_id: string; display_name: string | null; is_active: boolean; scope_count: number }) => (
-                            <TableRow key={c.client_id}>
-                              <TableCell className="max-w-[14rem] truncate text-xs font-mono">{c.client_id}</TableCell>
-                              <TableCell className="text-xs">{c.display_name || "—"}</TableCell>
-                              <TableCell>
-                                <Badge variant={c.is_active ? "default" : "destructive"} className="text-xs">
-                                  {c.is_active ? "Yes" : "No"}
-                                </Badge>
-                              </TableCell>
-                              <TableCell className="text-xs">{c.scope_count}</TableCell>
+                          <TableHeader>
+                            <TableRow className="bg-muted/20 hover:bg-muted/20">
+                              <TableHead className="pl-4 text-[10px] font-semibold uppercase tracking-wider">Worker</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider">Status</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider">Last Heartbeat</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider">Ago</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
+                          </TableHeader>
+                          <TableBody>
+                            {(dash.engine_workers as { worker_name: string; status: string; last_heartbeat: string | null; seconds_ago: number | null }[]).map((w) => (
+                              <TableRow key={w.worker_name} className="border-b border-border/30">
+                                <TableCell className="py-2.5 pl-4 font-mono text-xs">{w.worker_name}</TableCell>
+                                <TableCell className="py-2.5">
+                                  <Badge variant={w.status === "running" ? "default" : "secondary"} className="text-[10px]">
+                                    {w.status}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="py-2.5 text-xs text-muted-foreground">{w.last_heartbeat || "—"}</TableCell>
+                                <TableCell className="py-2.5 text-xs tabular-nums">
+                                  {w.seconds_ago != null
+                                    ? w.seconds_ago < 60 ? `${w.seconds_ago}s` : `${Math.round(w.seconds_ago / 60)}m`
+                                    : "—"}
+                                </TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
                         </Table>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
-              </div>
-            )}
+                      </CardContent>
+                    </Card>
+                  )}
 
-            {/* Orphaned Auth User Cleanup */}
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  {/* Service clients */}
+                  {(dash.service_clients as unknown[])?.length > 0 && (
+                    <Card className="rounded-2xl border-border/60 md:col-span-2">
+                      <CardHeader className="border-b border-border/40 pb-3">
+                        <CardTitle className="text-sm">Service Clients (IAM)</CardTitle>
+                      </CardHeader>
+                      <CardContent className="p-0 overflow-x-auto">
+                        <Table className="min-w-[560px]">
+                          <TableHeader>
+                            <TableRow className="bg-muted/20 hover:bg-muted/20">
+                              <TableHead className="pl-4 text-[10px] font-semibold uppercase tracking-wider">Client ID</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider">Name</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider">Active</TableHead>
+                              <TableHead className="text-[10px] font-semibold uppercase tracking-wider">Scopes</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(dash.service_clients as { client_id: string; display_name: string | null; is_active: boolean; scope_count: number }[]).map((c) => (
+                              <TableRow key={c.client_id} className="border-b border-border/30">
+                                <TableCell className="py-2.5 pl-4 font-mono text-xs">{c.client_id}</TableCell>
+                                <TableCell className="py-2.5 text-xs">{c.display_name || "—"}</TableCell>
+                                <TableCell className="py-2.5">
+                                  <Badge variant={c.is_active ? "default" : "destructive"} className="text-[10px]">
+                                    {c.is_active ? "Active" : "Inactive"}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="py-2.5 text-xs tabular-nums">{c.scope_count}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </CardContent>
+                    </Card>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Orphaned auth cleanup */}
+            <Card className="rounded-2xl border-border/60">
+              <CardHeader className="pb-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <CardTitle className="text-sm">Orphaned Auth User Cleanup</CardTitle>
-                    <CardDescription className="mt-1">
-                      Removes Supabase Auth records that have no matching profile row. These are left over from earlier deletions and permanently block those email addresses from being reused.
+                    <CardTitle className="text-sm">Orphaned Auth Cleanup</CardTitle>
+                    <CardDescription className="mt-1 text-xs">
+                      Removes Supabase Auth records with no matching profile row. These block email re-registration.
                     </CardDescription>
                   </div>
                   <Button
-                    type="button"
                     variant="destructive"
                     size="sm"
-                    className="w-full gap-2 rounded-xl sm:w-auto"
+                    className="gap-2 rounded-lg"
                     disabled={purgeLoading || !BACKEND_URL}
                     onClick={() => void purgeOrphanedAuthUsers()}
                   >
-                    {purgeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    {purgeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                     {purgeLoading ? "Purging…" : "Purge orphaned accounts"}
                   </Button>
                 </div>
               </CardHeader>
               {purgeResult && (
-                <CardContent>
+                <CardContent className="border-t border-border/40 pt-4">
                   <p className="text-sm">
-                    <span className="font-medium text-green-600 dark:text-green-400">{purgeResult.deleted} deleted</span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      {purgeResult.deleted} deleted
+                    </span>
                     {purgeResult.failed > 0 && (
-                      <span className="ml-2 text-destructive">{purgeResult.failed} failed</span>
+                      <span className="ml-2 text-rose-500">{purgeResult.failed} failed</span>
                     )}
                     {purgeResult.deleted === 0 && purgeResult.failed === 0 && (
-                      <span className="text-muted-foreground ml-1">— no orphaned records found</span>
+                      <span className="ml-1 text-muted-foreground">— no orphaned records found</span>
                     )}
                   </p>
                 </CardContent>
               )}
             </Card>
 
-            {/* Database Query Console */}
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <Terminal className="h-4 w-4" />
-                      Engine Database Query Console
-                    </CardTitle>
-                    <CardDescription>
-                      Run read-only SELECT queries against the engine database via DataAPI
-                    </CardDescription>
-                  </div>
-                </div>
+            {/* Query console */}
+            <Card className="rounded-2xl border-border/60">
+              <CardHeader className="border-b border-border/40 pb-4">
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Terminal className="h-4 w-4 text-primary" />
+                  Engine Database Query Console
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Read-only SELECT queries against the engine database via DataAPI
+                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Preset Query Buttons */}
+              <CardContent className="space-y-4 pt-4">
+                {/* Preset buttons */}
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT ticker, company_name, is_active FROM tickers ORDER BY ticker LIMIT 50")}>
-                    All Tickers
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT t.ticker, ls.last_price, ls.price_change_pct, ls.rsi_14, ls.updated_at FROM latest_snapshot ls JOIN tickers t ON t.ticker_id = ls.ticker_id ORDER BY ls.updated_at DESC LIMIT 25")}>
-                    Latest Prices
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT t.ticker, ls.latest_signal, ls.signal_confidence, ls.signal_strategy, ls.signal_ts FROM latest_snapshot ls JOIN tickers t ON t.ticker_id = ls.ticker_id WHERE ls.latest_signal IS NOT NULL ORDER BY ls.signal_ts DESC LIMIT 25")}>
-                    Latest Signals
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT * FROM paper_trades ORDER BY created_at DESC LIMIT 20")}>
-                    Recent Trades
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT * FROM portfolio_valuation ORDER BY valuation_date DESC LIMIT 5")}>
-                    Portfolio
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => runQuery("SELECT * FROM market_news ORDER BY published_at DESC LIMIT 15")}>
-                    Market News
-                  </Button>
+                  {[
+                    { label: "All Tickers", sql: "SELECT ticker, company_name, is_active FROM tickers ORDER BY ticker LIMIT 50" },
+                    { label: "Latest Prices", sql: "SELECT t.ticker, ls.last_price, ls.price_change_pct, ls.rsi_14, ls.updated_at FROM latest_snapshot ls JOIN tickers t ON t.ticker_id = ls.ticker_id ORDER BY ls.updated_at DESC LIMIT 25" },
+                    { label: "Latest Signals", sql: "SELECT t.ticker, ls.latest_signal, ls.signal_confidence, ls.signal_strategy, ls.signal_ts FROM latest_snapshot ls JOIN tickers t ON t.ticker_id = ls.ticker_id WHERE ls.latest_signal IS NOT NULL ORDER BY ls.signal_ts DESC LIMIT 25" },
+                    { label: "Recent Trades", sql: "SELECT * FROM paper_trades ORDER BY created_at DESC LIMIT 20" },
+                    { label: "Portfolio", sql: "SELECT * FROM portfolio_valuation ORDER BY valuation_date DESC LIMIT 5" },
+                    { label: "Market News", sql: "SELECT * FROM market_news ORDER BY published_at DESC LIMIT 15" },
+                  ].map((preset) => (
+                    <Button
+                      key={preset.label}
+                      variant="outline"
+                      size="sm"
+                      className="h-7 rounded-lg px-3 text-xs"
+                      onClick={() => runQuery(preset.sql)}
+                    >
+                      {preset.label}
+                    </Button>
+                  ))}
                 </div>
 
-                {/* Custom Query Input */}
+                {/* Custom query */}
                 <div className="space-y-2">
-                    <Textarea
-                      placeholder="SELECT * FROM tickers WHERE is_active = true LIMIT 10"
-                      value={queryInput}
-                      onChange={(e) => setQueryInput(e.target.value)}
-                      className="min-h-[80px] font-mono text-xs sm:text-sm"
-                    />
-                  <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center">
-                    <Button onClick={() => runQuery()} disabled={queryLoading || !queryInput.trim()} size="sm" className="w-full gap-2 sm:w-auto">
-                      {queryLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                      Execute Query
+                  <Textarea
+                    placeholder="SELECT * FROM tickers WHERE is_active = true LIMIT 10"
+                    value={queryInput}
+                    onChange={(e) => setQueryInput(e.target.value)}
+                    className="min-h-[80px] rounded-xl border-border/70 font-mono text-xs"
+                  />
+                  <div className="flex items-center gap-3">
+                    <Button
+                      onClick={() => runQuery()}
+                      disabled={queryLoading || !queryInput.trim()}
+                      size="sm"
+                      className="gap-2 rounded-lg"
+                    >
+                      {queryLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                      Execute
                     </Button>
                     {queryResults && (
-                      <span className="text-xs text-muted-foreground">
-                        {queryResults.row_count} rows returned
+                      <span className="text-xs text-muted-foreground tabular-nums">
+                        {String(queryResults.row_count)} rows
                       </span>
                     )}
                   </div>
                 </div>
 
-                {/* Query Error */}
+                {/* Error */}
                 {queryError && (
-                  <div className="rounded-lg border border-red-500/50 bg-red-500/5 p-3">
-                    <p className="text-sm text-red-400">{queryError}</p>
+                  <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 px-4 py-3">
+                    <p className="font-mono text-xs text-rose-500">{queryError}</p>
                   </div>
                 )}
 
-                {/* Query Results Table */}
-                {queryResults?.rows?.length > 0 && (
-                  <div className="max-h-[400px] max-w-full overflow-auto rounded-lg border">
+                {/* Results table */}
+                {(queryResults?.rows as unknown[])?.length > 0 && (
+                  <div className="max-h-[400px] overflow-auto rounded-xl border border-border/60">
                     <Table className="min-w-max">
                       <TableHeader>
-                        <TableRow>
-                          {Object.keys(queryResults.rows[0]).map((col) => (
-                            <TableHead key={col} className="text-xs whitespace-nowrap">{col}</TableHead>
+                        <TableRow className="bg-muted/30 hover:bg-muted/30">
+                          {Object.keys((queryResults!.rows as Record<string, unknown>[])[0]).map((col) => (
+                            <TableHead key={col} className="whitespace-nowrap text-[10px] font-semibold uppercase tracking-wider">
+                              {col}
+                            </TableHead>
                           ))}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {queryResults.rows.map((row: Record<string, string | null>, idx: number) => (
-                          <TableRow key={idx}>
+                        {(queryResults!.rows as Record<string, string | null>[]).map((row, idx) => (
+                          <TableRow key={idx} className="border-b border-border/30 hover:bg-muted/20">
                             {Object.values(row).map((val, ci) => (
-                              <TableCell key={ci} className="max-w-[160px] truncate align-top text-xs sm:max-w-[200px]">
-                                {val !== null ? String(val) : <span className="text-muted-foreground">null</span>}
+                              <TableCell key={ci} className="max-w-[180px] truncate py-2 align-top font-mono text-xs">
+                                {val !== null ? String(val) : <span className="text-muted-foreground/50">null</span>}
                               </TableCell>
                             ))}
                           </TableRow>
@@ -1782,6 +1696,7 @@ export default function Admin() {
                 )}
               </CardContent>
             </Card>
+
           </TabsContent>
         </Tabs>
       </div>
