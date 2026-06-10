@@ -188,7 +188,7 @@ export const tradeEngineApi = {
         `/api/news?${params}`,
         { skipRetry: true },
       );
-      if (data.items && data.items.length === 0 && data.message) {
+      if (data.items && data.items.length === 0 && data.message && import.meta.env.DEV) {
         console.log('Backend news endpoint is a stub, using Supabase instead');
       }
       return data;
@@ -243,10 +243,12 @@ export const tradeEngineApi = {
 
       return await apiClient.get<TradeEngineAIContext>(`/api/v1/ai/context?${params}`, { skipRetry: true });
     } catch (error) {
-      if (error instanceof ApiError) {
-        console.log('[TradeEngine] AI context endpoint not available, using Supabase fallback');
-      } else {
-        console.log('[TradeEngine] AI context fetch failed, using Supabase fallback:', error);
+      if (import.meta.env.DEV) {
+        if (error instanceof ApiError) {
+          console.log('[TradeEngine] AI context endpoint not available, using Supabase fallback');
+        } else {
+          console.log('[TradeEngine] AI context fetch failed, using Supabase fallback:', error);
+        }
       }
       return null;
     }
@@ -264,10 +266,12 @@ export const tradeEngineApi = {
 
       return await apiClient.get<TradeEngineSignal[]>(`/api/v1/ai/signals?${params}`, { skipRetry: true });
     } catch (error) {
-      if (error instanceof ApiError) {
-        console.log('[TradeEngine] Signals endpoint not available');
-      } else {
-        console.log('[TradeEngine] Signals fetch failed:', error);
+      if (import.meta.env.DEV) {
+        if (error instanceof ApiError) {
+          console.log('[TradeEngine] Signals endpoint not available');
+        } else {
+          console.log('[TradeEngine] Signals fetch failed:', error);
+        }
       }
       return [];
     }

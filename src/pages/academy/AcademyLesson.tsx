@@ -340,8 +340,9 @@ function LessonSidebar({
                       key={lesson.id}
                       disabled={isLocked}
                       onClick={() => !isLocked && onNavigate(lesson.slug)}
+                      aria-current={isCurrent ? "page" : undefined}
                       className={cn(
-                        "flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors",
+                        "flex items-center gap-2 w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                         isCurrent
                           ? "bg-primary/10 text-primary font-medium"
                           : isLocked

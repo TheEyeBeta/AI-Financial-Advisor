@@ -282,7 +282,11 @@ const ChatHistory = () => {
  
                           <div className="min-w-0 flex-1">
                             {editingChatId === chat.id ? (
-                              <div className="flex items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                              <div
+                                className="flex items-center gap-2"
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
+                              >
                                 <Input
                                   value={editTitle}
                                   onChange={(event) => setEditTitle(event.target.value)}

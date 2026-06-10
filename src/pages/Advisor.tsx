@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import { formatDistanceToNow, isToday, isYesterday, parseISO } from "date-fns";
-import { Clock3, History, Info, Plus, X } from "lucide-react";
+import { Clock3, History, Info, Loader2, Plus, X } from "lucide-react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 import { ChatInterface } from "@/components/advisor/ChatInterface";
@@ -390,6 +390,7 @@ const Advisor = () => {
                   onChange={setComposerValue}
                   onSubmit={() => void handleComposerSubmit()}
                   disabled={isLoading}
+                  pending={sendMessageMutation.isPending || createChatMutation.isPending}
                   placeholder="Ask anything..."
                   helperText="Enter to send. Shift+Enter for a new line."
                   ariaLabel="Ask IRIS a finance question"
@@ -501,11 +502,12 @@ const Advisor = () => {
                     value={composerValue}
                     onChange={setComposerValue}
                     onSubmit={() => void handleComposerSubmit()}
-                  disabled={isLoading}
-                  placeholder="Ask a follow-up..."
-                  helperText="Enter to send. Shift+Enter for a new line."
-                  ariaLabel="Ask IRIS a follow-up finance question"
-                />
+                    disabled={isLoading}
+                    pending={sendMessageMutation.isPending || createChatMutation.isPending}
+                    placeholder="Ask a follow-up..."
+                    helperText="Enter to send. Shift+Enter for a new line."
+                    ariaLabel="Ask IRIS a follow-up finance question"
+                  />
               </div>
             </div>
           </>
@@ -521,6 +523,7 @@ interface AdvisorComposerProps {
   onChange: (value: string) => void;
   onSubmit: () => void;
   disabled: boolean;
+  pending: boolean;
   placeholder: string;
   helperText: string;
   ariaLabel: string;
@@ -532,6 +535,7 @@ const AdvisorComposer = ({
   onChange,
   onSubmit,
   disabled,
+  pending,
   placeholder,
   helperText,
   ariaLabel,
@@ -563,7 +567,14 @@ const AdvisorComposer = ({
           disabled={disabled || value.trim().length === 0}
           className="rounded-full px-5"
         >
-          Send
+          {pending ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Sending
+            </>
+          ) : (
+            "Send"
+          )}
         </Button>
       </div>
     </div>
