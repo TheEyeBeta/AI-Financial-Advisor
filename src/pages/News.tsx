@@ -634,6 +634,10 @@ const News = () => {
                 </Button>
               </div>
             )}
+
+            <p className="pt-2 text-xs text-muted-foreground/80">
+              News is aggregated for educational context only — not personalised investment advice.
+            </p>
           </>
         )}
       </div>

@@ -2206,7 +2206,7 @@ async def meridian_onboard(
 
 
 class MeridianRefreshRequest(BaseModel):
-    user_id: str
+    user_id: str = Field(min_length=1, max_length=64)
 
 
 @router.post("/api/meridian/refresh-context")
@@ -2223,7 +2223,7 @@ async def meridian_refresh_context(
         return {"success": True}
     except Exception as exc:
         logger.exception("Meridian context refresh failed for user_id=%s: %s", auth_user.auth_id, exc)
-        return {"success": False, "error": str(exc)}
+        return {"success": False, "error": "Context refresh failed. Please try again."}
 
 
 @router.post("/api/meridian/refresh-all")
@@ -3042,7 +3042,7 @@ async def chat_completion(
             await audit_log(
                 "chat_reasoning_retry",
                 {
-                    "user_id": request.user_id,
+                    "user_id": verified_user_id,
                     "initial_reasoning_effort": reasoning_effort,
                     "retry_reasoning_effort": "low",
                     "initial_max_output_tokens": payload["max_output_tokens"],

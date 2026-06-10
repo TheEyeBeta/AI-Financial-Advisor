@@ -87,7 +87,9 @@ def test_meridian_refresh_context_exception_returns_failure(monkeypatch):
         )
     assert resp.status_code == 200
     assert resp.json()["success"] is False
-    assert "cache fail" in resp.json()["error"]
+    # Internal exception details must not leak to the client.
+    assert "cache fail" not in resp.json()["error"]
+    assert resp.json()["error"] == "Context refresh failed. Please try again."
 
 
 # ── meridian_refresh_all missing/invalid cron secret (lines 1995, 1998) ──────

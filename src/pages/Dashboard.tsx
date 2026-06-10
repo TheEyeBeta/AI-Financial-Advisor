@@ -154,6 +154,10 @@ const Dashboard = () => {
             <TradeHistory trades={closedTrades} isLoading={isLoading} />
           </div>
         </div>
+
+        <p className="text-xs text-muted-foreground/80">
+          Paper trading and analytics are provided for educational purposes only — not personalised investment advice.
+        </p>
       </div>
     </AppLayout>
   );
