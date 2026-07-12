@@ -36,24 +36,27 @@ for _env_path in _env_paths:
         load_dotenv(_env_path)
         break
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
 
+from .health_checks import assess_readiness, liveness_payload, mark_startup_complete
 from .routes.admin import router as admin_router
 from .routes.ai_proxy import router as ai_proxy_router
-from .routes.search import check_search_provider, router as search_router
+from .routes.search import router as search_router
 from .routes.news import router as news_router
 from .routes.trade_engine import router as trade_engine_router
 from .routes.stock_ranking import router as stock_ranking_router
+from .scheduler_config import (
+    create_scheduler,
+    is_primary_worker,
+    run_startup_background_tasks,
+    scheduler_enabled,
+)
 from .services.auth import validate_auth_configuration
-from .services.intelligence_engine import run_intelligence_cycle
-from .services.job_logger import log_job_run
-from .services.memory_agent import run_history_scan, run_memory_extraction_cycle
-from .services.ranking_engine import run_ranking_cycle
+from .services.rate_limit import validate_rate_limit_configuration
 
 logger = logging.getLogger(__name__)
 
@@ -78,254 +81,43 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-async def _run_scheduled_cycle() -> None:
-    """Scheduler callback: run one intelligence cycle and log the summary."""
-    started_at = datetime.now(timezone.utc)
-    try:
-        summary = await run_intelligence_cycle()
-        skipped = summary.get("skipped", False)
-        logger.info(
-            "Scheduled intelligence cycle: users_processed=%s digests_generated=%s errors=%s%s",
-            summary.get("users_processed", 0),
-            summary.get("digests_generated", 0),
-            len(summary.get("errors", [])),
-            " [skipped — previous cycle still running]" if skipped else "",
-        )
-        await log_job_run(
-            job_name="intelligence_engine",
-            started_at=started_at,
-            status="skipped" if skipped else "success",
-            records_processed=summary.get("users_processed", 0),
-            raw_output=summary,
-        )
-    except Exception as exc:
-        # Belt-and-suspenders: run_intelligence_cycle() never raises, but if it
-        # ever does we must not let APScheduler swallow the exception silently.
-        logger.error(
-            "Scheduled intelligence cycle raised an unexpected exception: %s",
-            type(exc).__name__,
-        )
-        await log_job_run(
-            job_name="intelligence_engine",
-            started_at=started_at,
-            status="error",
-            error=type(exc).__name__,
-        )
-
-
-async def _run_scheduled_memory_extraction() -> None:
-    """Scheduler callback: run one memory extraction cycle and log the summary."""
-    started_at = datetime.now(timezone.utc)
-    try:
-        summary = await run_memory_extraction_cycle()
-        skipped = summary.get("skipped", False)
-        if skipped:
-            logger.info("Scheduled memory extraction: skipped — previous cycle still running")
-        else:
-            logger.info(
-                "Scheduled memory extraction: chats_processed=%s insights=%s errors=%s",
-                summary.get("chats_processed", 0),
-                summary.get("total_insights_extracted", 0),
-                len(summary.get("errors", [])),
-            )
-        await log_job_run(
-            job_name="memory_extraction",
-            started_at=started_at,
-            status="skipped" if skipped else "success",
-            records_processed=summary.get("chats_processed", 0),
-            raw_output=summary,
-        )
-    except Exception as exc:
-        logger.error(
-            "Scheduled memory extraction raised an unexpected exception: %s",
-            type(exc).__name__,
-        )
-        await log_job_run(
-            job_name="memory_extraction",
-            started_at=started_at,
-            status="error",
-            error=type(exc).__name__,
-        )
-
-
-async def _run_scheduled_ranking_cycle() -> None:
-    """Scheduler callback: run one ranking cycle and log the summary."""
-    started_at = datetime.now(timezone.utc)
-    try:
-        summary = await run_ranking_cycle()
-        skipped = summary.get("skipped", False)
-        if skipped:
-            logger.info("Scheduled ranking cycle: skipped — previous cycle still running")
-        else:
-            logger.info(
-                "Scheduled ranking cycle: tickers_scored=%s tickers_failed=%s "
-                "top_50_written=%s duration=%.1fs",
-                summary.get("tickers_scored", 0),
-                summary.get("tickers_failed", 0),
-                summary.get("top_50_written", 0),
-                summary.get("cycle_duration_seconds", 0.0),
-            )
-        await log_job_run(
-            job_name="ranking_engine",
-            started_at=started_at,
-            status="skipped" if skipped else "success",
-            records_processed=summary.get("tickers_scored", 0),
-            raw_output=summary,
-        )
-    except Exception as exc:
-        logger.error(
-            "Scheduled ranking cycle raised an unexpected exception: %s",
-            type(exc).__name__,
-        )
-        await log_job_run(
-            job_name="ranking_engine",
-            started_at=started_at,
-            status="error",
-            error=type(exc).__name__,
-        )
-
-
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    """Start schedulers on startup; shut them down on shutdown."""
+    """Web process lifecycle — scheduler runs only when SCHEDULER_ENABLED=true."""
     logger.info("STARTUP: lifespan startup block reached, pid=%s", os.getpid())
 
-    scheduler = AsyncIOScheduler()
-
-    # Intelligence digest cycle — every 6 hours
-    scheduler.add_job(
-        _run_scheduled_cycle,
-        trigger="interval",
-        hours=6,
-        id="intelligence_cycle",
-        replace_existing=True,
-        # Allow up to 1 hour of lateness before skipping a missed execution.
-        misfire_grace_time=3600,
-    )
-
-    # Stock ranking cycle — daily at 01:00 UTC
-    # Runs after market close and before pg_cron cleanup at 02:00 UTC.
-    scheduler.add_job(
-        _run_scheduled_ranking_cycle,
-        trigger="cron",
-        hour=1,
-        minute=0,
-        timezone="UTC",
-        id="ranking_cycle",
-        replace_existing=True,
-        # Allow up to 30 minutes of lateness before skipping.
-        misfire_grace_time=1800,
-    )
-
-    # Memory extraction cycle — every 15 minutes
-    scheduler.add_job(
-        _run_scheduled_memory_extraction,
-        trigger="interval",
-        minutes=15,
-        id="memory_extraction",
-        replace_existing=True,
-        misfire_grace_time=300,
-    )
-
-    scheduler.start()
-    logger.info(
-        "Schedulers started (intelligence=6h interval, ranking=daily 01:00 UTC, "
-        "memory_extraction=15m interval)"
-    )
-
-    # Gate startup background jobs to a single worker process. Railway runs
-    # multiple uvicorn workers; without this guard each worker would trigger
-    # its own ranking + memory scan, causing N simultaneous duplicate runs.
-    import os as _os
-    _own_pid = -1
-    _parent_pid = -1
-    try:
-        _own_pid = _os.getpid()
-        _parent_pid = _os.getppid()
-        _is_primary_worker = (_own_pid == _parent_pid + 1)
-    except Exception:
-        _is_primary_worker = True  # safe fallback — allow startup
-
-    logger.info(
-        "STARTUP: pid=%d ppid=%d is_primary=%s",
-        _own_pid, _parent_pid, _is_primary_worker,
-    )
-
-    import asyncio as _asyncio
-
-    if _is_primary_worker:
-        # Fire-and-forget: populate market.trending_stocks immediately on startup
-        # if the data is stale (>2 h old) or missing.  Querying Supabase directly
-        # means this logic is safe across multiple uvicorn worker processes — each
-        # worker checks the shared DB state rather than a per-process boolean flag.
-        from .services.supabase_client import supabase_client as _supabase_client
-
-        def _get_last_ranked_at():
-            result = (
-                _supabase_client.schema("market")
-                .table("trending_stocks")
-                .select("ranked_at")
-                .order("ranked_at", desc=True)
-                .limit(1)
-                .execute()
-            )
-            if result.data:
-                return result.data[0].get("ranked_at")
-            return None
-
-        try:
-            logger.info("STARTUP: Checking last ranking timestamp...")
-            _last_ranked_at_raw = await _asyncio.to_thread(_get_last_ranked_at)
-            logger.info("STARTUP: Last ranked at: %s", _last_ranked_at_raw)
-
-            _now = datetime.now(timezone.utc)
-            if _last_ranked_at_raw is not None:
-                if isinstance(_last_ranked_at_raw, str):
-                    _ranked_at_dt = datetime.fromisoformat(
-                        _last_ranked_at_raw.replace("Z", "+00:00")
-                    )
-                else:
-                    _ranked_at_dt = _last_ranked_at_raw
-            else:
-                _ranked_at_dt = None
-
-            if _ranked_at_dt is None or (_now - _ranked_at_dt).total_seconds() >= 90000:
-                logger.info("STARTUP: Triggering ranking cycle...")
-                _asyncio.create_task(_run_scheduled_ranking_cycle())
-                logger.info("STARTUP: Ranking cycle task created")
-            else:
-                _minutes_ago = int((_now - _ranked_at_dt).total_seconds() / 60)
-                logger.info("STARTUP: Ranking cycle skipped - ranked %s minutes ago", _minutes_ago)
-        except Exception as e:
-            logger.error("STARTUP: Ranking check failed: %s", e, exc_info=True)
-            logger.info("STARTUP: Triggering ranking cycle as fallback")
-            _asyncio.create_task(_run_scheduled_ranking_cycle())
-
-        # Bootstrap: if meridian.user_insights has fewer than 10 rows, run a
-        # history scan in the background so the system is useful on first deploy.
-        from .services.memory_agent import _count_user_insights_sync as _count_insights
-
-        try:
-            _insight_count = await _asyncio.to_thread(_count_insights)
-            logger.info("STARTUP: meridian.user_insights row count (capped at 11): %d", _insight_count)
-            if _insight_count < 10:
-                logger.info("STARTUP: fewer than 10 insights found — triggering history scan (limit=50)")
-                _asyncio.create_task(run_history_scan(limit=50))
-        except Exception as _e:
-            logger.warning("STARTUP: insight bootstrap check failed: %s", _e)
+    scheduler = None
+    if scheduler_enabled():
+        scheduler = create_scheduler()
+        scheduler.start()
+        logger.info(
+            "Schedulers started in this process (SCHEDULER_ENABLED=true; "
+            "intelligence=6h, ranking=01:00 UTC, memory=15m)"
+        )
     else:
         logger.info(
-            "STARTUP: Skipping ranking + memory scan triggers — not primary worker "
+            "Schedulers disabled in this web worker. "
+            "Run `python run_scheduler.py` on a single dedicated replica."
+        )
+
+    if is_primary_worker() and not scheduler_enabled():
+        await run_startup_background_tasks()
+    elif not is_primary_worker():
+        logger.info(
+            "STARTUP: skipping one-shot startup tasks — not primary worker "
             "(RAILWAY_REPLICA_ID=%s, WEB_CONCURRENCY=%s)",
             os.environ.get("RAILWAY_REPLICA_ID"),
             os.environ.get("WEB_CONCURRENCY"),
         )
 
+    mark_startup_complete()
+
     try:
         yield
     finally:
-        scheduler.shutdown(wait=False)
-        logger.info("Schedulers shut down")
+        if scheduler is not None:
+            scheduler.shutdown(wait=True)
+            logger.info("Schedulers shut down")
 
 
 def create_app() -> FastAPI:
@@ -344,6 +136,7 @@ def create_app() -> FastAPI:
     - Point your AI orchestration logic at /api/search on this service.
     """
     validate_auth_configuration()
+    validate_rate_limit_configuration()
 
     app = FastAPI(
         title="AI Financial Advisor - Web Search Service",
@@ -460,24 +253,14 @@ def create_app() -> FastAPI:
 
     @app.get("/health/live")
     async def liveness_check() -> dict[str, str]:
-        return {"status": "alive"}
+        return liveness_payload()
 
     @app.get("/health/ready")
     async def readiness_check() -> dict[str, object]:
-        dependency = await check_search_provider()
-        if dependency.get("status") != "connected":
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "status": "not_ready",
-                    "dependencies": {"search_api": dependency},
-                },
-            )
-
-        return {
-            "status": "ready",
-            "dependencies": {"search_api": dependency},
-        }
+        report = await assess_readiness()
+        if not report.get("ready"):
+            raise HTTPException(status_code=503, detail=report)
+        return report
 
     # Mount routers
     app.include_router(search_router, prefix="")

@@ -40,6 +40,13 @@ from ..services.orphan_user_cleanup import (
     create_dry_run_snapshot,
     execute_snapshot,
 )
+from ..services.user_account_lifecycle import (
+    AdminCaller,
+    UserLifecycleError,
+    create_delete_request,
+    execute_delete_request,
+    suspend_user_account,
+)
 from ..services.ranking_engine import run_ranking_cycle
 
 logger = logging.getLogger(__name__)
@@ -159,6 +166,65 @@ async def _require_admin(request: Request) -> str:
 
     logger.info("Admin access granted to %s", user_email)
     return user_email
+
+
+async def _require_admin_caller(request: Request) -> AdminCaller:
+    """Return structured admin identity for destructive lifecycle operations."""
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    if not auth_header.lower().startswith("bearer "):
+        raise HTTPException(status_code=401, detail="Missing authentication.")
+
+    token = auth_header[7:].strip()
+    jwt_iat: int | None = None
+    if token:
+        try:
+            import jwt as pyjwt
+
+            payload = pyjwt.decode(token, options={"verify_signature": False})
+            raw_iat = payload.get("iat")
+            if isinstance(raw_iat, (int, float)):
+                jwt_iat = int(raw_iat)
+        except Exception:
+            jwt_iat = None
+
+    principal = await _require_admin(request)
+    if principal == "service-role":
+        return AdminCaller(
+            principal=principal,
+            auth_user_id=None,
+            email=None,
+            jwt_iat=jwt_iat,
+            is_service_role=True,
+        )
+
+    supabase_url = get_backend_supabase_url()
+    supabase_key = get_backend_service_role_key()
+    if not supabase_url or not supabase_key:
+        raise HTTPException(status_code=503, detail="Supabase not configured on backend")
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as http:
+            resp = await http.get(
+                f"{supabase_url}/auth/v1/user",
+                headers={
+                    "apikey": supabase_key,
+                    "Authorization": f"Bearer {token}",
+                },
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="Failed to resolve admin identity") from exc
+
+    if resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+    user_data = resp.json()
+    return AdminCaller(
+        principal=principal,
+        auth_user_id=user_data.get("id"),
+        email=user_data.get("email"),
+        jwt_iat=jwt_iat,
+        is_service_role=False,
+    )
 
 
 async def _get_admin_token() -> tuple[str, str]:
@@ -293,35 +359,95 @@ async def dataapi_query(
 
 @router.delete("/api/admin/users/{auth_id}")
 async def delete_user(auth_id: str, admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Permanently delete a user from Supabase Auth and all downstream tables.
+    """Deprecated immediate delete — use suspend then delete-request/execute."""
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Immediate user deletion is disabled. "
+            "POST /api/admin/users/{auth_id}/suspend, then "
+            "/delete-request and /delete-execute with typed confirmation."
+        ),
+    )
 
-    Deletes the auth.users record via the Supabase Admin API.  The ON DELETE
-    CASCADE constraints on core.users (and its children) handle the rest, so
-    the email is fully released and can be reused for a new account.
-    """
+
+class SuspendUserRequest(BaseModel):
+    confirmation_email: str = Field(min_length=3)
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class DeleteExecuteRequest(BaseModel):
+    snapshot_id: str = Field(min_length=1)
+    confirmation_token: str = Field(min_length=1)
+    confirmation_email: str = Field(min_length=3)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+@router.post("/api/admin/users/{auth_id}/suspend")
+async def suspend_user(
+    auth_id: str,
+    body: SuspendUserRequest,
+    caller: AdminCaller = Depends(_require_admin_caller),
+) -> dict[str, Any]:
+    """Suspend a user account and revoke active sessions."""
     supabase_url, service_role_key = _get_supabase_rest_config()
-
     try:
-        async with httpx.AsyncClient(timeout=15.0) as http:
-            resp = await http.delete(
-                f"{supabase_url}/auth/v1/admin/users/{auth_id}",
-                headers={
-                    "apikey": service_role_key,
-                    "Authorization": f"Bearer {service_role_key}",
-                },
-            )
-    except httpx.HTTPError as exc:
-        logger.error("Supabase auth user deletion failed for %s: %s", auth_id, exc)
-        raise HTTPException(status_code=502, detail="Failed to reach authentication service.") from exc
+        return await suspend_user_account(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            caller=caller,
+            target_auth_id=auth_id,
+            reason=body.reason,
+            confirmation_email=body.confirmation_email,
+        )
+    except UserLifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
-    if resp.status_code == 404:
-        raise HTTPException(status_code=404, detail="Auth user not found")
-    if resp.status_code not in (200, 204):
-        logger.error("Supabase user delete HTTP %s for %s: %s", resp.status_code, auth_id, resp.text[:200])
-        raise HTTPException(status_code=502, detail="Failed to delete user.")
 
-    logger.info("Admin %s deleted auth user %s", admin, auth_id)
-    return {"status": "deleted", "auth_id": auth_id}
+@router.post("/api/admin/users/{auth_id}/delete-request")
+async def request_user_delete(
+    auth_id: str,
+    caller: AdminCaller = Depends(_require_admin_caller),
+) -> dict[str, Any]:
+    """Create a short-lived delete confirmation snapshot for a suspended user."""
+    supabase_url, service_role_key = _get_supabase_rest_config()
+    try:
+        snapshot = await create_delete_request(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            caller=caller,
+            target_auth_id=auth_id,
+        )
+        return {
+            "snapshot_id": snapshot.snapshot_id,
+            "confirmation_token": snapshot.confirmation_token,
+            "target_auth_id": snapshot.target_auth_id,
+            "target_email": snapshot.target_email,
+            "expires_at": snapshot.expires_at.isoformat(),
+        }
+    except UserLifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@router.post("/api/admin/users/{auth_id}/delete-execute")
+async def execute_user_delete(
+    auth_id: str,
+    body: DeleteExecuteRequest,
+    caller: AdminCaller = Depends(_require_admin_caller),
+) -> dict[str, Any]:
+    """Permanently delete a suspended user using a verified snapshot."""
+    supabase_url, service_role_key = _get_supabase_rest_config()
+    try:
+        return await execute_delete_request(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            caller=caller,
+            snapshot_id=body.snapshot_id,
+            confirmation_token=body.confirmation_token,
+            confirmation_email=body.confirmation_email,
+            idempotency_key=body.idempotency_key,
+        )
+    except UserLifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
 
 class PurgeExecuteRequest(BaseModel):

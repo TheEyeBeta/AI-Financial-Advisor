@@ -121,9 +121,9 @@ async def test_search_endpoint_empty_results(client: TestClient):
 
 @pytest.mark.asyncio
 async def test_check_search_provider_connected(client: TestClient):
-    """Test check_search_provider when connected."""
+    """Search provider degraded does not fail readiness when required deps are healthy."""
     mock_response_data = {"results": []}
-    
+
     mock_client = AsyncMock()
     mock_response = MagicMock()
     mock_response.status_code = 200
@@ -132,19 +132,22 @@ async def test_check_search_provider_connected(client: TestClient):
     mock_client.post = AsyncMock(return_value=mock_response)
     mock_client.__aenter__ = AsyncMock(return_value=mock_client)
     mock_client.__aexit__ = AsyncMock(return_value=None)
-    
+
     with patch("httpx.AsyncClient", return_value=mock_client):
         response = client.get("/health/ready")
         assert response.status_code == 200
         data = response.json()
         assert data["status"] == "ready"
-        assert data["dependencies"]["search_api"]["status"] == "connected"
+        assert data["components"]["search_api"]["status"] == "connected"
 
 
 @pytest.mark.asyncio
 async def test_check_search_provider_down(client: TestClient, monkeypatch):
-    """Test check_search_provider when provider is down."""
+    """Optional search provider outage marks readiness degraded but still ready."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
-    
+
     response = client.get("/health/ready")
-    assert response.status_code == 503
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ready"
+    assert data["degraded"] is True

@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import (
+from app.main import create_app
+from app.scheduler_config import (
     _run_scheduled_cycle,
     _run_scheduled_memory_extraction,
     _run_scheduled_ranking_cycle,
-    create_app,
 )
 
 
@@ -20,43 +20,43 @@ from app.main import (
 class TestRunScheduledCycle:
     def test_success_logs_summary(self):
         summary = {"users_processed": 3, "digests_generated": 2, "errors": []}
-        with patch("app.main.run_intelligence_cycle", new=AsyncMock(return_value=summary)):
+        with patch("app.scheduler_config.run_intelligence_cycle", new=AsyncMock(return_value=summary)):
             asyncio.run(_run_scheduled_cycle())
 
     def test_skipped_flag_logged(self):
         summary = {"users_processed": 0, "digests_generated": 0, "errors": [], "skipped": True}
-        with patch("app.main.run_intelligence_cycle", new=AsyncMock(return_value=summary)):
+        with patch("app.scheduler_config.run_intelligence_cycle", new=AsyncMock(return_value=summary)):
             asyncio.run(_run_scheduled_cycle())
 
     def test_exception_not_raised(self):
         with patch(
-            "app.main.run_intelligence_cycle",
+            "app.scheduler_config.run_intelligence_cycle",
             new=AsyncMock(side_effect=RuntimeError("boom")),
         ):
             asyncio.run(_run_scheduled_cycle())
 
     def test_errors_list_in_summary(self):
         summary = {"users_processed": 1, "digests_generated": 0, "errors": ["oops"]}
-        with patch("app.main.run_intelligence_cycle", new=AsyncMock(return_value=summary)):
+        with patch("app.scheduler_config.run_intelligence_cycle", new=AsyncMock(return_value=summary)):
             asyncio.run(_run_scheduled_cycle())
 
 
 class TestRunScheduledMemoryExtraction:
     def test_success_logs_summary(self):
         summary = {"chats_processed": 5, "total_insights_extracted": 10, "errors": []}
-        with patch("app.main.run_memory_extraction_cycle", new=AsyncMock(return_value=summary)):
+        with patch("app.scheduler_config.run_memory_extraction_cycle", new=AsyncMock(return_value=summary)):
             asyncio.run(_run_scheduled_memory_extraction())
 
     def test_skipped_flag_logged(self):
         with patch(
-            "app.main.run_memory_extraction_cycle",
+            "app.scheduler_config.run_memory_extraction_cycle",
             new=AsyncMock(return_value={"skipped": True}),
         ):
             asyncio.run(_run_scheduled_memory_extraction())
 
     def test_exception_not_raised(self):
         with patch(
-            "app.main.run_memory_extraction_cycle",
+            "app.scheduler_config.run_memory_extraction_cycle",
             new=AsyncMock(side_effect=RuntimeError("memory boom")),
         ):
             asyncio.run(_run_scheduled_memory_extraction())
@@ -70,19 +70,19 @@ class TestRunScheduledRankingCycle:
             "top_50_written": 50,
             "cycle_duration_seconds": 12.5,
         }
-        with patch("app.main.run_ranking_cycle", new=AsyncMock(return_value=summary)):
+        with patch("app.scheduler_config.run_ranking_cycle", new=AsyncMock(return_value=summary)):
             asyncio.run(_run_scheduled_ranking_cycle())
 
     def test_skipped_flag_logged(self):
         with patch(
-            "app.main.run_ranking_cycle",
+            "app.scheduler_config.run_ranking_cycle",
             new=AsyncMock(return_value={"skipped": True}),
         ):
             asyncio.run(_run_scheduled_ranking_cycle())
 
     def test_exception_not_raised(self):
         with patch(
-            "app.main.run_ranking_cycle",
+            "app.scheduler_config.run_ranking_cycle",
             new=AsyncMock(side_effect=RuntimeError("ranking boom")),
         ):
             asyncio.run(_run_scheduled_ranking_cycle())
@@ -94,6 +94,8 @@ class TestCreateAppFactory:
     def test_production_raises_without_cors_origins(self, monkeypatch):
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.setenv("ALLOW_IN_MEMORY_RATE_LIMIT", "true")
+        monkeypatch.setenv("WORKERS", "1")
         monkeypatch.delenv("CORS_ORIGINS", raising=False)
         with patch("app.main.validate_auth_configuration"):
             with pytest.raises(RuntimeError, match="CORS_ORIGINS"):
@@ -102,6 +104,8 @@ class TestCreateAppFactory:
     def test_production_raises_with_wildcard_cors(self, monkeypatch):
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.setenv("ALLOW_IN_MEMORY_RATE_LIMIT", "true")
+        monkeypatch.setenv("WORKERS", "1")
         monkeypatch.setenv("CORS_ORIGINS", "*")
         with patch("app.main.validate_auth_configuration"):
             with pytest.raises(RuntimeError, match="CORS_ORIGINS"):
@@ -117,6 +121,8 @@ class TestCreateAppFactory:
     def test_production_with_valid_cors_creates_app(self, monkeypatch):
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.setenv("ALLOW_IN_MEMORY_RATE_LIMIT", "true")
+        monkeypatch.setenv("WORKERS", "1")
         monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
         monkeypatch.setenv("TRUSTED_HOSTS", "app.example.com")
         with patch("app.main.validate_auth_configuration"):
@@ -154,13 +160,13 @@ def test_liveness_check(client: TestClient):
 
 @pytest.mark.asyncio
 async def test_readiness_check_without_api_key(client: TestClient, monkeypatch):
-    """Test readiness check when API key is missing."""
+    """Readiness stays green when optional search provider is missing."""
     monkeypatch.delenv("TAVILY_API_KEY", raising=False)
     response = client.get("/health/ready")
-    assert response.status_code == 503
+    assert response.status_code == 200
     data = response.json()
-    assert data["detail"]["status"] == "not_ready"
-    assert "dependencies" in data["detail"]
+    assert data["status"] == "ready"
+    assert data["degraded"] is True
 
 
 def test_app_creation():

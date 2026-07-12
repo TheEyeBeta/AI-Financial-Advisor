@@ -835,13 +835,69 @@ export interface paths {
         post?: never;
         /**
          * Delete User
-         * @description Permanently delete a user from Supabase Auth and all downstream tables.
-         *
-         *     Deletes the auth.users record via the Supabase Admin API.  The ON DELETE
-         *     CASCADE constraints on core.users (and its children) handle the rest, so
-         *     the email is fully released and can be reused for a new account.
+         * @description Deprecated immediate delete — use suspend then delete-request/execute.
          */
         delete: operations["delete_user_api_admin_users__auth_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{auth_id}/suspend": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Suspend User
+         * @description Suspend a user account and revoke active sessions.
+         */
+        post: operations["suspend_user_api_admin_users__auth_id__suspend_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{auth_id}/delete-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request User Delete
+         * @description Create a short-lived delete confirmation snapshot for a suspended user.
+         */
+        post: operations["request_user_delete_api_admin_users__auth_id__delete_request_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/users/{auth_id}/delete-execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute User Delete
+         * @description Permanently delete a suspended user using a verified snapshot.
+         */
+        post: operations["execute_user_delete_api_admin_users__auth_id__delete_execute_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1154,6 +1210,17 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** DeleteExecuteRequest */
+        DeleteExecuteRequest: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Confirmation Token */
+            confirmation_token: string;
+            /** Confirmation Email */
+            confirmation_email: string;
+            /** Idempotency Key */
+            idempotency_key: string;
+        };
         /**
          * EngineStatus
          * @description Status of the Trade Engine - matches TradeEngineEngineStatus interface.
@@ -1426,6 +1493,13 @@ export interface components {
             fundamentals: components["schemas"]["FundamentalsData"];
             signals: components["schemas"]["SignalsData"];
             ranking?: components["schemas"]["RankingData"] | null;
+        };
+        /** SuspendUserRequest */
+        SuspendUserRequest: {
+            /** Confirmation Email */
+            confirmation_email: string;
+            /** Reason */
+            reason: string;
         };
         /** TechnicalIndicators */
         TechnicalIndicators: {
@@ -2984,6 +3058,113 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    suspend_user_api_admin_users__auth_id__suspend_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                auth_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SuspendUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    request_user_delete_api_admin_users__auth_id__delete_request_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                auth_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    execute_user_delete_api_admin_users__auth_id__delete_execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                auth_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteExecuteRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -56,4 +56,4 @@ EXPOSE 8000
 HEALTHCHECK NONE
 
 # Run uvicorn - shell form for proper $PORT expansion
-CMD /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port \${PORT:-8000} --workers \${WORKERS:-2} --log-level \${LOG_LEVEL:-info}"
+CMD /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port \${PORT:-8000} --workers \${WORKERS:-1} --log-level \${LOG_LEVEL:-info}"

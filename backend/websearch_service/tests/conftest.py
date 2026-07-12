@@ -79,7 +79,8 @@ def anon_role_jwt() -> str:
 def client() -> TestClient:
     """Create a test client for the FastAPI app."""
     app = create_app()
-    return TestClient(app)
+    with TestClient(app) as tc:
+        yield tc
 
 
 @pytest.fixture

@@ -97,7 +97,16 @@ vercel --prod
    ENVIRONMENT=production
    AI_AUDIT_LOG_PATH=/app/logs/audit.jsonl
    PORT=8000
+   WORKERS=1
+   REDIS_URL=redis://...            # Required for multi-worker; strongly recommended in prod
+   ALLOW_IN_MEMORY_RATE_LIMIT=true  # Only when WORKERS=1 and Redis intentionally omitted
+   SCHEDULER_ENABLED=false          # Web service — do NOT enable on API replicas
    ```
+
+   **Process topology (beta):**
+   - **Web service** (`uvicorn app.main:app`): `WORKERS=1`, `SCHEDULER_ENABLED=false`, health check `/health/ready`.
+   - **Scheduler service** (second Railway service, single replica): `SCHEDULER_ENABLED=true`, start command `python run_scheduler.py`, no HTTP traffic.
+   - Do not run APScheduler in every web worker — only the dedicated scheduler process.
 
 3. **Deploy**
    ```bash

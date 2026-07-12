@@ -49,9 +49,15 @@ def test_refresh_all_allows_legacy_cron_secret_in_non_production(monkeypatch):
     refresh_mock.assert_awaited_once()
 
 
+def _client() -> TestClient:
+    return TestClient(create_app())
+
+
 def test_refresh_all_rejects_legacy_cron_secret_in_production(monkeypatch):
     monkeypatch.setenv("AUTH_REQUIRED", "true")
     monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("ALLOW_IN_MEMORY_RATE_LIMIT", "true")
+    monkeypatch.setenv("WORKERS", "1")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
     monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
     monkeypatch.setenv("MERIDIAN_CRON_SECRET", "legacy-secret")
