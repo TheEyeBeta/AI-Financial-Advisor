@@ -2255,7 +2255,7 @@
           "admin"
         ],
         "summary": "Delete User",
-        "description": "Permanently delete a user from Supabase Auth and all downstream tables.\n\nDeletes the auth.users record via the Supabase Admin API.  The ON DELETE\nCASCADE constraints on core.users (and its children) handle the rest, so\nthe email is fully released and can be reused for a new account.",
+        "description": "Deprecated immediate delete \u2014 use suspend then delete-request/execute.",
         "operationId": "delete_user_api_admin_users__auth_id__delete",
         "parameters": [
           {
@@ -2277,6 +2277,161 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Delete User Api Admin Users  Auth Id  Delete"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{auth_id}/suspend": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Suspend User",
+        "description": "Suspend a user account and revoke active sessions.",
+        "operationId": "suspend_user_api_admin_users__auth_id__suspend_post",
+        "parameters": [
+          {
+            "name": "auth_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Auth Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SuspendUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Suspend User Api Admin Users  Auth Id  Suspend Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{auth_id}/delete-request": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Request User Delete",
+        "description": "Create a short-lived delete confirmation snapshot for a suspended user.",
+        "operationId": "request_user_delete_api_admin_users__auth_id__delete_request_post",
+        "parameters": [
+          {
+            "name": "auth_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Auth Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Request User Delete Api Admin Users  Auth Id  Delete Request Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/users/{auth_id}/delete-execute": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Execute User Delete",
+        "description": "Permanently delete a suspended user using a verified snapshot.",
+        "operationId": "execute_user_delete_api_admin_users__auth_id__delete_execute_post",
+        "parameters": [
+          {
+            "name": "auth_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Auth Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteExecuteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Execute User Delete Api Admin Users  Auth Id  Delete Execute Post"
                 }
               }
             }
@@ -2835,6 +2990,39 @@
         "type": "object",
         "title": "ContextBlock",
         "description": "Raw context data sent by the frontend; the backend formats it into the system prompt."
+      },
+      "DeleteExecuteRequest": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Snapshot Id"
+          },
+          "confirmation_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Confirmation Token"
+          },
+          "confirmation_email": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Confirmation Email"
+          },
+          "idempotency_key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "title": "Idempotency Key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "confirmation_token",
+          "confirmation_email",
+          "idempotency_key"
+        ],
+        "title": "DeleteExecuteRequest"
       },
       "EngineStatus": {
         "properties": {
@@ -3729,6 +3917,27 @@
           "signals"
         ],
         "title": "StockDetailResponse"
+      },
+      "SuspendUserRequest": {
+        "properties": {
+          "confirmation_email": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Confirmation Email"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirmation_email",
+          "reason"
+        ],
+        "title": "SuspendUserRequest"
       },
       "TechnicalIndicators": {
         "properties": {

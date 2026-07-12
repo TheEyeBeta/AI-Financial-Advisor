@@ -482,21 +482,81 @@ export default function Admin() {
     }
   };
 
-  const deleteUser = async (userId: string, authId: string) => {
+  const suspendUser = async (authId: string, email: string) => {
+    const confirmation = window.prompt(
+      `Type the user's email to confirm suspension:\n${email}`,
+    );
+    if (!confirmation || confirmation.trim().toLowerCase() !== email.trim().toLowerCase()) {
+      toast({
+        title: "Suspension cancelled",
+        description: "Confirmation email did not match.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const reason =
+      window.prompt("Reason for suspension (required):")?.trim() || "admin action";
     try {
-      if (BACKEND_URL && authId) {
-        const headers = await getAuthHeaders();
-        const resp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}`, { method: "DELETE", headers });
-        if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
-      } else {
-        await supabase.schema("ai").from("chats").delete().eq("user_id", userId);
-        const { error } = await supabase.schema("core").from("users").delete().eq("id", userId);
-        if (error) throw error;
+      const headers = await getAuthHeaders();
+      const resp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}/suspend`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation_email: confirmation.trim(), reason }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+      toast({ title: "User suspended", description: "Sessions revoked. Use delete-request to purge later." });
+      fetchUsers();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: getErrorMessage(error) || "Failed to suspend user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const deleteUser = async (_userId: string, authId: string, _email: string) => {
+    try {
+      const headers = await getAuthHeaders();
+      const requestResp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}/delete-request`, {
+        method: "POST",
+        headers,
+      });
+      if (!requestResp.ok) throw new Error((await requestResp.text()) || `HTTP ${requestResp.status}`);
+      const requestData = await requestResp.json() as {
+        snapshot_id: string;
+        confirmation_token: string;
+        target_email: string;
+      };
+      const confirmation = window.prompt(
+        `Type the user's email to permanently delete:\n${requestData.target_email}`,
+      );
+      if (
+        !confirmation ||
+        confirmation.trim().toLowerCase() !== requestData.target_email.trim().toLowerCase()
+      ) {
+        toast({ title: "Deletion cancelled", description: "Confirmation email did not match.", variant: "destructive" });
+        return;
       }
+      const executeResp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}/delete-execute`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          snapshot_id: requestData.snapshot_id,
+          confirmation_token: requestData.confirmation_token,
+          confirmation_email: confirmation.trim(),
+          idempotency_key: crypto.randomUUID(),
+        }),
+      });
+      if (!executeResp.ok) throw new Error((await executeResp.text()) || `HTTP ${executeResp.status}`);
       toast({ title: "User deleted" });
       fetchUsers();
     } catch (error) {
-      toast({ title: "Error", description: getErrorMessage(error) || "Failed to delete user", variant: "destructive" });
+      toast({
+        title: "Error",
+        description: getErrorMessage(error) || "Failed to delete user",
+        variant: "destructive",
+      });
     }
   };
 
@@ -927,16 +987,21 @@ export default function Admin() {
                                         </AlertDialogTrigger>
                                         <AlertDialogContent>
                                           <AlertDialogHeader>
-                                            <AlertDialogTitle>Delete user?</AlertDialogTitle>
+                                            <AlertDialogTitle>Suspend or delete user?</AlertDialogTitle>
                                             <AlertDialogDescription>
-                                              This permanently removes {user.email || "this user"} and all associated data — chats, trades, and journal entries.
+                                              Suspend first (revokes sessions). Permanent deletion requires the account to already be suspended and typed email confirmation.
                                             </AlertDialogDescription>
                                           </AlertDialogHeader>
                                           <AlertDialogFooter>
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                                             <AlertDialogAction
+                                              onClick={() => suspendUser(user.auth_id, user.email || "")}
+                                            >
+                                              Suspend
+                                            </AlertDialogAction>
+                                            <AlertDialogAction
                                               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                              onClick={() => deleteUser(user.id, user.auth_id)}
+                                              onClick={() => deleteUser(user.id, user.auth_id, user.email || "")}
                                             >
                                               Delete permanently
                                             </AlertDialogAction>

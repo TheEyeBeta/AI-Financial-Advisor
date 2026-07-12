@@ -179,18 +179,15 @@ class RateLimitService:
             logger.info("Rate limiting is using Redis-backed shared state")
         else:
             if (os.getenv("ENVIRONMENT") or "").strip().lower() == "production":
-                # ERROR (not WARNING) so alerting/monitoring picks this up.
-                # Rate limits are per-process in fallback mode — each uvicorn worker
-                # enforces limits independently, multiplying the effective limit by
-                # the worker count. This is a security misconfiguration in production.
                 logger.error(
                     "SECURITY: Redis is not configured in production. "
-                    "Rate limiting is running in per-process fallback mode. "
-                    "Effective limits are multiplied by the number of workers. "
-                    "Configure REDIS_URL to enable shared rate limiting."
+                    "Rate limiting is running in per-process fallback mode."
                 )
             else:
                 logger.info("Redis is not configured; rate limiting is running in local fallback mode")
+
+    def uses_redis(self) -> bool:
+        return self._redis_mode
 
     def _get_config(self, endpoint: str) -> RateLimitConfig:
         return self._endpoint_configs.get(endpoint, self._default_config)
@@ -500,3 +497,63 @@ class RateLimitService:
 
 
 rate_limiter = RateLimitService()
+
+
+def _worker_count() -> int:
+    for key in ("WEB_CONCURRENCY", "WORKERS"):
+        raw = (os.getenv(key) or "").strip()
+        if raw.isdigit():
+            return max(1, int(raw))
+    return 1
+
+
+def validate_rate_limit_configuration() -> None:
+    """Fail fast when production cannot enforce global rate limits."""
+    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
+    if env not in ("production",):
+        return
+
+    allow_memory = (os.getenv("ALLOW_IN_MEMORY_RATE_LIMIT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    has_redis = RateLimitRedisBackend.from_env() is not None
+    workers = _worker_count()
+
+    if workers > 1 and not has_redis:
+        raise RuntimeError(
+            "FATAL: Production is configured with multiple workers but REDIS_URL is missing. "
+            "Shared Redis-backed rate limiting is required for multi-worker deployments."
+        )
+    if not has_redis and not allow_memory:
+        raise RuntimeError(
+            "FATAL: Production requires REDIS_URL for shared rate limiting, or set "
+            "ALLOW_IN_MEMORY_RATE_LIMIT=true for an explicit single-worker beta deployment."
+        )
+
+
+def rate_limit_readiness_status() -> dict[str, Any]:
+    """Component status for /health/ready."""
+    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
+    if rate_limiter.uses_redis():
+        return {"status": "ok", "mode": "redis"}
+    if env == "production":
+        allow_memory = (os.getenv("ALLOW_IN_MEMORY_RATE_LIMIT") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if not allow_memory:
+            return {
+                "status": "error",
+                "mode": "memory",
+                "detail": "production in-memory rate limiting not explicitly allowed",
+            }
+        if _worker_count() > 1:
+            return {
+                "status": "error",
+                "mode": "memory",
+                "detail": "multiple workers without Redis",
+            }
+    return {"status": "ok", "mode": "memory", "detail": "local fallback"}

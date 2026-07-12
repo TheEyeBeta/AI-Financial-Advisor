@@ -103,6 +103,7 @@ async def log_job_run(
     records_processed: int | None = None,
     raw_output: dict[str, Any] | None = None,
     error: str | None = None,
+    run_id: str | None = None,
 ) -> None:
     """Write a job run record to core.job_run_logs. Never raises."""
     finished_at = datetime.now(timezone.utc)
@@ -124,6 +125,8 @@ async def log_job_run(
         "summary": summary,
         "error": error,
     }
+    if run_id:
+        row["summary"] = f"{summary or ''} [run_id={run_id}]".strip()
 
     try:
         await asyncio.to_thread(_write_log_sync, row)
