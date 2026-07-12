@@ -3,7 +3,7 @@
 from alembic import op
 
 revision = "0029_user_account_lifecycle"
-down_revision = "0028_orphan_purge_audit_tables"
+down_revision = "0028"
 branch_labels = None
 depends_on = None
 
