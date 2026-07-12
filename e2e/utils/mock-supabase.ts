@@ -133,6 +133,53 @@ export async function installSupabaseMocks(page: Page, options?: { onboardingCom
     await fulfillJson(route, {});
   });
 
+  // Register the catch-all first so specific REST handlers below take priority.
+  await page.route('**/rest/v1/**', async (route) => {
+    const method = route.request().method();
+    const url = route.request().url();
+    const prefer = route.request().headers()['prefer'] ?? '';
+
+    if (method === 'HEAD' || prefer.includes('count=exact')) {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'content-range': '*/0',
+        },
+        body: '',
+      });
+      return;
+    }
+
+    if (method === 'GET') {
+      if (url.includes('chats') || url.includes('chat_messages')) {
+        await fulfillJson(route, []);
+        return;
+      }
+      await fulfillJson(route, []);
+      return;
+    }
+
+    if (method === 'POST') {
+      const resourceType = url.includes('chats') ? 'chats' :
+                          url.includes('chat_messages') ? 'chat_messages' : 'resource';
+      await fulfillJson(route, [{ id: `mock-${resourceType}-${Date.now()}` }], 201);
+      return;
+    }
+
+    if (method === 'PATCH' || method === 'PUT') {
+      await fulfillJson(route, {});
+      return;
+    }
+
+    if (method === 'DELETE') {
+      await fulfillJson(route, {});
+      return;
+    }
+
+    await fulfillJson(route, {});
+  });
+
   await page.route('**/rest/v1/users*', async (route) => {
     if (isAuthenticated) {
       const _url = route.request().url();
@@ -144,8 +191,13 @@ export async function installSupabaseMocks(page: Page, options?: { onboardingCom
       // - But the REST API always returns arrays for GET requests
       // - POST/PATCH return the object directly
       
-      if (method === 'GET') {
-        await fulfillJson(route, [profileWithOnboarding]);
+      if (method === 'GET' || method === 'HEAD') {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          headers: method === 'HEAD' ? { 'content-range': '0-0/1' } : undefined,
+          body: method === 'HEAD' ? '' : JSON.stringify([profileWithOnboarding]),
+        });
         return;
       }
 
@@ -165,35 +217,29 @@ export async function installSupabaseMocks(page: Page, options?: { onboardingCom
     }
   });
 
-  await page.route('**/rest/v1/**', async (route) => {
+  await page.route('**/rest/v1/user_profiles*', async (route) => {
     const method = route.request().method();
-    const url = route.request().url();
+    const prefer = route.request().headers()['prefer'] ?? '';
 
-    // Handle chats and messages - return empty arrays for new users
+    if (method === 'HEAD' || prefer.includes('count=exact')) {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'application/json',
+          'content-range': '*/0',
+        },
+        body: '',
+      });
+      return;
+    }
+
     if (method === 'GET') {
-      if (url.includes('chats') || url.includes('chat_messages')) {
-        await fulfillJson(route, []);
-        return;
-      }
       await fulfillJson(route, []);
       return;
     }
 
     if (method === 'POST') {
-      // Return a mock object with an ID for created resources
-      const resourceType = url.includes('chats') ? 'chats' : 
-                          url.includes('chat_messages') ? 'chat_messages' : 'resource';
-      await fulfillJson(route, [{ id: `mock-${resourceType}-${Date.now()}` }], 201);
-      return;
-    }
-
-    if (method === 'PATCH' || method === 'PUT') {
-      await fulfillJson(route, {});
-      return;
-    }
-
-    if (method === 'DELETE') {
-      await fulfillJson(route, {});
+      await fulfillJson(route, [{}], 201);
       return;
     }
 

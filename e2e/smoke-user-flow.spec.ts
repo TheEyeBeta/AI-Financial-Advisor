@@ -1,32 +1,9 @@
 import { expect, test } from '@playwright/test';
-import { installSupabaseMocks } from './utils/mock-supabase';
-import { testUser } from './fixtures/test-user';
+import { signInWithMockedUser } from './utils/sign-in';
 
 test.describe('Smoke E2E: sign-in to core product surfaces', () => {
   test('user can sign in, open dashboard, advisor, and paper trading', async ({ page }) => {
-    await installSupabaseMocks(page);
-
-    // Test 1: Sign in flow
-    await page.goto('/', { waitUntil: 'networkidle' });
-    await page.waitForLoadState('domcontentloaded');
-    await expect(page).toHaveURL('/');
-
-    // Click Sign In
-    await page.getByRole('button', { name: 'Sign In' }).waitFor({ state: 'visible', timeout: 10000 });
-    await page.getByRole('button', { name: 'Sign In' }).click();
-    
-    // Fill and submit sign in form
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    const dialog = page.getByRole('dialog', { name: /sign in/i });
-    await dialog.getByLabel('Email').waitFor({ state: 'visible', timeout: 5000 });
-    await dialog.getByLabel('Email').fill(testUser.email);
-    await dialog.getByLabel('Password').fill(testUser.password);
-    await dialog.getByRole('button', { name: /^sign in$/i }).click();
-
-    // Wait for navigation after sign in
-    await page.waitForURL(/\/(advisor|onboarding)/, { timeout: 10000 });
-    
-    // Test 2: Verify advisor page loads (or onboarding if profile needs setup)
+    await signInWithMockedUser(page);
     const advisorUrl = page.url();
     expect(advisorUrl).toMatch(/\/(advisor|onboarding)/);
     await page.waitForLoadState('networkidle', { timeout: 10000 });

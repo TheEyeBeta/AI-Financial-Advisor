@@ -283,7 +283,13 @@ export default function Admin() {
   const [lastJobsRefresh, setLastJobsRefresh] = useState<Date | null>(null);
 
   const [purgeLoading, setPurgeLoading] = useState(false);
-  const [purgeResult, setPurgeResult] = useState<{ deleted: number; failed: number } | null>(null);
+  const [purgeDryRun, setPurgeDryRun] = useState<{
+    snapshot_id: string;
+    confirmation_token: string;
+    candidate_count: number;
+    candidates: Array<{ auth_id: string; email?: string | null }>;
+  } | null>(null);
+  const [purgeResult, setPurgeResult] = useState<{ deleted: number; failed: number; skipped?: number } | null>(null);
 
   const BACKEND_URL = getPythonApiUrl();
 
@@ -494,16 +500,54 @@ export default function Admin() {
     }
   };
 
-  const purgeOrphanedAuthUsers = async () => {
+  const runPurgeDryRun = async () => {
+    setPurgeLoading(true);
+    setPurgeResult(null);
+    setPurgeDryRun(null);
+    try {
+      const headers = await getAuthHeaders();
+      const resp = await fetch(`${BACKEND_URL}/api/admin/purge-orphaned-auth-users/dry-run`, {
+        method: "POST",
+        headers,
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+      const result = await resp.json() as {
+        snapshot_id: string;
+        confirmation_token: string;
+        candidate_count: number;
+        candidates: Array<{ auth_id: string; email?: string | null }>;
+      };
+      setPurgeDryRun(result);
+      toast({
+        title: "Dry run complete",
+        description: `${result.candidate_count} orphan candidate(s) found`,
+      });
+    } catch (error) {
+      toast({ title: "Dry run failed", description: getErrorMessage(error), variant: "destructive" });
+    } finally {
+      setPurgeLoading(false);
+    }
+  };
+
+  const executePurgeDryRun = async () => {
+    if (!purgeDryRun) return;
     setPurgeLoading(true);
     setPurgeResult(null);
     try {
       const headers = await getAuthHeaders();
-      const resp = await fetch(`${BACKEND_URL}/api/admin/purge-orphaned-auth-users`, { method: "POST", headers });
+      const resp = await fetch(`${BACKEND_URL}/api/admin/purge-orphaned-auth-users/execute`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          snapshot_id: purgeDryRun.snapshot_id,
+          confirmation_token: purgeDryRun.confirmation_token,
+        }),
+      });
       if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
-      const result = await resp.json() as { deleted: number; failed: number };
+      const result = await resp.json() as { deleted: number; failed: number; skipped?: number };
       setPurgeResult(result);
-      toast({ title: `Purge complete — ${result.deleted} records removed` });
+      setPurgeDryRun(null);
+      toast({ title: `Purge complete — ${result.deleted} deleted` });
     } catch (error) {
       toast({ title: "Purge failed", description: getErrorMessage(error), variant: "destructive" });
     } finally {
@@ -1567,21 +1611,47 @@ export default function Admin() {
                   <div>
                     <CardTitle className="text-sm">Orphaned Auth Cleanup</CardTitle>
                     <CardDescription className="mt-1 text-xs">
-                      Removes Supabase Auth records with no matching profile row. These block email re-registration.
+                      Dry-run lists orphan auth accounts, then confirm to delete. Immediate purge is disabled for safety.
                     </CardDescription>
                   </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    className="gap-2 rounded-lg"
-                    disabled={purgeLoading || !BACKEND_URL}
-                    onClick={() => void purgeOrphanedAuthUsers()}
-                  >
-                    {purgeLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                    {purgeLoading ? "Purging…" : "Purge orphaned accounts"}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-2 rounded-lg"
+                      disabled={purgeLoading || !BACKEND_URL}
+                      onClick={() => void runPurgeDryRun()}
+                    >
+                      {purgeLoading && !purgeDryRun ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      {purgeLoading && !purgeDryRun ? "Running…" : "Dry run"}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="gap-2 rounded-lg"
+                      disabled={purgeLoading || !BACKEND_URL || !purgeDryRun || purgeDryRun.candidate_count === 0}
+                      onClick={() => void executePurgeDryRun()}
+                    >
+                      {purgeLoading && purgeDryRun ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                      {purgeLoading && purgeDryRun ? "Purging…" : "Confirm purge"}
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
+              {purgeDryRun && (
+                <CardContent className="border-t border-border/40 pt-4">
+                  <p className="text-sm font-medium">{purgeDryRun.candidate_count} candidate(s)</p>
+                  {purgeDryRun.candidates.length > 0 && (
+                    <ul className="mt-2 max-h-40 overflow-y-auto text-xs text-muted-foreground">
+                      {purgeDryRun.candidates.map((candidate) => (
+                        <li key={candidate.auth_id}>
+                          {candidate.email ?? candidate.auth_id}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </CardContent>
+              )}
               {purgeResult && (
                 <CardContent className="border-t border-border/40 pt-4">
                   <p className="text-sm">
@@ -1592,7 +1662,10 @@ export default function Admin() {
                       <span className="ml-2 text-rose-500">{purgeResult.failed} failed</span>
                     )}
                     {purgeResult.deleted === 0 && purgeResult.failed === 0 && (
-                      <span className="ml-1 text-muted-foreground">— no orphaned records found</span>
+                      <span className="ml-1 text-muted-foreground">— no records deleted</span>
+                    )}
+                    {typeof purgeResult.skipped === "number" && purgeResult.skipped > 0 && (
+                      <span className="ml-2 text-muted-foreground">{purgeResult.skipped} skipped</span>
                     )}
                   </p>
                 </CardContent>

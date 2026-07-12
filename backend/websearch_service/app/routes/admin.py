@@ -23,6 +23,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 
 from ..services.auth import (
     get_backend_service_role_key,
@@ -34,6 +35,11 @@ from ..services.intelligence_engine import run_intelligence_cycle
 from ..services.job_logger import log_job_run
 from ..services.memory_agent import run_history_scan, run_memory_extraction_cycle
 from ..services.meridian_context import refresh_all_users_context
+from ..services.orphan_user_cleanup import (
+    OrphanCleanupError,
+    create_dry_run_snapshot,
+    execute_snapshot,
+)
 from ..services.ranking_engine import run_ranking_cycle
 
 logger = logging.getLogger(__name__)
@@ -318,97 +324,83 @@ async def delete_user(auth_id: str, admin: str = Depends(_require_admin)) -> dic
     return {"status": "deleted", "auth_id": auth_id}
 
 
+class PurgeExecuteRequest(BaseModel):
+    snapshot_id: str = Field(min_length=1)
+    confirmation_token: str = Field(min_length=1)
+
+
 @router.post("/api/admin/purge-orphaned-auth-users")
 async def purge_orphaned_auth_users(admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Delete auth.users records that have no matching core.users row.
+    """Deprecated immediate-delete purge. Use dry-run + execute instead."""
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Immediate orphan purge is disabled. "
+            "POST /api/admin/purge-orphaned-auth-users/dry-run then "
+            "/api/admin/purge-orphaned-auth-users/execute with the snapshot token."
+        ),
+    )
 
-    Left over from the previous deleteUser implementation which removed
-    core.users but skipped auth.users, permanently blocking those email
-    addresses.  This endpoint finds the orphans and removes them so the
-    emails can be reused.
-    """
+
+@router.post("/api/admin/purge-orphaned-auth-users/dry-run")
+async def purge_orphaned_auth_users_dry_run(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """List orphan auth.users candidates without deleting anything."""
     supabase_url, service_role_key = _get_supabase_rest_config()
-    headers = {
-        "apikey": service_role_key,
-        "Authorization": f"Bearer {service_role_key}",
-    }
-
-    # Collect every auth_id that still has a core.users row.
     try:
-        async with httpx.AsyncClient(timeout=30.0) as http:
-            resp = await http.get(
-                f"{supabase_url}/rest/v1/users",
-                params={"select": "auth_id"},
-                headers={**headers, "Accept-Profile": "core"},
-            )
+        snapshot = await create_dry_run_snapshot(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            actor=admin,
+        )
+    except OrphanCleanupError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
     except httpx.HTTPError as exc:
-        logger.warning("Failed to fetch core users: %s", exc)
-        raise HTTPException(status_code=502, detail="Failed to reach database service.") from exc
-
-    if resp.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"core.users query failed: HTTP {resp.status_code}")
-
-    live_auth_ids: set[str] = {row["auth_id"] for row in resp.json() if row.get("auth_id")}
-
-    # Page through all auth users and collect orphans.
-    orphan_ids: list[str] = []
-    page = 1
-    per_page = 1000
-
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as http:
-            while True:
-                resp = await http.get(
-                    f"{supabase_url}/auth/v1/admin/users",
-                    params={"page": page, "per_page": per_page},
-                    headers=headers,
-                )
-                if resp.status_code != 200:
-                    raise HTTPException(
-                        status_code=502,
-                        detail=f"auth.users list failed: HTTP {resp.status_code}",
-                    )
-                data = resp.json()
-                auth_users = data.get("users", [])
-                if not auth_users:
-                    break
-
-                for user in auth_users:
-                    if user.get("id") not in live_auth_ids:
-                        orphan_ids.append(user["id"])
-
-                if len(auth_users) < per_page:
-                    break
-                page += 1
-    except httpx.HTTPError as exc:
-        logger.warning("Failed to list auth users: %s", exc)
+        logger.warning("Orphan purge dry-run failed: %s", exc)
         raise HTTPException(status_code=502, detail="Failed to reach authentication service.") from exc
 
-    # Delete each orphan.
-    deleted: list[str] = []
-    failed: list[str] = []
+    return {
+        "snapshot_id": snapshot.snapshot_id,
+        "confirmation_token": snapshot.confirmation_token,
+        "expires_at": snapshot.expires_at.isoformat(),
+        "total_auth_users": snapshot.total_auth_users,
+        "candidate_count": len(snapshot.candidates),
+        "candidates": [
+            {"auth_id": c.auth_id, "email": c.email, "reason": c.reason}
+            for c in snapshot.candidates
+        ],
+    }
 
-    async with httpx.AsyncClient(timeout=30.0) as http:
-        for auth_id in orphan_ids:
-            try:
-                del_resp = await http.delete(
-                    f"{supabase_url}/auth/v1/admin/users/{auth_id}",
-                    headers=headers,
-                )
-                if del_resp.status_code in (200, 204):
-                    deleted.append(auth_id)
-                else:
-                    failed.append(auth_id)
-            except httpx.HTTPError:
-                failed.append(auth_id)
 
-    logger.info(
-        "Admin %s purged orphaned auth users: %d deleted, %d failed",
-        admin,
-        len(deleted),
-        len(failed),
-    )
-    return {"deleted": len(deleted), "failed": len(failed)}
+@router.post("/api/admin/purge-orphaned-auth-users/execute")
+async def purge_orphaned_auth_users_execute(
+    body: PurgeExecuteRequest,
+    admin: str = Depends(_require_admin),
+) -> dict[str, Any]:
+    """Delete orphan auth.users from a verified dry-run snapshot."""
+    supabase_url, service_role_key = _get_supabase_rest_config()
+    try:
+        result = await execute_snapshot(
+            snapshot_id=body.snapshot_id,
+            confirmation_token=body.confirmation_token,
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            actor=admin,
+        )
+    except OrphanCleanupError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    except httpx.HTTPError as exc:
+        logger.warning("Orphan purge execute failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to reach authentication service.") from exc
+
+    return {
+        "snapshot_id": result.snapshot_id,
+        "deleted": len(result.deleted),
+        "skipped": len(result.skipped),
+        "failed": len(result.failed),
+        "quarantined": len(result.quarantined),
+        "deleted_auth_ids": result.deleted,
+        "failed_auth_ids": result.failed,
+    }
 
 
 async def _run_ranking_logged() -> None:

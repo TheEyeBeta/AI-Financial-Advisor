@@ -61,7 +61,7 @@ export default defineConfig({
               VITE_GOOGLE_AUTH_ENABLED: 'true',
               VITE_SUPPORT_EMAIL: 'theeyebeta@gmail.com',
               ...(process.env.CI
-                ? { VITE_SUPABASE_URL: 'http://127.0.0.1:54321', VITE_SUPABASE_ANON_KEY: 'e2e-test-key' }
+                ? { VITE_SUPABASE_URL: 'http://localhost:54321', VITE_SUPABASE_ANON_KEY: 'e2e-test-key' }
                 : {}),
             },
           },

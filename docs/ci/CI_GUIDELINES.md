@@ -20,7 +20,7 @@ treat that as a bug — open a PR to reconcile, do not silently lower a gate.
 | `docker-build.yml`                  | PR touching backend/Dockerfile   | Docker image builds (backend + frontend) and `docker compose config` validation                |
 | `integration-tests.yml`             | push to `main`/`staging`         | Backend integration tests against the test Supabase project                                    |
 | `deploy-staging.yml`                | push/PR to `staging`             | Railway staging deploy + full Playwright suite against the live staging URL                    |
-| `deploy.yml`                        | push to `main` / tags            | Build & push GHCR images, Vercel prod deploy, Railway prod deploy                              |
+| `deploy.yml`                        | `CI/CD Pipeline` success on `main` / tags `v*` | Build & push GHCR images, Vercel prod deploy, Railway prod deploy                              |
 | `promote-to-prod.yml`               | manual                           | Opens a `staging → main` promotion PR                                                          |
 | `dast.yml`                          | weekly cron + manual             | OWASP ZAP baseline scan against staging                                                        |
 | `load-tests.yml`                    | manual                           | k6 chat / search / paper-trading load tests                                                    |
@@ -132,24 +132,18 @@ Three jobs:
 
 ### 3.6 E2E (`e2e.yml`, `deploy-staging.yml#e2e`)
 
-- `e2e.yml` runs on every PR. It boots Vite via `playwright.config.ts`'s
-  `webServer` block; backend calls are mocked at the browser layer
-  (`e2e/utils/mock-supabase.ts`). No external services required.
-- `deploy-staging.yml#e2e` runs the **same suite** against the deployed
-  staging URL after a successful Railway deploy, then comments the result
-  on the PR.
-- New tests must work in both modes. Use `process.env.PLAYWRIGHT_BASE_URL`
-  to detect the staging mode if you need to skip mock-only assertions.
-- **TODO (stabilisation):** the mocked-Supabase suite is currently flagged
-  `continue-on-error: true` in `e2e.yml` while the timing on CI runners is
-  triaged. The job still uploads the playwright HTML report as an artifact;
-  download it to debug. Remove `continue-on-error` once the suite is
-  reliably green on a clean run.
+- `e2e.yml` runs on every PR to `main`/`develop` and **fails the workflow** on
+  any Playwright failure. Backend calls are mocked at the browser layer
+  (`e2e/utils/mock-supabase.ts`). Shared sign-in lives in `e2e/utils/sign-in.ts`.
+- `deploy-staging.yml#e2e` runs the same suite against the deployed staging URL
+  after a successful Railway deploy and **fails** when tests fail.
 
 ### 3.7 Deploy (`deploy.yml`, `deploy-staging.yml`)
 
 - **Never** push directly to `main`. Use the `promote-to-prod` workflow to
   open a `staging → main` PR; merge after CI green and review.
+- `deploy.yml` runs only after **`CI/CD Pipeline` succeeds** on `main`
+  (`workflow_run` trigger). Tag pushes (`v*`) still deploy directly.
 - `deploy.yml` requires the following secrets — keep them in sync with
   `deployment/DEPLOYMENT.md`:
   - `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
@@ -158,6 +152,24 @@ Three jobs:
     `VITE_PYTHON_API_URL`, `VITE_WEBSEARCH_API_URL`
 - `deploy-staging.yml` additionally needs `STAGING_FRONTEND_URL`,
   `STAGING_BACKEND_URL`, and `RAILWAY_STAGING_SERVICE`.
+
+### 3.8 Branch protection (GitHub settings — human step)
+
+Configure a ruleset on `main` (and optionally `staging`) that **requires** these
+status checks before merge. Names must match the workflow / job labels in the
+Actions tab:
+
+| Required check name | Workflow |
+| ------------------- | -------- |
+| `frontend` | `ci.yml` |
+| `backend` | `ci.yml` |
+| `docker-build` | `ci.yml` (path-filtered) |
+| `Lint & Type Check` | `lint.yml` |
+| `E2E Tests` | `e2e.yml` |
+| `Security Checks` | `security.yml` |
+
+Production deploy (`deploy.yml`) is triggered only after `CI/CD Pipeline`
+succeeds on `main`; it must **not** run on a failing commit.
 
 ---
 
