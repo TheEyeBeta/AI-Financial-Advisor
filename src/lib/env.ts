@@ -20,12 +20,16 @@ const PYTHON_API_URL_PLACEHOLDERS = new Set([
 
 const LOCAL_BACKEND_URL = 'http://localhost:7000';
 
+const DEFAULT_SUPPORT_EMAIL = 'theeyebeta@gmail.com';
+
 export interface FrontendRuntimeEnv {
   VITE_SUPABASE_URL?: string;
   VITE_SUPABASE_ANON_KEY?: string;
   VITE_PYTHON_API_URL?: string;
   VITE_WEBSEARCH_API_URL?: string;
   VITE_ENABLE_LOCAL_BACKEND_MONITOR?: string | boolean;
+  VITE_GOOGLE_AUTH_ENABLED?: string;
+  VITE_SUPPORT_EMAIL?: string;
   PROD?: boolean;
 }
 
@@ -159,4 +163,13 @@ export function assertFrontendRuntimeConfigForProduction(
 
   getPythonApiUrl(env);
   getWebSearchApiUrl(env);
+}
+
+export function isGoogleAuthEnabled(env: FrontendRuntimeEnv = import.meta.env): boolean {
+  return getTrimmedEnvValue(env.VITE_GOOGLE_AUTH_ENABLED).toLowerCase() === 'true';
+}
+
+export function getSupportEmail(env: FrontendRuntimeEnv = import.meta.env): string {
+  const email = getTrimmedEnvValue(env.VITE_SUPPORT_EMAIL);
+  return email || DEFAULT_SUPPORT_EMAIL;
 }

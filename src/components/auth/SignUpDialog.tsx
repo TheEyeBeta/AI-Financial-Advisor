@@ -13,18 +13,23 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { supabase } from "@/lib/supabase";
+import { isGoogleAuthEnabled } from "@/lib/env";
+import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
+import { AuthDivider } from "@/components/auth/AuthDivider";
 
 interface SignUpDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSwitchToSignIn?: () => void;
 }
 
-export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
+export function SignUpDialog({ open, onOpenChange, onSwitchToSignIn }: SignUpDialogProps) {
+  const googleAuthEnabled = isGoogleAuthEnabled();
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleRedirecting, setIsGoogleRedirecting] = useState(false);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [age, setAge] = useState<string>("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -32,29 +37,19 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
   const resetForm = () => {
     setFirstName("");
     setLastName("");
-    setAge("");
     setEmail("");
     setPassword("");
     setConfirmPassword("");
+    setIsGoogleRedirecting(false);
   };
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!firstName || !lastName || !age || !email || !password) {
+    if (!firstName || !lastName || !email || !password) {
       toast({
         title: "Error",
         description: "Please fill in all required fields",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const ageNum = parseInt(age, 10);
-    if (isNaN(ageNum) || ageNum < 18 || ageNum > 150) {
-      toast({
-        title: "Error",
-        description: "Please enter a valid age (18-150)",
         variant: "destructive",
       });
       return;
@@ -87,7 +82,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
           data: {
             first_name: firstName,
             last_name: lastName,
-            age: ageNum,
           },
           emailRedirectTo: `${window.location.origin}/auth/callback?verified=true`,
         },
@@ -95,9 +89,6 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
 
       if (authError) throw authError;
 
-      // Supabase returns a fake user with empty identities when the email
-      // already exists (to prevent enumeration). Detect this case so the
-      // user gets accurate feedback instead of a false "Account Created!".
       if (
         authData.user &&
         (!authData.user.identities || authData.user.identities.length === 0)
@@ -133,6 +124,8 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
     }
   };
 
+  const formDisabled = isLoading || isGoogleRedirecting;
+
   return (
     <Dialog
       open={open}
@@ -144,18 +137,27 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
       <DialogContent className="sm:max-w-md max-h-[90vh] overflow-hidden flex flex-col p-0">
         <div className="flex-shrink-0 px-6 pt-6">
           <DialogHeader>
-            <DialogTitle>Create Your Account</DialogTitle>
+            <DialogTitle>Create your account</DialogTitle>
             <DialogDescription>
-              Start your journey to financial mastery. All fields are required.
+              Build your financial profile
             </DialogDescription>
           </DialogHeader>
         </div>
 
         <div className="space-y-4 py-4 px-6 overflow-y-auto flex-1 min-h-0">
+          {googleAuthEnabled && (
+            <GoogleAuthButton
+              returnTo="/onboarding"
+              onRedirectingChange={setIsGoogleRedirecting}
+            />
+          )}
+
+          {googleAuthEnabled && <AuthDivider />}
+
           <form onSubmit={handleEmailSignUp} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="signup-first-name">First Name *</Label>
+                <Label htmlFor="signup-first-name">First name</Label>
                 <Input
                   id="signup-first-name"
                   type="text"
@@ -164,10 +166,11 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                   value={firstName}
                   onChange={(e) => setFirstName(e.target.value)}
                   required
+                  disabled={formDisabled}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="signup-last-name">Last Name *</Label>
+                <Label htmlFor="signup-last-name">Last name</Label>
                 <Input
                   id="signup-last-name"
                   type="text"
@@ -176,29 +179,13 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                   value={lastName}
                   onChange={(e) => setLastName(e.target.value)}
                   required
+                  disabled={formDisabled}
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="signup-age">Age *</Label>
-              <Input
-                id="signup-age"
-                type="number"
-                placeholder="25"
-                min="18"
-                max="150"
-                value={age}
-                onChange={(e) => setAge(e.target.value)}
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Must be between 18 and 150
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="signup-email">Email *</Label>
+              <Label htmlFor="signup-email">Email</Label>
               <Input
                 id="signup-email"
                 type="email"
@@ -207,11 +194,12 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={formDisabled}
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="signup-password">Password *</Label>
+              <Label htmlFor="signup-password">Password</Label>
               <Input
                 id="signup-password"
                 type="password"
@@ -221,6 +209,7 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 minLength={10}
+                disabled={formDisabled}
               />
               <p className="text-xs text-muted-foreground">
                 Must be at least 10 characters
@@ -228,28 +217,46 @@ export function SignUpDialog({ open, onOpenChange }: SignUpDialogProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="signup-confirm-password">Confirm Password *</Label>
+              <Label htmlFor="signup-confirm-password">Confirm password</Label>
               <Input
                 id="signup-confirm-password"
                 type="password"
+                autoComplete="new-password"
                 placeholder="••••••••"
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
                 required
+                disabled={formDisabled}
               />
             </div>
 
-            <Button type="submit" className="w-full" disabled={isLoading}>
+            <Button type="submit" className="w-full" disabled={formDisabled}>
               {isLoading ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Creating Account...
+                  Creating account...
                 </>
               ) : (
-                "Create Account"
+                "Create account"
               )}
             </Button>
           </form>
+
+          {onSwitchToSignIn && (
+            <p className="text-center text-sm text-muted-foreground">
+              Already registered?{" "}
+              <button
+                type="button"
+                className="text-primary hover:underline"
+                onClick={() => {
+                  onOpenChange(false);
+                  onSwitchToSignIn();
+                }}
+              >
+                Sign in
+              </button>
+            </p>
+          )}
         </div>
       </DialogContent>
     </Dialog>

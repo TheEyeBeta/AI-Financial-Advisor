@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { supabase, coreDb } from "@/lib/supabase";
 import { getCurrentUserProfile } from "@/lib/user-helpers";
 import { getSupabaseEnvConfig } from "@/lib/env";
+import { buildAuthCallbackUrl, sanitizeReturnPath } from "@/lib/auth-redirect";
 import { analytics, AnalyticsEvents } from "@/services/analytics";
 import type { User } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
@@ -24,6 +25,7 @@ interface AuthContextValue {
   signUp: (email: string, password: string) => Promise<unknown>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
+  signInWithGoogle: (returnTo?: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
@@ -194,6 +196,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   };
 
+  const signInWithGoogle = async (returnTo?: string) => {
+    const safePath = sanitizeReturnPath(returnTo);
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: buildAuthCallbackUrl(safePath),
+      },
+    });
+    if (error) throw error;
+    AnalyticsEvents.signIn("oauth");
+  };
+
   const refreshProfile = async () => {
     if (!authUser) return;
 
@@ -226,6 +240,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     signUp,
     signOut,
     resetPassword,
+    signInWithGoogle,
     refreshProfile,
   };
 

@@ -15,18 +15,24 @@ import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
+import { isGoogleAuthEnabled } from "@/lib/env";
+import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
+import { AuthDivider } from "@/components/auth/AuthDivider";
 
 interface SignInDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onSwitchToSignUp?: () => void;
 }
 
-export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
+export function SignInDialog({ open, onOpenChange, onSwitchToSignUp }: SignInDialogProps) {
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const googleAuthEnabled = isGoogleAuthEnabled();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [isGoogleRedirecting, setIsGoogleRedirecting] = useState(false);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
   const [resetEmail, setResetEmail] = useState("");
   const [isResetting, setIsResetting] = useState(false);
@@ -34,7 +40,7 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email || !password) {
       toast({
         title: "Error",
@@ -68,7 +74,7 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
 
   const handlePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!resetEmail) {
       toast({
         title: "Error",
@@ -102,6 +108,8 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
     }
   };
 
+  const formDisabled = isLoading || isGoogleRedirecting;
+
   return (
     <>
       <Dialog
@@ -110,6 +118,7 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
           if (!nextOpen) {
             setEmail("");
             setPassword("");
+            setIsGoogleRedirecting(false);
             setShowPasswordReset(false);
             setResetEmail("");
             setResetSent(false);
@@ -119,13 +128,22 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Sign In</DialogTitle>
+            <DialogTitle>Sign in</DialogTitle>
             <DialogDescription>
-              Welcome back! Sign in to continue your financial journey.
+              Welcome back to Lens
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
+            {googleAuthEnabled && (
+              <GoogleAuthButton
+                returnTo="/advisor"
+                onRedirectingChange={setIsGoogleRedirecting}
+              />
+            )}
+
+            {googleAuthEnabled && <AuthDivider />}
+
             <form onSubmit={handleEmailSignIn} className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="signin-email">Email</Label>
@@ -137,6 +155,7 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                  disabled={formDisabled}
                 />
               </div>
 
@@ -150,6 +169,7 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  disabled={formDisabled}
                 />
               </div>
 
@@ -161,12 +181,13 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
                     onOpenChange(false);
                   }}
                   className="text-sm text-primary hover:underline"
+                  disabled={formDisabled}
                 >
                   Forgot password?
                 </button>
               </div>
 
-              <Button type="submit" className="w-full" disabled={isLoading}>
+              <Button type="submit" className="w-full" disabled={formDisabled}>
                 {isLoading ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -177,6 +198,22 @@ export function SignInDialog({ open, onOpenChange }: SignInDialogProps) {
                 )}
               </Button>
             </form>
+
+            {onSwitchToSignUp && (
+              <p className="text-center text-sm text-muted-foreground">
+                New to Lens?{" "}
+                <button
+                  type="button"
+                  className="text-primary hover:underline"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onSwitchToSignUp();
+                  }}
+                >
+                  Create an account
+                </button>
+              </p>
+            )}
           </div>
         </DialogContent>
       </Dialog>

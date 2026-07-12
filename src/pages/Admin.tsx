@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Users, Shield, Database, MessageSquare, TrendingUp,
   Activity, Search, Download, Trash2, RefreshCw,
-  BarChart3, UserCheck, UserX, Clock, Server,
+  BarChart3, Clock, Server,
   Wifi, WifiOff, Loader2, Play, Terminal, Sparkles,
   ShieldCheck, AlertTriangle, CheckCircle2, XCircle,
   MinusCircle, FileText, Zap, Radio, Eye,
@@ -594,7 +594,6 @@ export default function Admin() {
     SCHEDULED_JOB_DEFS.forEach((def) => { void fetchJobLogs(def.id); });
     const interval = setInterval(() => { void fetchSchedulerStatus(); }, 30000);
     return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, fetchSchedulerStatus]);
 
   // ── Computed values ───────────────────────────────────────────────────────

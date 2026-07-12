@@ -10,6 +10,7 @@ const mockSignInWithPassword = vi.fn();
 const mockSignUp = vi.fn();
 const mockSignOut = vi.fn();
 const mockResetPasswordForEmail = vi.fn();
+const mockSignInWithOAuth = vi.fn();
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
@@ -20,6 +21,7 @@ vi.mock('@/lib/supabase', () => ({
       signUp: (params: unknown) => mockSignUp(params),
       signOut: () => mockSignOut(),
       resetPasswordForEmail: (email: string, opts: unknown) => mockResetPasswordForEmail(email, opts),
+      signInWithOAuth: (params: unknown) => mockSignInWithOAuth(params),
     },
     from: vi.fn().mockReturnThis(),
     select: vi.fn().mockReturnThis(),
@@ -221,6 +223,52 @@ describe('useAuthContext', () => {
         redirectTo: expect.stringContaining('/auth/reset-password'),
       })
     );
+  });
+
+  it('should call signInWithOAuth with google provider and callback URL', async () => {
+    mockSignInWithOAuth.mockResolvedValue({ data: { provider: 'google', url: 'https://google.com' }, error: null });
+
+    const { result } = renderHook(() => useAuthContext(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.signInWithGoogle('/onboarding');
+    });
+
+    expect(mockSignInWithOAuth).toHaveBeenCalledTimes(1);
+    expect(mockSignInWithOAuth).toHaveBeenCalledWith({
+      provider: 'google',
+      options: {
+        redirectTo: expect.stringContaining('/auth/callback'),
+      },
+    });
+
+    const callArgs = mockSignInWithOAuth.mock.calls[0][0] as { options: { redirectTo: string } };
+    expect(callArgs.options.redirectTo).toContain('next=%2Fonboarding');
+  });
+
+  it('should reject unsafe return paths in signInWithGoogle', async () => {
+    mockSignInWithOAuth.mockResolvedValue({ data: { provider: 'google', url: 'https://google.com' }, error: null });
+
+    const { result } = renderHook(() => useAuthContext(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => {
+      expect(result.current.loading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.signInWithGoogle('https://evil.com');
+    });
+
+    const callArgs = mockSignInWithOAuth.mock.calls[0][0] as { options: { redirectTo: string } };
+    expect(callArgs.options.redirectTo).toContain('next=%2Fadvisor');
   });
 
   it('should throw error if used outside AuthProvider', () => {

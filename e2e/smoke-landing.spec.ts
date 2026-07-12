@@ -21,4 +21,14 @@ test.describe('Smoke: Landing page', () => {
       page.getByRole('button', { name: /sign in/i }),
     ).toBeVisible({ timeout: 10_000 });
   });
+
+  test('shows Lens branding and legal footer links', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+    await expect(page.getByRole('heading', { name: /^lens$/i })).toBeVisible();
+    await expect(page.getByText(/ai financial advisor/i)).toBeVisible();
+    await expect(page.getByRole('link', { name: /privacy policy/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /terms of service/i })).toBeVisible();
+    await expect(page.getByRole('link', { name: /theeyebeta@gmail.com/i })).toBeVisible();
+  });
 });

@@ -46,23 +46,68 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
-export async function installSupabaseMocks(page: Page) {
+export async function installSupabaseMocks(page: Page, options?: { onboardingComplete?: boolean }) {
+  const onboardingComplete = options?.onboardingComplete ?? true;
+  const profileWithOnboarding = {
+    ...profile,
+    onboarding_complete: onboardingComplete,
+  };
+
   // Track authentication state
   let isAuthenticated = false;
 
-  // Handle sign-in - set authenticated state
-  await page.route('**/auth/v1/token?grant_type=password', async (route) => {
+  // Handle Google OAuth authorize redirect (mock — no real Google page)
+  await page.route('**/auth/v1/authorize**', async (route) => {
     isAuthenticated = true;
-    await fulfillJson(route, mockSession);
+    const url = new URL(route.request().url());
+    const redirectTo = url.searchParams.get('redirect_to') || '/auth/callback';
+    await route.fulfill({
+      status: 302,
+      headers: {
+        Location: `${redirectTo}${redirectTo.includes('?') ? '&' : '?'}code=mock-oauth-code`,
+      },
+    });
   });
 
-  // Handle refresh token
-  await page.route('**/auth/v1/token?grant_type=refresh_token', async (route) => {
-    if (isAuthenticated) {
-      await fulfillJson(route, mockSession);
-    } else {
-      await fulfillJson(route, { error: 'invalid_grant' }, 400);
+  // Handle token grants (password sign-in, refresh)
+  await page.route(/\/auth\/v1\/token/, async (route) => {
+    if (route.request().method() !== 'POST') {
+      await route.continue();
+      return;
     }
+
+    const url = new URL(route.request().url());
+    const rawBody = route.request().postData() ?? '';
+    let grantType = url.searchParams.get('grant_type') ?? undefined;
+
+    try {
+      const json = JSON.parse(rawBody) as { grant_type?: string; email?: string; password?: string };
+      grantType = grantType ?? json.grant_type ?? (json.email && json.password ? 'password' : undefined);
+    } catch {
+      const params = new URLSearchParams(rawBody);
+      grantType = grantType ?? params.get('grant_type') ?? undefined;
+      if (!grantType && params.get('email') && params.get('password')) {
+        grantType = 'password';
+      }
+    }
+
+    if (!grantType || grantType === 'password') {
+      isAuthenticated = true;
+      await fulfillJson(route, mockSession);
+      return;
+    }
+
+    if (grantType === 'refresh_token') {
+      if (isAuthenticated) {
+        await fulfillJson(route, mockSession);
+      } else {
+        await fulfillJson(route, { error: 'invalid_grant' }, 400);
+      }
+      return;
+    }
+
+    isAuthenticated = true;
+    await fulfillJson(route, mockSession);
   });
 
   // Handle getSession - return session only if authenticated
@@ -100,25 +145,21 @@ export async function installSupabaseMocks(page: Page) {
       // - POST/PATCH return the object directly
       
       if (method === 'GET') {
-        // All GET requests return arrays in Supabase REST API
-        // The client's .single() will extract the first element
-        await fulfillJson(route, [profile]);
+        await fulfillJson(route, [profileWithOnboarding]);
         return;
       }
-      
-      // POST returns the created object
+
       if (method === 'POST') {
-        await fulfillJson(route, profile, 201);
+        await fulfillJson(route, profileWithOnboarding, 201);
         return;
       }
-      
-      // PATCH/PUT return the updated object
+
       if (method === 'PATCH' || method === 'PUT') {
-        await fulfillJson(route, profile);
+        await fulfillJson(route, profileWithOnboarding);
         return;
       }
-      
-      await fulfillJson(route, profile);
+
+      await fulfillJson(route, profileWithOnboarding);
     } else {
       await fulfillJson(route, [], 401);
     }

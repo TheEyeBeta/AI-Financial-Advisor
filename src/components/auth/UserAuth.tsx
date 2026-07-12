@@ -106,8 +106,16 @@ export function UserAuth() {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <SignInDialog open={showSignInDialog} onOpenChange={setShowSignInDialog} />
-      <SignUpDialog open={showSignUpDialog} onOpenChange={setShowSignUpDialog} />
+      <SignInDialog
+        open={showSignInDialog}
+        onOpenChange={setShowSignInDialog}
+        onSwitchToSignUp={() => setShowSignUpDialog(true)}
+      />
+      <SignUpDialog
+        open={showSignUpDialog}
+        onOpenChange={setShowSignUpDialog}
+        onSwitchToSignIn={() => setShowSignInDialog(true)}
+      />
     </>
   );
 }
