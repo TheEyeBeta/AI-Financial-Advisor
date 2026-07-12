@@ -258,7 +258,7 @@ class StockDetailResponse(BaseModel):
 async def get_stock_detail(
     raw_request: Request,
     response: Response,
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
     auth_user: Optional[AuthenticatedUser] = Depends(optional_auth),
 ) -> StockDetailResponse:
     """

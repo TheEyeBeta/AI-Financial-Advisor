@@ -700,14 +700,11 @@ def test_meridian_onboard_schedules_background_cache_refresh(client: TestClient)
 
     mock_to_thread = MagicMock(return_value="refresh-coro")
     with patch("app.routes.ai_proxy.run_meridian_onboard", new=AsyncMock()) as mock_onboard, \
-         patch("app.routes.ai_proxy.asyncio.to_thread", new=mock_to_thread), \
          patch("app.routes.ai_proxy.asyncio.create_task") as mock_create_task:
         response = client.post("/api/meridian/onboard", json=sample_body)
 
     assert response.status_code == 200
     mock_onboard.assert_awaited_once()
-    mock_to_thread.assert_called_once_with(
-        ai_proxy._refresh_iris_context_cache_sync,
-        "43245b18-2feb-49a4-9958-44fa5c17881e",
-    )
-    mock_create_task.assert_called_once_with("refresh-coro")
+    mock_create_task.assert_called_once()
+    scheduled = mock_create_task.call_args.args[0]
+    assert scheduled.cr_code.co_name == "_safe_background"

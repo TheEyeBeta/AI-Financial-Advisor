@@ -7,7 +7,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.testclient import TestClient
 
 from app.services.auth import _verify_supabase_jwt, verify_service_role
-from .conftest import TEST_JWT_SECRET, _make_jwt
+from .conftest import TEST_JWT_SECRET, _make_jwt, supabase_test_issuer
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,12 @@ class TestVerifyServiceRole:
         monkeypatch.setenv("AUTH_REQUIRED", "true")
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
         bad_token = pyjwt.encode(
-            {"role": "service_role", "iat": int(time.time())},
+            {
+                "role": "service_role",
+                "iat": int(time.time()),
+                "exp": int(time.time()) + 3600,
+                "iss": supabase_test_issuer(),
+            },
             "wrong-secret",
             algorithm="HS256",
         )
@@ -74,7 +79,12 @@ class TestVerifyServiceRole:
         monkeypatch.setenv("AUTH_REQUIRED", "true")
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
         expired_token = pyjwt.encode(
-            {"role": "service_role", "iat": int(time.time()) - 7200, "exp": int(time.time()) - 3600},
+            {
+                "role": "service_role",
+                "iat": int(time.time()) - 7200,
+                "exp": int(time.time()) - 3600,
+                "iss": supabase_test_issuer(),
+            },
             TEST_JWT_SECRET,
             algorithm="HS256",
         )

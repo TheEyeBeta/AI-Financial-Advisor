@@ -34,6 +34,7 @@ _SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 _HAS_REAL_DB = (
     _SUPABASE_URL
     and "your-test-project" not in _SUPABASE_URL
+    and "test.supabase.co" not in _SUPABASE_URL
     and _SUPABASE_ANON_KEY
     and "your-test-anon-key" not in _SUPABASE_ANON_KEY
     and _SUPABASE_SERVICE_ROLE_KEY

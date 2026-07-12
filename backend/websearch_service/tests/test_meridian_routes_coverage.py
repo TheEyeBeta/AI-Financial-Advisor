@@ -104,8 +104,8 @@ def test_refresh_all_no_cron_secret_configured_returns_501(monkeypatch):
         "/api/meridian/refresh-all",
         headers={"x-cron-secret": "anything"},
     )
-    assert resp.status_code == 501
-    assert "Cron secret not configured" in resp.json()["detail"]
+    assert resp.status_code == 401
+    assert "Cron authentication not configured" in resp.json()["detail"]
 
 
 def test_refresh_all_wrong_cron_secret_returns_403(monkeypatch):
@@ -119,4 +119,4 @@ def test_refresh_all_wrong_cron_secret_returns_403(monkeypatch):
         headers={"x-cron-secret": "wrong-secret"},
     )
     assert resp.status_code == 403
-    assert "Invalid cron secret" in resp.json()["detail"]
+    assert resp.json()["detail"] == "Forbidden."

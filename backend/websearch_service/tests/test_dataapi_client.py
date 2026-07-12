@@ -18,7 +18,6 @@ def client():
         base_url="http://dataapi.test:7000",
         client_id="test-client",
         client_secret="teb_sk_abcd1234_testSecretValue0123456789ab",
-        enabled=True,
     )
 
 
@@ -28,7 +27,6 @@ def disabled_client():
         base_url="",
         client_id="",
         client_secret="",
-        enabled=False,
     )
 
 
@@ -41,7 +39,7 @@ def test_is_configured_when_disabled(disabled_client: DataAPIClient):
 
 
 def test_is_configured_missing_url():
-    c = DataAPIClient(base_url="", client_id="x", client_secret="y", enabled=True)
+    c = DataAPIClient(base_url="", client_id="x", client_secret="y")
     assert c.is_configured is False
 
 

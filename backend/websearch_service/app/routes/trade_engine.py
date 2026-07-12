@@ -408,7 +408,7 @@ def _get_supabase_client():
 
 @router.get("/api/stock-price/{ticker}")
 async def get_stock_price(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$", description="Ticker symbol (e.g. AAPL, BRK.B)"),
     source: str = Query(default="auto", description="Data source: supabase, dataapi, or auto"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -468,7 +468,7 @@ async def get_stock_price(
 
 @router.get("/api/v1/indicators/{ticker}/technical")
 async def get_technical_indicators(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     date: Optional[str] = Query(None, description="Filter to a specific date (YYYY-MM-DD)"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -497,7 +497,7 @@ async def get_technical_indicators(
 
 @router.get("/api/v1/charting/{ticker}/prices")
 async def get_charting_prices(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     start_date: Optional[str] = Query(None),
     end_date: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=2000),
@@ -605,7 +605,7 @@ async def search_symbols(
 
 @router.get("/api/v1/tickers/{ticker}/fundamentals")
 async def get_ticker_fundamentals(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     ticker = ticker.upper()
@@ -620,7 +620,7 @@ async def get_ticker_fundamentals(
 
 @router.get("/api/v1/tickers/{ticker}/corporate-actions")
 async def get_corporate_actions(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     limit: int = Query(50, ge=1, le=500),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -636,7 +636,7 @@ async def get_corporate_actions(
 
 @router.get("/api/v1/financials/{ticker}/income")
 async def get_financials_income(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     limit: int = Query(12, ge=1, le=40),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -652,7 +652,7 @@ async def get_financials_income(
 
 @router.get("/api/v1/financials/{ticker}/balance")
 async def get_financials_balance(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     limit: int = Query(12, ge=1, le=40),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -668,7 +668,7 @@ async def get_financials_balance(
 
 @router.get("/api/v1/financials/{ticker}/cashflow")
 async def get_financials_cashflow(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     limit: int = Query(12, ge=1, le=40),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -684,7 +684,7 @@ async def get_financials_cashflow(
 
 @router.get("/api/v1/financials/{ticker}/quality")
 async def get_financials_quality(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     limit: int = Query(12, ge=1, le=40),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -700,7 +700,7 @@ async def get_financials_quality(
 
 @router.get("/api/v1/indicators/{ticker}/risk")
 async def get_risk_indicators(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=2000),
@@ -718,7 +718,7 @@ async def get_risk_indicators(
 
 @router.get("/api/v1/indicators/{ticker}/valuation")
 async def get_valuation_indicators(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=2000),
@@ -736,7 +736,7 @@ async def get_valuation_indicators(
 
 @router.get("/api/v1/indicators/{ticker}/returns")
 async def get_returns_indicators(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     start: Optional[str] = Query(None),
     end: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=2000),
@@ -754,7 +754,7 @@ async def get_returns_indicators(
 
 @router.get("/api/v1/news/ticker/{ticker}")
 async def get_ticker_news(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     limit: int = Query(10, ge=1, le=50),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
@@ -868,7 +868,7 @@ async def place_trade_order(
 
 @router.get("/api/v1/ai/ticker/{ticker}")
 async def get_ticker_details(
-    ticker: str = Path(..., pattern=r"^[A-Z0-9.]{1,10}$"),
+    ticker: str = Path(..., pattern=r"^[A-Za-z0-9.]{1,10}$"),
     _auth: AuthenticatedUser = Depends(require_auth),
 ) -> Dict[str, Any]:
     """Full ticker detail (snapshot + signals + price history), sourced from TheEyeBetaDataAPI."""

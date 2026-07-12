@@ -1,4 +1,5 @@
 """Pytest configuration and fixtures."""
+import asyncio
 import os
 import time
 from typing import AsyncGenerator
@@ -13,6 +14,7 @@ TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests"
 # so we must provide test placeholders before collection begins.
 # setdefault keeps real values from .env.test intact for integration tests.
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 os.environ.setdefault("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
 os.environ.setdefault("AUTH_REQUIRED", "false")
@@ -26,9 +28,14 @@ import pytest
 from fastapi.testclient import TestClient
 from httpx import AsyncClient
 
+def run_async(coro):
+    """Run a coroutine in a fresh event loop (Python 3.12+ safe)."""
+    return asyncio.run(coro)
+
 # Set stub Supabase credentials before the app module chain is imported.
 # supabase_client.py calls create_client() at module level and raises if missing.
 os.environ.setdefault("SUPABASE_URL", "https://test.supabase.co")
+os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 
 # Patch create_client so no real network connection is attempted at import time.
@@ -36,9 +43,23 @@ with patch("supabase.create_client", return_value=MagicMock()):
     from app.main import create_app
 
 
+def supabase_test_issuer() -> str:
+    """Issuer claim expected by auth._verify_issuer for the test Supabase project."""
+    base = os.environ.get("SUPABASE_URL", "https://test.supabase.co").rstrip("/")
+    return f"{base}/auth/v1"
+
+
 def _make_jwt(role: str = "service_role", sub: str = "test-service", **extra) -> str:
     """Create a signed HS256 JWT for testing."""
-    payload = {"role": role, "sub": sub, "iat": int(time.time()), **extra}
+    now = int(time.time())
+    payload = {
+        "role": role,
+        "sub": sub,
+        "iat": now,
+        "exp": extra.pop("exp", now + 3600),
+        "iss": extra.pop("iss", supabase_test_issuer()),
+        **extra,
+    }
     return pyjwt.encode(payload, TEST_JWT_SECRET, algorithm="HS256")
 
 
@@ -78,6 +99,11 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "test")
     monkeypatch.setenv("AUTH_REQUIRED", "false")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+    monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "test-anon-key")
+    monkeypatch.delenv("VITE_SUPABASE_URL", raising=False)
+    monkeypatch.delenv("VITE_SUPABASE_ANON_KEY", raising=False)
+    monkeypatch.delenv("VITE_SUPABASE_SERVICE_ROLE_KEY", raising=False)
 
 
 @pytest.fixture
