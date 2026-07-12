@@ -1,11 +1,12 @@
 """
-News endpoint — serves market news from TheEyeBetaDataAPI when available,
-falls back to an empty response so the frontend uses its Supabase path.
+News endpoint — serves market news from TheEyeBetaDataAPI when configured.
+Returns explicit errors when the provider is unavailable.
 """
 import os
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from ..services.auth import AuthenticatedUser, optional_auth
 from ..services.dataapi_client import get_dataapi_client
@@ -35,11 +36,9 @@ async def get_news(
     auth_user: Optional[AuthenticatedUser] = Depends(optional_auth),
 ) -> Dict[str, Any]:
     """
-    Stub endpoint for news.
-    
-    Note: News articles are stored in Supabase (news_articles table).
-    This endpoint returns empty results to prevent 404 errors.
-    The frontend should use Supabase directly for news.
+    Return market news from DataAPI when configured.
+
+    Clients should use Supabase `news_articles` when this endpoint returns 503.
     """
     verified_user_id = auth_user.auth_id if auth_user else None
     rate_limit_config = AUTHENTICATED_RATE_LIMIT if verified_user_id else ANONYMOUS_RATE_LIMIT
@@ -54,6 +53,13 @@ async def get_news(
     if not allowed:
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
     rate_limiter.add_rate_limit_headers(response, rate_limit_info)
+
+    def _unavailable_response(status_code: int, payload: Dict[str, Any]) -> JSONResponse:
+        return JSONResponse(
+            status_code=status_code,
+            content={"detail": payload},
+            headers=dict(response.headers),
+        )
 
     try:
         client = get_dataapi_client()
@@ -75,16 +81,25 @@ async def get_news(
             ]
             return {"items": items, "next_cursor": None}
 
-        return {
-            "items": [],
-            "next_cursor": None,
-            "message": "News is available via Supabase news_articles table",
-        }
+        return _unavailable_response(
+            503,
+            {
+                "message": "News provider is not configured; use Supabase news_articles",
+                "availability_status": "not_configured",
+                "reason_code": "dataapi_not_configured",
+            },
+        )
+    except HTTPException:
+        raise
     except Exception as e:
-        return {
-            "items": [],
-            "next_cursor": None,
-            "error": str(e) if os.getenv("ENVIRONMENT") != "production" else None,
-        }
+        return _unavailable_response(
+            502,
+            {
+                "message": "News provider request failed",
+                "availability_status": "unavailable",
+                "reason_code": "dataapi_error",
+                "error": str(e) if os.getenv("ENVIRONMENT") != "production" else None,
+            },
+        )
     finally:
         rate_limiter.release_request(raw_request, user_id=verified_user_id)

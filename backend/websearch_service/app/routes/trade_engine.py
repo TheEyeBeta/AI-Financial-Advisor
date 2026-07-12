@@ -1,9 +1,8 @@
 """
 Trade Engine API routes.
 
-These endpoints provide AI context data that would normally come from a live Trade Engine.
-Since the Trade Engine may not be deployed, these return stub/empty data so the frontend
-doesn't error out. The frontend will fall back to Supabase data when this returns empty.
+Market and trade-engine endpoints return explicit availability metadata.
+Silent stub/empty success responses are not used in production paths.
 """
 
 from __future__ import annotations
@@ -149,6 +148,28 @@ class AIContextResponse(BaseModel):
     recent_signals: List[TradingSignal] = []
     recent_news: List[NewsItemFull] = []
     summary: EngineSummaryFull
+    data_available: bool = False
+    availability_status: str = "unavailable"
+    data_source: Optional[str] = None
+    as_of: Optional[str] = None
+    reason_code: Optional[str] = None
+
+
+def _availability_fields(
+    *,
+    data_available: bool,
+    availability_status: str,
+    data_source: Optional[str],
+    as_of: Optional[str] = None,
+    reason_code: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "data_available": data_available,
+        "availability_status": availability_status,
+        "data_source": data_source,
+        "as_of": as_of,
+        "reason_code": reason_code,
+    }
 
 
 async def _build_context_from_dataapi() -> AIContextResponse | None:
@@ -217,8 +238,9 @@ async def _build_context_from_dataapi() -> AIContextResponse | None:
             logger.warning("DataAPI signals fetch skipped during context build: %s", sig_exc)
 
         tracked = [s.ticker for s in snapshots]
+        as_of = datetime.now(timezone.utc).isoformat()
         return AIContextResponse(
-            generated_at=datetime.now(timezone.utc).isoformat(),
+            generated_at=as_of,
             engine_status=EngineStatus(
                 is_running=True,
                 engine_started_at=None,
@@ -239,9 +261,96 @@ async def _build_context_from_dataapi() -> AIContextResponse | None:
                 signals_last_24h=len(signals_list),
                 news_count=len(news_items),
             ),
+            **_availability_fields(
+                data_available=len(snapshots) > 0,
+                availability_status="ok" if snapshots else "degraded",
+                data_source="dataapi",
+                as_of=as_of,
+            ),
         )
     except Exception as exc:
         logger.warning("DataAPI context fetch failed: %s", exc)
+        return None
+
+
+def _build_context_from_supabase() -> AIContextResponse | None:
+    """Build AI context from Supabase market snapshots. Returns None when unavailable."""
+    sb_client = _get_supabase_client()
+    if not sb_client:
+        return None
+    try:
+        result = _query_stock_snapshots(
+            sb_client,
+            columns="ticker,company_name,last_price,price_change_pct,volume,rsi_14,sma_50,sma_200,macd,macd_signal,pe_ratio,market_cap,latest_signal,signal_confidence,updated_at",
+            limit=50,
+        )
+        rows = result.data or []
+        if not rows:
+            return None
+
+        snapshots: list[TickerSnapshot] = []
+        buy_tickers: list[str] = []
+        sell_tickers: list[str] = []
+        latest_as_of: str | None = None
+        for row in rows:
+            snap = TickerSnapshot(
+                ticker=row.get("ticker", ""),
+                company_name=row.get("company_name"),
+                last_price=row.get("last_price"),
+                price_change_pct=row.get("price_change_pct"),
+                volume=row.get("volume"),
+                rsi_14=row.get("rsi_14"),
+                sma_50=row.get("sma_50"),
+                sma_200=row.get("sma_200"),
+                macd=row.get("macd"),
+                macd_signal=row.get("macd_signal"),
+                pe_ratio=row.get("pe_ratio"),
+                market_cap=row.get("market_cap"),
+                latest_signal=row.get("latest_signal"),
+                signal_confidence=row.get("signal_confidence"),
+            )
+            snapshots.append(snap)
+            sig = (row.get("latest_signal") or "").upper()
+            if sig == "BUY":
+                buy_tickers.append(snap.ticker)
+            elif sig == "SELL":
+                sell_tickers.append(snap.ticker)
+            updated_at = row.get("updated_at")
+            if updated_at and (latest_as_of is None or str(updated_at) > latest_as_of):
+                latest_as_of = str(updated_at)
+
+        tracked = [s.ticker for s in snapshots]
+        as_of = latest_as_of or datetime.now(timezone.utc).isoformat()
+        return AIContextResponse(
+            generated_at=datetime.now(timezone.utc).isoformat(),
+            engine_status=EngineStatus(
+                is_running=False,
+                active_workers={"supabase": True},
+            ),
+            tracked_tickers=tracked,
+            ticker_snapshots=snapshots,
+            recent_signals=[],
+            recent_news=[],
+            summary=EngineSummaryFull(
+                total_tracked_tickers=len(tracked),
+                tickers_with_data=len(snapshots),
+                buy_signals_count=len(buy_tickers),
+                sell_signals_count=len(sell_tickers),
+                hold_signals_count=0,
+                tickers_with_buy=buy_tickers,
+                tickers_with_sell=sell_tickers,
+                signals_last_24h=0,
+                news_count=0,
+            ),
+            **_availability_fields(
+                data_available=True,
+                availability_status="ok",
+                data_source="supabase",
+                as_of=as_of,
+            ),
+        )
+    except Exception as exc:
+        logger.warning("Supabase context fetch failed: %s", exc)
         return None
 
 
@@ -256,54 +365,55 @@ async def get_ai_context(
     """
     Get comprehensive AI context for the chatbot.
 
-    Use `source=dataapi` to fetch from TheEyeBetaDataAPI (live engine data),
-    `source=auto` to try DataAPI first with stub fallback, or `source=supabase`
-    (default) for the original stub behavior.
+  Use `source=dataapi` for live DataAPI data, `source=supabase` for cached
+  market snapshots, or `source=auto` to try DataAPI then Supabase.
     """
-    # Try DataAPI if requested
-    if source in ("dataapi", "auto"):
+    normalized_source = source.strip().lower()
+
+    if normalized_source == "dataapi":
         result = await _build_context_from_dataapi()
+        if result is not None and result.data_available:
+            return result
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Market data provider is unavailable",
+                "availability_status": "unavailable",
+                "reason_code": "dataapi_unavailable",
+                "data_source": "dataapi",
+            },
+        )
+
+    if normalized_source == "supabase":
+        result = _build_context_from_supabase()
         if result is not None:
             return result
-        if source == "dataapi":
-            # DataAPI was explicitly requested but failed — return error-aware stub
-            return AIContextResponse(
-                generated_at=datetime.now(timezone.utc).isoformat(),
-                engine_status=EngineStatus(is_running=False, active_workers={"dataapi": False}),
-                tracked_tickers=[],
-                ticker_snapshots=[],
-                recent_signals=[],
-                recent_news=[],
-                summary=EngineSummaryFull(),
-            )
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "No market snapshot data is available",
+                "availability_status": "unavailable",
+                "reason_code": "supabase_empty",
+                "data_source": "supabase",
+            },
+        )
 
-    # Default stub response (original behavior)
-    return AIContextResponse(
-        generated_at=datetime.now(timezone.utc).isoformat(),
-        engine_status=EngineStatus(
-            is_running=False,
-            engine_started_at=None,
-            last_price_tick=None,
-            last_news_poll=None,
-            total_ticks_processed=0,
-            total_news_fetched=0,
-            active_workers={},
-        ),
-        tracked_tickers=[],
-        ticker_snapshots=[],
-        recent_signals=[],
-        recent_news=[],
-        summary=EngineSummaryFull(
-            total_tracked_tickers=0,
-            tickers_with_data=0,
-            buy_signals_count=0,
-            sell_signals_count=0,
-            hold_signals_count=0,
-            tickers_with_buy=[],
-            tickers_with_sell=[],
-            signals_last_24h=0,
-            news_count=0,
-        ),
+    # auto: DataAPI first, then Supabase
+    result = await _build_context_from_dataapi()
+    if result is not None and result.data_available:
+        return result
+    supabase_result = _build_context_from_supabase()
+    if supabase_result is not None:
+        return supabase_result
+
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "message": "Market data is unavailable from all configured sources",
+            "availability_status": "unavailable",
+            "reason_code": "no_market_data",
+            "data_source": None,
+        },
     )
 
 
@@ -320,9 +430,10 @@ async def get_signals(
     Get recent trading signals.
 
     Use `source=dataapi` or `source=auto` to fetch from TheEyeBetaDataAPI.
-    Default (supabase) returns empty list (Trade Engine not deployed).
+    Returns 503 when no signal source is available.
     """
-    if source in ("dataapi", "auto"):
+    normalized_source = source.strip().lower()
+    if normalized_source in ("dataapi", "auto"):
         client = get_dataapi_client()
         if client.is_configured:
             try:
@@ -343,10 +454,23 @@ async def get_signals(
                 return signals
             except Exception as exc:
                 logger.warning("DataAPI signals fetch failed: %s", exc)
-                if source == "dataapi":
-                    return []
+                if normalized_source == "dataapi":
+                    raise HTTPException(
+                        status_code=502,
+                        detail={
+                            "message": "Trading signal provider failed",
+                            "reason_code": "dataapi_error",
+                        },
+                    ) from exc
 
-    return []
+    raise HTTPException(
+        status_code=503,
+        detail={
+            "message": "Trading signals are unavailable",
+            "availability_status": "unavailable",
+            "reason_code": "signals_not_configured",
+        },
+    )
 
 
 @router.get("/api/v1/engine/status")
@@ -439,7 +563,13 @@ async def get_stock_price(
             except Exception as exc:
                 logger.warning("DataAPI price fetch failed for %s: %s", ticker, exc)
                 if source == "dataapi":
-                    return {"ticker": ticker, "price": None, "change_percent": None, "source": "dataapi_error"}
+                    raise HTTPException(
+                        status_code=502,
+                        detail={
+                            "message": f"DataAPI price fetch failed for {ticker}",
+                            "reason_code": "dataapi_error",
+                        },
+                    ) from exc
 
     # Supabase fallback (original behavior)
     sb_client = _get_supabase_client()
@@ -463,7 +593,15 @@ async def get_stock_price(
         except Exception as sb_exc:
             logger.warning("Supabase price fetch failed for %s: %s", ticker, sb_exc)
 
-    return {"ticker": ticker, "price": None, "change_percent": None, "source": "unavailable"}
+    raise HTTPException(
+        status_code=404,
+        detail={
+            "message": f"No price data available for {ticker}",
+            "availability_status": "unavailable",
+            "reason_code": "price_not_found",
+            "ticker": ticker,
+        },
+    )
 
 
 @router.get("/api/v1/indicators/{ticker}/technical")

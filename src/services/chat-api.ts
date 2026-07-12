@@ -108,6 +108,28 @@ function fromAiChatMessages() {
   return aiDb.from('chat_messages');
 }
 
+function fromAiChatTurnRequests() {
+  return aiDb.from('chat_turn_requests');
+}
+
+export type ChatTurnStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
+
+export interface ChatTurnRequest {
+  id: string;
+  user_id: string;
+  chat_id: string;
+  user_message_id: string;
+  assistant_message_id: string | null;
+  correlation_id: string;
+  retry_of_request_id: string | null;
+  status: ChatTurnStatus;
+  failure_code: string | null;
+  failure_reason: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+}
+
 function isSchemaOrTableNotFound(error: unknown): boolean {
   if (!error || typeof error !== 'object') return false;
   const e = error as { status?: number; code?: string; message?: string };
@@ -282,20 +304,6 @@ export const chatApi = {
     }
 
     const messages = data || [];
-    const lastMessage = messages[messages.length - 1];
-
-    if (lastMessage && lastMessage.role === 'user') {
-      const messageAge = Date.now() - new Date(lastMessage.created_at).getTime();
-      const STREAM_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes — longer than any stream timeout
-
-      if (messageAge > STREAM_TIMEOUT_MS) {
-        await fromAiChatMessages()
-          .delete()
-          .eq('id', lastMessage.id);
-        return messages.slice(0, -1);
-      }
-    }
-
     return messages;
   },
 
@@ -343,6 +351,63 @@ export const chatApi = {
       .eq('chat_id', chatId);
 
     if (error) throw error;
+  },
+};
+
+export const chatTurnApi = {
+  async createProcessing(
+    userId: string,
+    chatId: string,
+    userMessageId: string,
+    correlationId: string,
+  ): Promise<ChatTurnRequest | null> {
+    const now = new Date().toISOString();
+    const { data, error } = await fromAiChatTurnRequests()
+      .insert({
+        user_id: userId,
+        chat_id: chatId,
+        user_message_id: userMessageId,
+        correlation_id: correlationId,
+        status: 'processing',
+        updated_at: now,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      if (isSchemaOrTableNotFound(error)) return null;
+      throw error;
+    }
+    return data as ChatTurnRequest;
+  },
+
+  async markCompleted(turnId: string, assistantMessageId: string): Promise<void> {
+    const now = new Date().toISOString();
+    const { error } = await fromAiChatTurnRequests()
+      .update({
+        status: 'completed',
+        assistant_message_id: assistantMessageId,
+        updated_at: now,
+        completed_at: now,
+      })
+      .eq('id', turnId);
+
+    if (error && !isSchemaOrTableNotFound(error)) throw error;
+  },
+
+  async markFailed(turnId: string, failureCode: string, failureReason: string): Promise<void> {
+    const now = new Date().toISOString();
+    const { error } = await fromAiChatTurnRequests()
+      .update({
+        status: 'failed',
+        failure_code: failureCode,
+        failure_reason: failureReason,
+        updated_at: now,
+        completed_at: now,
+      })
+      .eq('id', turnId);
+
+    if (error && !isSchemaOrTableNotFound(error)) throw error;
   },
 };
 

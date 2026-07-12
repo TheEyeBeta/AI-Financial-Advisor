@@ -1,8 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { chatApi, chatsApi, markDigestRead } from '@/services/chat-api';
+import { chatApi, chatsApi, chatTurnApi, markDigestRead } from '@/services/chat-api';
 import { newsApi } from '@/services/news-api';
 import { apiClient } from '@/lib/api-client';
-import { tradeEngineApi } from '@/services/trade-engine-api';
+import { tradeEngineApi, isTradeEngineContextUsable } from '@/services/trade-engine-api';
 import { portfolioApi, positionsApi, tradesApi, journalApi } from '@/services/trading-api';
 import { achievementsApi, learningApi, marketApi } from '@/services/user-data-api';
 import { pythonApi } from '@/services/python-api';
@@ -213,6 +213,9 @@ export function useSendChatMessage() {
     }) => {
       if (!userId) throw new Error('Not authenticated');
 
+      const correlationId = crypto.randomUUID();
+      let turnRequestId: string | null = null;
+
       // Fetch conversation history for context before saving the current message
       // so the current message appears exactly once (passed explicitly below).
       const history = await chatApi.getMessages(chatId);
@@ -221,41 +224,59 @@ export function useSendChatMessage() {
         content: msg.content
       }));
 
-      // Save user message
-      await chatApi.addMessage(userId, chatId, 'user', message);
+      try {
+        // Save user message (preserved even when AI generation fails)
+        const userMessage = await chatApi.addMessage(userId, chatId, 'user', message);
+        const turnRequest = await chatTurnApi.createProcessing(
+          userId,
+          chatId,
+          userMessage.id,
+          correlationId,
+        );
+        turnRequestId = turnRequest?.id ?? null;
 
-      // Fetch market data context using the user's preferred data source
-      const src = sourceParam(dataSource);
-      const tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48, src);
-      
-      
-      // Get AI response — experience_level and session_type flow through to the backend
-      const experienceLevel = userProfile?.experience_level ?? null;
-      const aiResponse = await pythonApi.getChatResponse(
-        message,
-        userId,
-        experienceLevel,
-        chatHistory,
-        tradeEngineContext,  // Live Trade Engine data; session_type 'advisor' is set inside getChatResponse
-        onChunk,
-      );
-      
-      // Save AI response
-      await chatApi.addMessage(userId, chatId, 'assistant', aiResponse);
-      
-      // Auto-generate title on first message
-      if (isFirstMessage) {
-        try {
-          const title = await pythonApi.generateChatTitle(message);
-          await chatsApi.updateTitle(chatId, title);
-        } catch (error) {
-          // Log error but don't fail the message creation if title generation fails
-          console.error('Failed to generate chat title:', error);
-          // Continue without updating title - chat will use default title
+        // Fetch market data context using the user's preferred data source
+        const src = sourceParam(dataSource);
+        const tradeEngineContext = await tradeEngineApi.getAIContext(true, 15, 48, src);
+        const usableContext = isTradeEngineContextUsable(tradeEngineContext)
+          ? tradeEngineContext
+          : null;
+
+        // Get AI response — experience_level and session_type flow through to the backend
+        const experienceLevel = userProfile?.experience_level ?? null;
+        const aiResponse = await pythonApi.getChatResponse(
+          message,
+          userId,
+          experienceLevel,
+          chatHistory,
+          usableContext,
+          onChunk,
+        );
+
+        const assistantMessage = await chatApi.addMessage(userId, chatId, 'assistant', aiResponse);
+        if (turnRequestId) {
+          await chatTurnApi.markCompleted(turnRequestId, assistantMessage.id);
         }
+
+        // Auto-generate title on first message
+        if (isFirstMessage) {
+          try {
+            const title = await pythonApi.generateChatTitle(message);
+            await chatsApi.updateTitle(chatId, title);
+          } catch (error) {
+            console.error('Failed to generate chat title:', error);
+          }
+        }
+
+        return { message, response: aiResponse };
+      } catch (error) {
+        if (turnRequestId) {
+          const failureCode = error instanceof Error ? error.name : 'chat_generation_failed';
+          const failureReason = error instanceof Error ? error.message : 'Failed to generate assistant response';
+          await chatTurnApi.markFailed(turnRequestId, failureCode, failureReason);
+        }
+        throw error;
       }
-      
-      return { message, response: aiResponse };
     },
     onSettled: (_, __, variables) => {
       if (!variables) return;

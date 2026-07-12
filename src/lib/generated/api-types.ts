@@ -221,11 +221,9 @@ export interface paths {
         };
         /**
          * Get News
-         * @description Stub endpoint for news.
+         * @description Return market news from DataAPI when configured.
          *
-         *     Note: News articles are stored in Supabase (news_articles table).
-         *     This endpoint returns empty results to prevent 404 errors.
-         *     The frontend should use Supabase directly for news.
+         *     Clients should use Supabase `news_articles` when this endpoint returns 503.
          */
         get: operations["get_news_api_news_get"];
         put?: never;
@@ -247,9 +245,8 @@ export interface paths {
          * Get Ai Context
          * @description Get comprehensive AI context for the chatbot.
          *
-         *     Use `source=dataapi` to fetch from TheEyeBetaDataAPI (live engine data),
-         *     `source=auto` to try DataAPI first with stub fallback, or `source=supabase`
-         *     (default) for the original stub behavior.
+         *     Use `source=dataapi` for live DataAPI data, `source=supabase` for cached
+         *     market snapshots, or `source=auto` to try DataAPI then Supabase.
          */
         get: operations["get_ai_context_api_v1_ai_context_get"];
         put?: never;
@@ -272,7 +269,7 @@ export interface paths {
          * @description Get recent trading signals.
          *
          *     Use `source=dataapi` or `source=auto` to fetch from TheEyeBetaDataAPI.
-         *     Default (supabase) returns empty list (Trade Engine not deployed).
+         *     Returns 503 when no signal source is available.
          */
         get: operations["get_signals_api_v1_ai_signals_get"];
         put?: never;
@@ -1155,6 +1152,22 @@ export interface components {
              */
             recent_news: components["schemas"]["NewsItemFull"][];
             summary: components["schemas"]["EngineSummaryFull"];
+            /**
+             * Data Available
+             * @default false
+             */
+            data_available: boolean;
+            /**
+             * Availability Status
+             * @default unavailable
+             */
+            availability_status: string;
+            /** Data Source */
+            data_source?: string | null;
+            /** As Of */
+            as_of?: string | null;
+            /** Reason Code */
+            reason_code?: string | null;
         };
         /** ChatRequest */
         ChatRequest: {

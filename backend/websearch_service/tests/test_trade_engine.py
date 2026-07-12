@@ -18,34 +18,72 @@ def client() -> TestClient:
 
 # ─── /api/v1/ai/context ─────────────────────────────────────────────────────
 
-def test_ai_context_defaults_to_stub_for_supabase_source(client: TestClient):
-    resp = client.get("/api/v1/ai/context", params={"source": "supabase"})
+def test_ai_context_supabase_source_returns_503_when_empty(client: TestClient):
+    with patch.object(trade_engine_route, "_build_context_from_supabase", return_value=None):
+        resp = client.get("/api/v1/ai/context", params={"source": "supabase"})
+    assert resp.status_code == 503
+    detail = resp.json()["detail"]
+    assert detail["reason_code"] == "supabase_empty"
+
+
+def test_ai_context_supabase_source_returns_data_when_available(client: TestClient):
+    sample = trade_engine_route.AIContextResponse(
+        generated_at="2026-04-24T00:00:00Z",
+        engine_status=trade_engine_route.EngineStatus(active_workers={"supabase": True}),
+        tracked_tickers=["AAPL"],
+        ticker_snapshots=[trade_engine_route.TickerSnapshot(ticker="AAPL", last_price=100.0)],
+        summary=trade_engine_route.EngineSummaryFull(total_tracked_tickers=1, tickers_with_data=1),
+        data_available=True,
+        availability_status="ok",
+        data_source="supabase",
+    )
+    with patch.object(trade_engine_route, "_build_context_from_supabase", return_value=sample):
+        resp = client.get("/api/v1/ai/context", params={"source": "supabase"})
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["engine_status"]["is_running"] is False
-    assert body["tracked_tickers"] == []
-    assert body["summary"]["total_tracked_tickers"] == 0
+    assert resp.json()["data_available"] is True
 
 
-def test_ai_context_dataapi_source_falls_back_when_unavailable(client: TestClient):
-    # `_build_context_from_dataapi` returns None → source=dataapi returns the
-    # error-aware stub with is_running=False and active_workers={'dataapi': False}.
+def test_ai_context_auto_falls_back_to_supabase(client: TestClient):
+    sample = trade_engine_route.AIContextResponse(
+        generated_at="2026-04-24T00:00:00Z",
+        engine_status=trade_engine_route.EngineStatus(active_workers={"supabase": True}),
+        tracked_tickers=["MSFT"],
+        ticker_snapshots=[trade_engine_route.TickerSnapshot(ticker="MSFT", last_price=200.0)],
+        summary=trade_engine_route.EngineSummaryFull(total_tracked_tickers=1, tickers_with_data=1),
+        data_available=True,
+        availability_status="ok",
+        data_source="supabase",
+    )
+    with patch.object(
+        trade_engine_route, "_build_context_from_dataapi", new=AsyncMock(return_value=None)
+    ), patch.object(trade_engine_route, "_build_context_from_supabase", return_value=sample):
+        resp = client.get("/api/v1/ai/context", params={"source": "auto"})
+
+    assert resp.status_code == 200
+    assert resp.json()["data_source"] == "supabase"
+
+
+def test_build_context_from_supabase_returns_none_without_client():
+    with patch.object(trade_engine_route, "_get_supabase_client", return_value=None):
+        assert trade_engine_route._build_context_from_supabase() is None
+
+
+def test_ai_context_dataapi_source_returns_503_when_unavailable(client: TestClient):
     with patch.object(
         trade_engine_route, "_build_context_from_dataapi", new=AsyncMock(return_value=None)
     ):
         resp = client.get("/api/v1/ai/context", params={"source": "dataapi"})
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["engine_status"]["active_workers"]["dataapi"] is False
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["reason_code"] == "dataapi_unavailable"
 
 
 # ─── /api/v1/ai/signals ─────────────────────────────────────────────────────
 
-def test_signals_default_returns_empty_list_for_supabase_source(client: TestClient):
+def test_signals_default_returns_503_when_unavailable(client: TestClient):
     resp = client.get("/api/v1/ai/signals")
-    assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.status_code == 503
+    assert resp.json()["detail"]["reason_code"] == "signals_not_configured"
 
 
 def test_signals_dataapi_applies_signal_type_filter(client: TestClient):
@@ -73,15 +111,15 @@ def test_signals_dataapi_applies_signal_type_filter(client: TestClient):
     assert data[0]["signal"] == "BUY"
 
 
-def test_signals_dataapi_returns_empty_on_upstream_error(client: TestClient):
+def test_signals_dataapi_returns_502_on_upstream_error(client: TestClient):
     fake_client = MagicMock()
     fake_client.is_configured = True
     fake_client.get_latest_signals = AsyncMock(side_effect=RuntimeError("upstream"))
     with patch.object(trade_engine_route, "get_dataapi_client", return_value=fake_client):
         resp = client.get("/api/v1/ai/signals", params={"source": "dataapi"})
 
-    assert resp.status_code == 200
-    assert resp.json() == []
+    assert resp.status_code == 502
+    assert resp.json()["detail"]["reason_code"] == "dataapi_error"
 
 
 # ─── /api/v1/engine/status ──────────────────────────────────────────────────
@@ -124,15 +162,12 @@ def test_engine_status_dataapi_error_reports_unreachable(client: TestClient):
 
 # ─── /api/stock-price/{ticker} ──────────────────────────────────────────────
 
-def test_stock_price_default_returns_unavailable_when_no_backend(client: TestClient):
+def test_stock_price_default_returns_404_when_no_backend(client: TestClient):
     with patch.object(trade_engine_route, "_get_supabase_client", return_value=None):
         resp = client.get("/api/stock-price/AAPL")
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["ticker"] == "AAPL"
-    assert body["price"] is None
-    assert body["source"] == "unavailable"
+    assert resp.status_code == 404
+    assert resp.json()["detail"]["reason_code"] == "price_not_found"
 
 
 def test_stock_price_dataapi_happy_path(client: TestClient):
@@ -157,7 +192,7 @@ def test_stock_price_dataapi_happy_path(client: TestClient):
     assert body["source"] == "dataapi"
 
 
-def test_stock_price_dataapi_error_returns_error_source(client: TestClient):
+def test_stock_price_dataapi_error_returns_502(client: TestClient):
     fake_dataapi = MagicMock()
     fake_dataapi.is_configured = True
     fake_dataapi.get_quotes = AsyncMock(side_effect=RuntimeError("bad"))
@@ -165,9 +200,8 @@ def test_stock_price_dataapi_error_returns_error_source(client: TestClient):
     with patch.object(trade_engine_route, "get_dataapi_client", return_value=fake_dataapi):
         resp = client.get("/api/stock-price/AAPL", params={"source": "dataapi"})
 
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["source"] == "dataapi_error"
+    assert resp.status_code == 502
+    assert resp.json()["detail"]["reason_code"] == "dataapi_error"
 
 
 # ─── WebSocket /ws/live ─────────────────────────────────────────────────────

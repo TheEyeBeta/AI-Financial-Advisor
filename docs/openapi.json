@@ -402,7 +402,7 @@
           "news"
         ],
         "summary": "Get News",
-        "description": "Stub endpoint for news.\n\nNote: News articles are stored in Supabase (news_articles table).\nThis endpoint returns empty results to prevent 404 errors.\nThe frontend should use Supabase directly for news.",
+        "description": "Return market news from DataAPI when configured.\n\nClients should use Supabase `news_articles` when this endpoint returns 503.",
         "operationId": "get_news_api_news_get",
         "parameters": [
           {
@@ -470,7 +470,7 @@
           "trade-engine"
         ],
         "summary": "Get Ai Context",
-        "description": "Get comprehensive AI context for the chatbot.\n\nUse `source=dataapi` to fetch from TheEyeBetaDataAPI (live engine data),\n`source=auto` to try DataAPI first with stub fallback, or `source=supabase`\n(default) for the original stub behavior.",
+        "description": "Get comprehensive AI context for the chatbot.\n\nUse `source=dataapi` for live DataAPI data, `source=supabase` for cached\nmarket snapshots, or `source=auto` to try DataAPI then Supabase.",
         "operationId": "get_ai_context_api_v1_ai_context_get",
         "parameters": [
           {
@@ -556,7 +556,7 @@
           "trade-engine"
         ],
         "summary": "Get Signals",
-        "description": "Get recent trading signals.\n\nUse `source=dataapi` or `source=auto` to fetch from TheEyeBetaDataAPI.\nDefault (supabase) returns empty list (Trade Engine not deployed).",
+        "description": "Get recent trading signals.\n\nUse `source=dataapi` or `source=auto` to fetch from TheEyeBetaDataAPI.\nReturns 503 when no signal source is available.",
         "operationId": "get_signals_api_v1_ai_signals_get",
         "parameters": [
           {
@@ -2813,6 +2813,49 @@
           },
           "summary": {
             "$ref": "#/components/schemas/EngineSummaryFull"
+          },
+          "data_available": {
+            "type": "boolean",
+            "title": "Data Available",
+            "default": false
+          },
+          "availability_status": {
+            "type": "string",
+            "title": "Availability Status",
+            "default": "unavailable"
+          },
+          "data_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Source"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
           }
         },
         "type": "object",

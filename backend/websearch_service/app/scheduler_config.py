@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from .services.chat_turn_reconciliation import run_chat_turn_reconciliation
 from .services.intelligence_engine import run_intelligence_cycle
 from .services.job_logger import log_job_run
 from .services.memory_agent import run_history_scan, run_memory_extraction_cycle
@@ -134,6 +135,37 @@ async def _run_scheduled_ranking_cycle() -> None:
         )
 
 
+async def _run_scheduled_chat_turn_reconciliation() -> None:
+    run_id = str(uuid.uuid4())
+    started_at = datetime.now(timezone.utc)
+    try:
+        summary = await run_chat_turn_reconciliation()
+        logger.info(
+            "Scheduled chat turn reconciliation run_id=%s reconciled=%s errors=%s",
+            run_id,
+            summary.get("reconciled", 0),
+            len(summary.get("errors", [])),
+        )
+        await log_job_run(
+            job_name="chat_turn_reconciliation",
+            started_at=started_at,
+            status="success",
+            records_processed=summary.get("reconciled", 0),
+            raw_output={**summary, "run_id": run_id},
+            run_id=run_id,
+        )
+    except Exception as exc:
+        logger.error("Scheduled chat turn reconciliation run_id=%s failed: %s", run_id, type(exc).__name__)
+        await log_job_run(
+            job_name="chat_turn_reconciliation",
+            started_at=started_at,
+            status="error",
+            error=type(exc).__name__,
+            raw_output={"run_id": run_id},
+            run_id=run_id,
+        )
+
+
 def create_scheduler() -> AsyncIOScheduler:
     """Build a configured AsyncIOScheduler (not started)."""
     scheduler = AsyncIOScheduler(job_defaults=_JOB_DEFAULTS)
@@ -160,6 +192,13 @@ def create_scheduler() -> AsyncIOScheduler:
         minutes=15,
         id="memory_extraction",
         misfire_grace_time=300,
+    )
+    scheduler.add_job(
+        _run_scheduled_chat_turn_reconciliation,
+        trigger="interval",
+        minutes=5,
+        id="chat_turn_reconciliation",
+        misfire_grace_time=120,
     )
     return scheduler
 

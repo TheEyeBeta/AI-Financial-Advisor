@@ -146,6 +146,22 @@ export interface TradeEngineAIContext {
     news_count: number;
     high_volume_tickers: string[] | null;
   };
+  data_available?: boolean;
+  availability_status?: string;
+  data_source?: string | null;
+  as_of?: string | null;
+  reason_code?: string | null;
+}
+
+export function isTradeEngineContextUsable(
+  context: TradeEngineAIContext | null | undefined,
+): context is TradeEngineAIContext {
+  if (!context) return false;
+  if (context.data_available === false) return false;
+  if (context.availability_status === 'unavailable' || context.availability_status === 'not_configured') {
+    return false;
+  }
+  return context.ticker_snapshots.length > 0 || context.tracked_tickers.length > 0;
 }
 
 export interface TradeEnginePortfolioSummary {
@@ -241,7 +257,8 @@ export const tradeEngineApi = {
       });
       if (source) params.append('source', source);
 
-      return await apiClient.get<TradeEngineAIContext>(`/api/v1/ai/context?${params}`, { skipRetry: true });
+      const data = await apiClient.get<TradeEngineAIContext>(`/api/v1/ai/context?${params}`, { skipRetry: true });
+      return isTradeEngineContextUsable(data) ? data : null;
     } catch (error) {
       if (import.meta.env.DEV) {
         if (error instanceof ApiError) {

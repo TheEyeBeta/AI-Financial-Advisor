@@ -1,4 +1,5 @@
 import time
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -48,8 +49,8 @@ def test_news_endpoint_allows_anonymous_requests_with_optional_auth(monkeypatch)
 
     response = client.get("/api/news")
 
-    assert response.status_code == 200
-    assert response.json()["items"] == []
+    assert response.status_code == 503
+    assert response.json()["detail"]["reason_code"] == "dataapi_not_configured"
     assert response.headers["x-ratelimit-limit-minute"] == "10"
 
 
@@ -58,8 +59,8 @@ def test_news_endpoint_uses_authenticated_rate_limit(monkeypatch):
 
     response = client.get("/api/news", headers=_auth_headers())
 
-    assert response.status_code == 200
-    assert response.json()["items"] == []
+    assert response.status_code == 503
+    assert response.json()["detail"]["reason_code"] == "dataapi_not_configured"
     assert response.headers["x-ratelimit-limit-minute"] == "60"
 
 
@@ -85,8 +86,8 @@ def test_news_endpoint_accepts_es256_authenticated_jwt(monkeypatch):
 
     response = client.get("/api/news", headers={"Authorization": "Bearer not-a-real-jwt"})
 
-    assert response.status_code == 200
-    assert response.json()["items"] == []
+    assert response.status_code == 503
+    assert response.json()["detail"]["reason_code"] == "dataapi_not_configured"
     assert response.headers["x-ratelimit-limit-minute"] == "60"
 
 
@@ -101,8 +102,21 @@ def test_news_endpoint_blocks_after_anonymous_rate_limit(monkeypatch):
     first = client.get("/api/news")
     second = client.get("/api/news")
 
-    assert first.status_code == 200
+    assert first.status_code == 503
     assert second.status_code == 429
+
+
+def test_news_endpoint_returns_502_when_provider_raises(monkeypatch):
+    client = _client(monkeypatch)
+    fake_client = MagicMock()
+    fake_client.is_configured = True
+    fake_client.get_market_news = AsyncMock(side_effect=RuntimeError("upstream"))
+
+    with patch.object(news_route, "get_dataapi_client", return_value=fake_client):
+        response = client.get("/api/news")
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["reason_code"] == "dataapi_error"
 
 
 def test_stock_ranking_endpoint_allows_anonymous_requests_with_optional_auth(monkeypatch):

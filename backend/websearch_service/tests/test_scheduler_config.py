@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.scheduler_config import (
+    _run_scheduled_chat_turn_reconciliation,
     _run_scheduled_cycle,
     create_scheduler,
     scheduler_enabled,
@@ -33,6 +34,13 @@ class TestSchedulerCallbacks:
         ), patch("app.scheduler_config.log_job_run", new=AsyncMock()):
             asyncio.run(_run_scheduled_cycle())
 
+    def test_chat_turn_reconciliation_logs_success(self):
+        with patch(
+            "app.scheduler_config.run_chat_turn_reconciliation",
+            new=AsyncMock(return_value={"reconciled": 2, "errors": []}),
+        ), patch("app.scheduler_config.log_job_run", new=AsyncMock()):
+            asyncio.run(_run_scheduled_chat_turn_reconciliation())
+
 
 class TestWebLifespanScheduler:
     def test_web_lifespan_does_not_start_scheduler_by_default(self, monkeypatch):
@@ -52,3 +60,5 @@ class TestWebLifespanScheduler:
         scheduler = create_scheduler()
         assert scheduler._job_defaults["max_instances"] == 1
         assert scheduler._job_defaults["coalesce"] is True
+        job_ids = {job.id for job in scheduler.get_jobs()}
+        assert "chat_turn_reconciliation" in job_ids
