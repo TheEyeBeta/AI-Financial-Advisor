@@ -151,6 +151,7 @@ jobs:
         run: npm install -g @railway/cli
 
       - name: Deploy to Railway
+        working-directory: ./backend/websearch_service
         run: railway up --service ai-financial-advisor-backend --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
