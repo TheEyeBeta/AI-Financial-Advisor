@@ -858,14 +858,49 @@ export interface paths {
         put?: never;
         /**
          * Purge Orphaned Auth Users
-         * @description Delete auth.users records that have no matching core.users row.
-         *
-         *     Left over from the previous deleteUser implementation which removed
-         *     core.users but skipped auth.users, permanently blocking those email
-         *     addresses.  This endpoint finds the orphans and removes them so the
-         *     emails can be reused.
+         * @description Deprecated immediate-delete purge. Use dry-run + execute instead.
          */
         post: operations["purge_orphaned_auth_users_api_admin_purge_orphaned_auth_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/purge-orphaned-auth-users/dry-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Orphaned Auth Users Dry Run
+         * @description List orphan auth.users candidates without deleting anything.
+         */
+        post: operations["purge_orphaned_auth_users_dry_run_api_admin_purge_orphaned_auth_users_dry_run_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/purge-orphaned-auth-users/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Purge Orphaned Auth Users Execute
+         * @description Delete orphan auth.users from a verified dry-run snapshot.
+         */
+        post: operations["purge_orphaned_auth_users_execute_api_admin_purge_orphaned_auth_users_execute_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1302,6 +1337,13 @@ export interface components {
             published_at: string;
             /** Related Tickers */
             related_tickers?: string | null;
+        };
+        /** PurgeExecuteRequest */
+        PurgeExecuteRequest: {
+            /** Snapshot Id */
+            snapshot_id: string;
+            /** Confirmation Token */
+            confirmation_token: string;
         };
         /** QuantitativeAnalysisRequest */
         QuantitativeAnalysisRequest: {
@@ -2983,6 +3025,63 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    purge_orphaned_auth_users_dry_run_api_admin_purge_orphaned_auth_users_dry_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    purge_orphaned_auth_users_execute_api_admin_purge_orphaned_auth_users_execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PurgeExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

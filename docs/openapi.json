@@ -2300,7 +2300,7 @@
           "admin"
         ],
         "summary": "Purge Orphaned Auth Users",
-        "description": "Delete auth.users records that have no matching core.users row.\n\nLeft over from the previous deleteUser implementation which removed\ncore.users but skipped auth.users, permanently blocking those email\naddresses.  This endpoint finds the orphans and removes them so the\nemails can be reused.",
+        "description": "Deprecated immediate-delete purge. Use dry-run + execute instead.",
         "operationId": "purge_orphaned_auth_users_api_admin_purge_orphaned_auth_users_post",
         "responses": {
           "200": {
@@ -2311,6 +2311,74 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Purge Orphaned Auth Users Api Admin Purge Orphaned Auth Users Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/purge-orphaned-auth-users/dry-run": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Purge Orphaned Auth Users Dry Run",
+        "description": "List orphan auth.users candidates without deleting anything.",
+        "operationId": "purge_orphaned_auth_users_dry_run_api_admin_purge_orphaned_auth_users_dry_run_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Purge Orphaned Auth Users Dry Run Api Admin Purge Orphaned Auth Users Dry Run Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/purge-orphaned-auth-users/execute": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Purge Orphaned Auth Users Execute",
+        "description": "Delete orphan auth.users from a verified dry-run snapshot.",
+        "operationId": "purge_orphaned_auth_users_execute_api_admin_purge_orphaned_auth_users_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PurgeExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Purge Orphaned Auth Users Execute Api Admin Purge Orphaned Auth Users Execute Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -3298,6 +3366,26 @@
         ],
         "title": "NewsItemFull",
         "description": "News item matching frontend interface."
+      },
+      "PurgeExecuteRequest": {
+        "properties": {
+          "snapshot_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Snapshot Id"
+          },
+          "confirmation_token": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Confirmation Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshot_id",
+          "confirmation_token"
+        ],
+        "title": "PurgeExecuteRequest"
       },
       "QuantitativeAnalysisRequest": {
         "properties": {

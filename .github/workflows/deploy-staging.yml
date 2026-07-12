@@ -94,7 +94,6 @@ jobs:
 
       - name: Run E2E suite against staging
         id: e2e
-        continue-on-error: true
         env:
           PLAYWRIGHT_BASE_URL: ${{ env.STAGING_FRONTEND_URL }}
         run: |

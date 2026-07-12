@@ -1,7 +1,6 @@
 /* eslint-disable react-hooks/rules-of-hooks */
 import { test as base, type Page } from '@playwright/test';
-import { installSupabaseMocks } from '../utils/mock-supabase';
-import { testUser } from './test-user';
+import { signInWithMockedUser } from '../utils/sign-in';
 
 /**
  * Fixture that provides a page with Supabase mocks installed and the user
@@ -9,26 +8,11 @@ import { testUser } from './test-user';
  */
 export const test = base.extend<{ authenticatedPage: Page }>({
   authenticatedPage: async ({ page }, use) => {
-    await installSupabaseMocks(page);
-
-    // Navigate and sign in
-    await page.goto('/', { waitUntil: 'networkidle' });
-    await page.getByRole('button', { name: 'Sign In' }).waitFor({ state: 'visible', timeout: 10_000 });
-    await page.getByRole('button', { name: 'Sign In' }).click();
-
-    await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
-    const dialog = page.getByRole('dialog', { name: /sign in/i });
-    await dialog.getByLabel('Email').fill(testUser.email);
-    await dialog.getByLabel('Password').fill(testUser.password);
-    await dialog.getByRole('button', { name: /^sign in$/i }).click();
-
-    // Wait for post-login navigation
-    await page.waitForURL(/\/(advisor|onboarding|dashboard)/, { timeout: 10_000 });
-    await page.waitForLoadState('networkidle', { timeout: 10_000 });
-
+    await signInWithMockedUser(page);
+    await page.waitForLoadState('domcontentloaded');
     await use(page);
   },
 });
 
 export { expect } from '@playwright/test';
-export { testUser };
+export { testUser } from './test-user';
