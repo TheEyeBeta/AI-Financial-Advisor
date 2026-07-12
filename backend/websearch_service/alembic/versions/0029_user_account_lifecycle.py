@@ -32,9 +32,6 @@ def upgrade() -> None:
             result TEXT NOT NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
-
-        ALTER TABLE core.job_run_logs
-            ADD COLUMN IF NOT EXISTS run_id UUID;
         """
     )
 
@@ -42,7 +39,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute(
         """
-        ALTER TABLE core.job_run_logs DROP COLUMN IF EXISTS run_id;
         DROP TABLE IF EXISTS core.user_account_audit;
         ALTER TABLE core.users DROP CONSTRAINT IF EXISTS users_account_status_check;
         ALTER TABLE core.users

@@ -126,7 +126,7 @@ async def log_job_run(
         "error": error,
     }
     if run_id:
-        row["run_id"] = run_id
+        row["summary"] = f"{summary or ''} [run_id={run_id}]".strip()
 
     try:
         await asyncio.to_thread(_write_log_sync, row)
