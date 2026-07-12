@@ -13,9 +13,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { supabase } from "@/lib/supabase";
-import { isGoogleAuthEnabled } from "@/lib/env";
-import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
-import { AuthDivider } from "@/components/auth/AuthDivider";
+import { GoogleOAuthSection } from "@/components/auth/GoogleOAuthSection";
 
 interface SignUpDialogProps {
   open: boolean;
@@ -24,7 +22,6 @@ interface SignUpDialogProps {
 }
 
 export function SignUpDialog({ open, onOpenChange, onSwitchToSignIn }: SignUpDialogProps) {
-  const googleAuthEnabled = isGoogleAuthEnabled();
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleRedirecting, setIsGoogleRedirecting] = useState(false);
 
@@ -145,14 +142,10 @@ export function SignUpDialog({ open, onOpenChange, onSwitchToSignIn }: SignUpDia
         </div>
 
         <div className="space-y-4 py-4 px-6 overflow-y-auto flex-1 min-h-0">
-          {googleAuthEnabled && (
-            <GoogleAuthButton
-              returnTo="/onboarding"
-              onRedirectingChange={setIsGoogleRedirecting}
-            />
-          )}
-
-          {googleAuthEnabled && <AuthDivider />}
+          <GoogleOAuthSection
+            returnTo="/onboarding"
+            onRedirectingChange={setIsGoogleRedirecting}
+          />
 
           <form onSubmit={handleEmailSignUp} className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

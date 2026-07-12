@@ -15,9 +15,8 @@ import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
-import { isGoogleAuthEnabled } from "@/lib/env";
-import { GoogleAuthButton } from "@/components/auth/GoogleAuthButton";
-import { AuthDivider } from "@/components/auth/AuthDivider";
+import { GoogleOAuthSection } from "@/components/auth/GoogleOAuthSection";
+import { PRODUCT_NAME } from "@/lib/branding";
 
 interface SignInDialogProps {
   open: boolean;
@@ -28,7 +27,6 @@ interface SignInDialogProps {
 export function SignInDialog({ open, onOpenChange, onSwitchToSignUp }: SignInDialogProps) {
   const { signIn } = useAuth();
   const navigate = useNavigate();
-  const googleAuthEnabled = isGoogleAuthEnabled();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -130,19 +128,15 @@ export function SignInDialog({ open, onOpenChange, onSwitchToSignUp }: SignInDia
           <DialogHeader>
             <DialogTitle>Sign in</DialogTitle>
             <DialogDescription>
-              Welcome back to Lens
+              Welcome back to {PRODUCT_NAME}
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
-            {googleAuthEnabled && (
-              <GoogleAuthButton
-                returnTo="/advisor"
-                onRedirectingChange={setIsGoogleRedirecting}
-              />
-            )}
-
-            {googleAuthEnabled && <AuthDivider />}
+            <GoogleOAuthSection
+              returnTo="/advisor"
+              onRedirectingChange={setIsGoogleRedirecting}
+            />
 
             <form onSubmit={handleEmailSignIn} className="space-y-4">
               <div className="space-y-2">
@@ -201,7 +195,7 @@ export function SignInDialog({ open, onOpenChange, onSwitchToSignUp }: SignInDia
 
             {onSwitchToSignUp && (
               <p className="text-center text-sm text-muted-foreground">
-                New to Lens?{" "}
+                New to {PRODUCT_NAME}?{" "}
                 <button
                   type="button"
                   className="text-primary hover:underline"

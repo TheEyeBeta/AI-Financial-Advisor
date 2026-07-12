@@ -16,6 +16,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
 import { getSupportEmail } from "@/lib/env";
+import {
+  GOOGLE_AUTH_DISCLOSURE,
+  PRODUCT_DESCRIPTION,
+  PRODUCT_NAME,
+  PRODUCT_TAGLINE,
+} from "@/lib/branding";
 
 export default function Landing() {
   const { isAuthenticated, loading, profileLoading, onboardingComplete } = useAuth();
@@ -42,15 +48,15 @@ export default function Landing() {
             <TrendingUp className="h-8 w-8 text-primary sm:h-12 sm:w-12" />
             <div className="text-left">
               <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-                Lens
+                {PRODUCT_NAME}
               </h1>
               <p className="text-sm text-muted-foreground sm:text-base lg:text-lg">
-                AI Financial Advisor
+                {PRODUCT_TAGLINE}
               </p>
             </div>
           </div>
           <p className="mx-auto max-w-3xl px-4 text-base text-muted-foreground sm:text-lg lg:text-xl">
-            Lens is an AI-assisted financial education, investment research and paper-trading platform.
+            {PRODUCT_DESCRIPTION}
           </p>
         </div>
 
@@ -67,8 +73,7 @@ export default function Landing() {
                   Educational analysis only. Not personalised investment advice.
                 </p>
                 <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
-                  Google authentication is used to identify your account and retrieve your basic profile information,
-                  including your name and email address. Lens does not access your Gmail, Google Drive, contacts or calendar.
+                  {GOOGLE_AUTH_DISCLOSURE}
                 </p>
               </div>
             </div>

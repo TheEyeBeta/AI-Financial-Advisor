@@ -42,3 +42,24 @@ export function buildAuthCallbackUrl(returnTo?: string): string {
   const params = new URLSearchParams({ next: safePath });
   return `${window.location.origin}/auth/callback?${params.toString()}`;
 }
+
+export interface PostAuthUserContext {
+  userType?: string | null;
+  onboardingComplete: boolean | null;
+}
+
+/** Resolve where to send a user immediately after authentication. */
+export function resolvePostAuthPath(
+  context: PostAuthUserContext,
+  nextPath?: string | null,
+): string {
+  if (context.userType === 'Admin') {
+    return '/admin';
+  }
+
+  if (context.onboardingComplete === false) {
+    return '/onboarding';
+  }
+
+  return sanitizeReturnPath(nextPath);
+}

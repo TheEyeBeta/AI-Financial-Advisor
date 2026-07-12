@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sanitizeReturnPath, buildAuthCallbackUrl } from '../auth-redirect';
+import { sanitizeReturnPath, buildAuthCallbackUrl, resolvePostAuthPath } from '../auth-redirect';
 
 describe('sanitizeReturnPath', () => {
   it('returns default for empty or missing paths', () => {
@@ -47,5 +47,31 @@ describe('buildAuthCallbackUrl', () => {
   it('falls back to default path for unsafe input', () => {
     const url = buildAuthCallbackUrl('https://evil.com');
     expect(url).toContain('next=%2Fadvisor');
+  });
+});
+
+describe('resolvePostAuthPath', () => {
+  it('routes admins to /admin', () => {
+    expect(
+      resolvePostAuthPath({ userType: 'Admin', onboardingComplete: false }, '/advisor'),
+    ).toBe('/admin');
+  });
+
+  it('routes incomplete users to onboarding', () => {
+    expect(
+      resolvePostAuthPath({ userType: 'User', onboardingComplete: false }, '/advisor'),
+    ).toBe('/onboarding');
+  });
+
+  it('routes completed users to the sanitized next path', () => {
+    expect(
+      resolvePostAuthPath({ userType: 'User', onboardingComplete: true }, '/profile'),
+    ).toBe('/profile');
+  });
+
+  it('falls back to /advisor for unsafe next paths', () => {
+    expect(
+      resolvePostAuthPath({ userType: 'User', onboardingComplete: true }, 'https://evil.com'),
+    ).toBe('/advisor');
   });
 });
