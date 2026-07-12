@@ -25,6 +25,8 @@ const Onboarding = lazy(() => import("./pages/Onboarding"));
 const Admin = lazy(() => import("./pages/Admin"));
 const AuthCallback = lazy(() => import("./pages/AuthCallback"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
+const PrivacyPolicy = lazy(() => import("./pages/PrivacyPolicy"));
+const TermsOfService = lazy(() => import("./pages/TermsOfService"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const AcademyLanding = lazy(() => import("./pages/academy/AcademyLanding"));
 const AcademyTier = lazy(() => import("./pages/academy/AcademyTier"));
@@ -247,6 +249,10 @@ const App = () => {
               {/* OAuth callback - public */}
               <Route path="/auth/callback" element={<AuthCallback />} />
               <Route path="/auth/reset-password" element={<ResetPassword />} />
+
+              {/* Legal pages - public */}
+              <Route path="/privacy" element={<PrivacyPolicy />} />
+              <Route path="/terms" element={<TermsOfService />} />
 
               {/* 404 */}
               <Route path="*" element={<NotFound />} />

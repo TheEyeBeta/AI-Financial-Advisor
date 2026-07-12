@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   ArrowRight,
   BookOpen,
@@ -15,15 +15,22 @@ import { SignUpDialog } from "@/components/auth/SignUpDialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useAuth } from "@/hooks/use-auth";
+import { getSupportEmail } from "@/lib/env";
+import {
+  GOOGLE_AUTH_DISCLOSURE,
+  PRODUCT_DESCRIPTION,
+  PRODUCT_NAME,
+  PRODUCT_TAGLINE,
+} from "@/lib/branding";
 
 export default function Landing() {
   const { isAuthenticated, loading, profileLoading, onboardingComplete } = useAuth();
   const navigate = useNavigate();
+  const supportEmail = getSupportEmail();
   const [showSignUp, setShowSignUp] = useState(false);
   const [showSignIn, setShowSignIn] = useState(false);
 
   useEffect(() => {
-    // Wait for both auth and profile to fully resolve before deciding where to send the user.
     if (loading || !isAuthenticated) return;
     if (profileLoading || onboardingComplete === null) return;
 
@@ -39,12 +46,17 @@ export default function Landing() {
         <div className="space-y-4">
           <div className="flex items-center justify-center gap-3">
             <TrendingUp className="h-8 w-8 text-primary sm:h-12 sm:w-12" />
-            <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-              AI Financial Advisor
-            </h1>
+            <div className="text-left">
+              <h1 className="text-3xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+                {PRODUCT_NAME}
+              </h1>
+              <p className="text-sm text-muted-foreground sm:text-base lg:text-lg">
+                {PRODUCT_TAGLINE}
+              </p>
+            </div>
           </div>
           <p className="mx-auto max-w-3xl px-4 text-base text-muted-foreground sm:text-lg lg:text-xl">
-            Educational market analysis, ranked stock signals, guided learning, and paper trading in one investor workspace.
+            {PRODUCT_DESCRIPTION}
           </p>
         </div>
 
@@ -59,6 +71,9 @@ export default function Landing() {
                 </p>
                 <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
                   Educational analysis only. Not personalised investment advice.
+                </p>
+                <p className="text-sm leading-relaxed text-muted-foreground sm:text-base">
+                  {GOOGLE_AUTH_DISCLOSURE}
                 </p>
               </div>
             </div>
@@ -118,10 +133,32 @@ export default function Landing() {
             </CardContent>
           </Card>
         </div>
+
+        <footer className="mt-8 w-full max-w-3xl border-t pt-6 text-center text-xs text-muted-foreground sm:text-sm">
+          <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <Link to="/privacy" className="hover:text-primary hover:underline">
+              Privacy Policy
+            </Link>
+            <Link to="/terms" className="hover:text-primary hover:underline">
+              Terms of Service
+            </Link>
+            <a href={`mailto:${supportEmail}`} className="hover:text-primary hover:underline">
+              {supportEmail}
+            </a>
+          </nav>
+        </footer>
       </div>
 
-      <SignUpDialog open={showSignUp} onOpenChange={setShowSignUp} />
-      <SignInDialog open={showSignIn} onOpenChange={setShowSignIn} />
+      <SignUpDialog
+        open={showSignUp}
+        onOpenChange={setShowSignUp}
+        onSwitchToSignIn={() => setShowSignIn(true)}
+      />
+      <SignInDialog
+        open={showSignIn}
+        onOpenChange={setShowSignIn}
+        onSwitchToSignUp={() => setShowSignUp(true)}
+      />
     </div>
   );
 }

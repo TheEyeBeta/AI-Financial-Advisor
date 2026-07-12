@@ -33,15 +33,19 @@ from app.services.auth import (
     verify_service_role,
 )
 
-TEST_SECRET = "test-jwt-secret-for-auth-tests-32bytes"
+from .conftest import TEST_JWT_SECRET, supabase_test_issuer, run_async
+
+TEST_SECRET = TEST_JWT_SECRET
 
 
 def _jwt(role: str = "authenticated", sub: str = "test-user-id", **extra) -> str:
+    now = int(time.time())
     payload = {
         "role": role,
         "sub": sub,
-        "iat": int(time.time()),
-        "exp": int(time.time()) + 3600,
+        "iat": now,
+        "exp": extra.pop("exp", now + 3600),
+        "iss": extra.pop("iss", supabase_test_issuer()),
         **extra,
     }
     return pyjwt.encode(payload, TEST_SECRET, algorithm="HS256")
@@ -286,6 +290,8 @@ class TestVerifyJwtViaSuperbaseRest:
     def test_missing_supabase_url_raises_500(self, monkeypatch):
         monkeypatch.delenv("SUPABASE_URL", raising=False)
         monkeypatch.delenv("SUPABASE_ANON_KEY", raising=False)
+        monkeypatch.delenv("VITE_SUPABASE_URL", raising=False)
+        monkeypatch.delenv("VITE_SUPABASE_ANON_KEY", raising=False)
         with pytest.raises(HTTPException) as exc_info:
             _verify_jwt_via_supabase_rest("some-token")
         assert exc_info.value.status_code == 500
@@ -361,7 +367,7 @@ class TestRequireAuth:
         monkeypatch.setenv("AUTH_REQUIRED", "false")
         monkeypatch.setenv("ENVIRONMENT", "development")
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = run_async(
             require_auth(self._make_request())
         )
         assert isinstance(result, AuthenticatedUser)
@@ -371,7 +377,7 @@ class TestRequireAuth:
         monkeypatch.setenv("ENVIRONMENT", "development")
         import asyncio
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
+            run_async(
                 require_auth(self._make_request())
             )
         assert exc_info.value.status_code == 401
@@ -383,7 +389,7 @@ class TestRequireAuth:
 
         token = _jwt(role="authenticated", sub="user-xyz")
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = run_async(
             require_auth(self._make_request({"Authorization": f"Bearer {token}"}))
         )
         assert result.auth_id == "user-xyz"
@@ -394,11 +400,16 @@ class TestRequireAuth:
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
 
         # Token with no sub claim
-        payload = {"role": "authenticated", "iat": int(time.time()), "exp": int(time.time()) + 3600}
+        payload = {
+            "role": "authenticated",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "iss": supabase_test_issuer(),
+        }
         token = pyjwt.encode(payload, TEST_SECRET, algorithm="HS256")
         import asyncio
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
+            run_async(
                 require_auth(self._make_request({"Authorization": f"Bearer {token}"}))
             )
         assert exc_info.value.status_code == 401
@@ -410,11 +421,17 @@ class TestRequireAuth:
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
 
         # Empty string sub — passes PyJWT `require` check but fails `if not auth_id`
-        payload = {"role": "authenticated", "sub": "", "iat": int(time.time()), "exp": int(time.time()) + 3600}
+        payload = {
+            "role": "authenticated",
+            "sub": "",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "iss": supabase_test_issuer(),
+        }
         token = pyjwt.encode(payload, TEST_SECRET, algorithm="HS256")
         import asyncio
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
+            run_async(
                 require_auth(self._make_request({"Authorization": f"Bearer {token}"}))
             )
         assert exc_info.value.status_code == 401
@@ -425,7 +442,7 @@ class TestOptionalAuth:
         monkeypatch.setenv("AUTH_REQUIRED", "false")
         monkeypatch.setenv("ENVIRONMENT", "development")
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = run_async(
             optional_auth(_http_request())
         )
         assert isinstance(result, AuthenticatedUser)
@@ -434,7 +451,7 @@ class TestOptionalAuth:
         monkeypatch.setenv("AUTH_REQUIRED", "true")
         monkeypatch.setenv("ENVIRONMENT", "development")
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = run_async(
             optional_auth(_http_request())  # no Authorization header
         )
         assert result is None
@@ -445,7 +462,7 @@ class TestVerifyServiceRole:
         monkeypatch.setenv("AUTH_REQUIRED", "false")
         monkeypatch.setenv("ENVIRONMENT", "development")
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = run_async(
             verify_service_role(_http_request())
         )
         assert result["role"] == "service_role"
@@ -456,7 +473,7 @@ class TestVerifyServiceRole:
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
         import asyncio
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
+            run_async(
                 verify_service_role(_http_request())
             )
         assert exc_info.value.status_code == 401
@@ -468,7 +485,7 @@ class TestVerifyServiceRole:
         token = _jwt(role="authenticated")
         import asyncio
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(
+            run_async(
                 verify_service_role(_http_request({"Authorization": f"Bearer {token}"}))
             )
         assert exc_info.value.status_code == 403
@@ -479,7 +496,7 @@ class TestVerifyServiceRole:
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
         token = _jwt(role="service_role")
         import asyncio
-        result = asyncio.get_event_loop().run_until_complete(
+        result = run_async(
             verify_service_role(_http_request({"Authorization": f"Bearer {token}"}))
         )
         assert result["role"] == "service_role"
@@ -515,7 +532,11 @@ class TestVerifyJwtWithSupabaseJwks:
         mock_client_instance.get_signing_key_from_jwt.return_value = mock_signing_key
 
         with patch("app.services.auth._jwks_client", return_value=mock_client_instance):
-            with patch("jwt.decode", return_value={"sub": "user-123", "role": "authenticated"}):
+            with patch("jwt.decode", return_value={
+                "sub": "user-123",
+                "role": "authenticated",
+                "iss": "https://test.supabase.co/auth/v1",
+            }):
                 result = _verify_jwt_with_supabase_jwks(
                     "fake.token", "RS256", required_claims=("sub",)
                 )
@@ -571,7 +592,7 @@ class TestRequireWebsocketAuth:
         monkeypatch.setenv("ENVIRONMENT", "development")
         import asyncio
         ws = _mock_websocket()
-        result = asyncio.get_event_loop().run_until_complete(require_websocket_auth(ws))
+        result = run_async(require_websocket_auth(ws))
         assert isinstance(result, AuthenticatedUser)
 
     def test_missing_token_raises_401(self, monkeypatch):
@@ -580,7 +601,7 @@ class TestRequireWebsocketAuth:
         import asyncio
         ws = _mock_websocket()
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(require_websocket_auth(ws))
+            run_async(require_websocket_auth(ws))
         assert exc_info.value.status_code == 401
 
     def test_valid_token_in_header_returns_user(self, monkeypatch):
@@ -590,7 +611,7 @@ class TestRequireWebsocketAuth:
         token = _jwt(role="authenticated", sub="ws-user-id")
         import asyncio
         ws = _mock_websocket(auth_header=f"Bearer {token}")
-        result = asyncio.get_event_loop().run_until_complete(require_websocket_auth(ws))
+        result = run_async(require_websocket_auth(ws))
         assert result.auth_id == "ws-user-id"
 
     def test_valid_token_in_query_param_returns_user(self, monkeypatch):
@@ -600,19 +621,24 @@ class TestRequireWebsocketAuth:
         token = _jwt(role="authenticated", sub="ws-query-user")
         import asyncio
         ws = _mock_websocket(query_params={"token": token})
-        result = asyncio.get_event_loop().run_until_complete(require_websocket_auth(ws))
+        result = run_async(require_websocket_auth(ws))
         assert result.auth_id == "ws-query-user"
 
     def test_token_missing_sub_raises_401(self, monkeypatch):
         monkeypatch.setenv("AUTH_REQUIRED", "true")
         monkeypatch.setenv("ENVIRONMENT", "development")
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
-        payload = {"role": "authenticated", "iat": int(time.time()), "exp": int(time.time()) + 3600}
+        payload = {
+            "role": "authenticated",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "iss": supabase_test_issuer(),
+        }
         token = pyjwt.encode(payload, TEST_SECRET, algorithm="HS256")
         import asyncio
         ws = _mock_websocket(auth_header=f"Bearer {token}")
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(require_websocket_auth(ws))
+            run_async(require_websocket_auth(ws))
         assert exc_info.value.status_code == 401
 
     def test_empty_sub_claim_raises_401(self, monkeypatch):
@@ -621,10 +647,16 @@ class TestRequireWebsocketAuth:
         monkeypatch.setenv("ENVIRONMENT", "development")
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
         # Empty sub passes PyJWT `require` but fails `if not auth_id`
-        payload = {"role": "authenticated", "sub": "", "iat": int(time.time()), "exp": int(time.time()) + 3600}
+        payload = {
+            "role": "authenticated",
+            "sub": "",
+            "iat": int(time.time()),
+            "exp": int(time.time()) + 3600,
+            "iss": supabase_test_issuer(),
+        }
         token = pyjwt.encode(payload, TEST_SECRET, algorithm="HS256")
         import asyncio
         ws = _mock_websocket(auth_header=f"Bearer {token}")
         with pytest.raises(HTTPException) as exc_info:
-            asyncio.get_event_loop().run_until_complete(require_websocket_auth(ws))
+            run_async(require_websocket_auth(ws))
         assert exc_info.value.status_code == 401

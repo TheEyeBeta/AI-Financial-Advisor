@@ -1,141 +1,68 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { supabase } from "@/lib/supabase";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { toast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
+import { resolvePostAuthPath, sanitizeReturnPath } from "@/lib/auth-redirect";
+import { stripAuthParamsFromUrl } from "@/lib/auth-callback";
+import {
+  AUTH_CALLBACK_PROFILE_WAIT_MS,
+  useAuthCallbackSession,
+} from "@/hooks/use-auth-callback-session";
+import { Button } from "@/components/ui/button";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [loading, setLoading] = useState(true);
+  const { userProfile, profileLoading, onboardingComplete } = useAuth();
+  const routedRef = useRef(false);
+  const [profileSetupError, setProfileSetupError] = useState<string | null>(null);
+
+  const nextPath = sanitizeReturnPath(searchParams.get("next"));
+  const { phase, errorMessage } = useAuthCallbackSession(searchParams, navigate);
 
   useEffect(() => {
-    let isMounted = true;
-    let subscription: { unsubscribe: () => void } | null = null;
-    let timeoutId: NodeJS.Timeout | null = null;
-    
-    const handleAuthCallback = async () => {
-      try {
-        // Check if this looks like an auth callback
-        const hasAuthParams = 
-          window.location.hash.includes('access_token') ||
-          window.location.hash.includes('code') ||
-          searchParams.has('code') ||
-          searchParams.has('access_token') ||
-          searchParams.has('verified');
-        
-        if (!hasAuthParams) {
-          // Not an auth callback, redirect to home
-          console.warn('Auth callback accessed without auth parameters');
-          if (isMounted) {
-            navigate('/');
-            setLoading(false);
-          }
-          return;
-        }
+    if (phase !== "routing" || routedRef.current) return;
+    if (profileLoading || onboardingComplete === null) return;
 
-        // Wait a moment for Supabase to process URL hash/query params
-        // With detectSessionInUrl: true, Supabase processes these automatically
-        const SUPABASE_PROCESSING_DELAY = 1000;
-        await new Promise(resolve => setTimeout(resolve, SUPABASE_PROCESSING_DELAY));
+    routedRef.current = true;
+    stripAuthParamsFromUrl();
 
-        if (!isMounted) return;
+    const destination = resolvePostAuthPath(
+      {
+        userType: userProfile?.userType,
+        onboardingComplete,
+      },
+      nextPath,
+    );
+    navigate(destination, { replace: true });
+  }, [phase, profileLoading, onboardingComplete, userProfile, navigate, nextPath]);
 
-        // Check for session
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
-        if (sessionError) {
-          console.error('Auth callback error:', sessionError);
-          if (isMounted) {
-            const verified = searchParams.get('verified');
-            if (verified === 'true') {
-              toast({
-                title: "Email Verified!",
-                description: "Your account has been verified. Please sign in.",
-              });
-              navigate('/?verified=true');
-            } else {
-              navigate('/?error=auth_failed');
-            }
-            setLoading(false);
-          }
-          return;
-        }
+  useEffect(() => {
+    if (phase !== "routing" || routedRef.current) return;
 
-        if (session && isMounted) {
-          // User is authenticated — send them into the app (matches the
-          // SIGNED_IN listener below; ProtectedRoute handles onboarding).
-          navigate('/advisor');
-          setLoading(false);
-          return;
-        }
+    const profileTimeoutId = setTimeout(() => {
+      if (routedRef.current) return;
+      setProfileSetupError(
+        "Your account was authenticated but profile setup could not be completed. Please try signing in again or contact support.",
+      );
+      stripAuthParamsFromUrl();
+    }, AUTH_CALLBACK_PROFILE_WAIT_MS);
 
-        if (!isMounted) return;
+    return () => clearTimeout(profileTimeoutId);
+  }, [phase]);
 
-        // No session yet - listen for auth state changes
-        const { data: { subscription: authSubscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
-          if (!isMounted) return;
-          
-          if (event === 'SIGNED_IN' && newSession) {
-            if (authSubscription) authSubscription.unsubscribe();
-            if (timeoutId) clearTimeout(timeoutId);
-            navigate('/advisor');
-            setLoading(false);
-          }
-        });
-        
-        subscription = authSubscription;
+  const resolvedError = profileSetupError ?? errorMessage;
+  const isError = Boolean(resolvedError) && (phase === "error" || profileSetupError !== null);
 
-        // Timeout after 10 seconds
-        const AUTH_TIMEOUT_MS = 10000;
-        timeoutId = setTimeout(() => {
-          if (!isMounted) return;
-          
-          if (authSubscription) authSubscription.unsubscribe();
-          const verified = searchParams.get('verified');
-          if (verified === 'true') {
-            toast({
-              title: "Email Verified!",
-              description: "Your account has been verified. Please sign in.",
-            });
-            navigate('/?verified=true');
-          } else {
-            toast({
-              title: "Authentication Timeout",
-              description: "Please try signing in again.",
-              variant: "destructive",
-            });
-            navigate('/?error=timeout');
-          }
-          setLoading(false);
-        }, AUTH_TIMEOUT_MS);
-
-      } catch (error) {
-        console.error('Error handling auth callback:', error);
-        if (isMounted) {
-          navigate('/?error=auth_failed');
-          setLoading(false);
-        }
-      }
-    };
-
-    handleAuthCallback();
-
-    // Cleanup function - ensures all resources are properly cleaned up
-    return () => {
-      isMounted = false;
-      if (subscription) subscription.unsubscribe();
-      if (timeoutId) clearTimeout(timeoutId);
-    };
-  }, [navigate, searchParams]);
-
-
-  if (loading) {
+  if (isError && resolvedError) {
     return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center space-y-4">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-          <p className="text-muted-foreground">Completing sign in...</p>
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <div className="max-w-md space-y-4 text-center">
+          <h1 className="text-xl font-semibold">Sign-in incomplete</h1>
+          <p className="text-sm text-muted-foreground">{resolvedError}</p>
+          <Button asChild>
+            <Link to="/">Return home</Link>
+          </Button>
         </div>
       </div>
     );
@@ -145,7 +72,9 @@ export default function AuthCallback() {
     <div className="flex min-h-screen items-center justify-center">
       <div className="text-center space-y-4">
         <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-        <p className="text-muted-foreground">Redirecting...</p>
+        <p className="text-muted-foreground">
+          {phase === "routing" ? "Redirecting..." : "Completing sign in..."}
+        </p>
       </div>
     </div>
   );

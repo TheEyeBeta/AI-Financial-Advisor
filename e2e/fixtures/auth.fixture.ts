@@ -17,13 +17,10 @@ export const test = base.extend<{ authenticatedPage: Page }>({
     await page.getByRole('button', { name: 'Sign In' }).click();
 
     await page.waitForSelector('[role="dialog"]', { timeout: 5_000 });
-    await page.getByLabel('Email').fill(testUser.email);
-    await page.getByLabel('Password').fill(testUser.password);
-    await page
-      .getByRole('button', { name: 'Sign In', exact: false })
-      .filter({ hasText: /Sign In/i })
-      .last()
-      .click();
+    const dialog = page.getByRole('dialog', { name: /sign in/i });
+    await dialog.getByLabel('Email').fill(testUser.email);
+    await dialog.getByLabel('Password').fill(testUser.password);
+    await dialog.getByRole('button', { name: /^sign in$/i }).click();
 
     // Wait for post-login navigation
     await page.waitForURL(/\/(advisor|onboarding|dashboard)/, { timeout: 10_000 });

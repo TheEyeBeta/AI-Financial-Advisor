@@ -353,7 +353,7 @@ const Advisor = () => {
                   {getStarterHeading(userProfile?.first_name)}
                 </h1>
                 <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-                  Ask about markets, portfolio decisions, or financial planning. IRIS provides educational analysis and uses your profile and The Eye context when they are available.
+                  Ask about markets, portfolio decisions, or financial planning. IRIS provides educational analysis and uses your profile and Lens context when they are available.
                 </p>
                 <div className="mt-4 flex justify-center">
                   <TooltipProvider>

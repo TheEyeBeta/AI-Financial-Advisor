@@ -371,22 +371,32 @@ $$ language 'plpgsql';
 -- Function to handle new user creation from auth
 CREATE OR REPLACE FUNCTION core.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+    meta JSONB;
+    resolved_first_name TEXT;
+    resolved_last_name TEXT;
 BEGIN
+    meta := COALESCE(NEW.raw_user_meta_data, '{}'::jsonb);
+    resolved_first_name := COALESCE(meta->>'first_name', meta->>'given_name');
+    resolved_last_name := COALESCE(meta->>'last_name', meta->>'family_name');
+
     INSERT INTO core.users (auth_id, first_name, last_name, age, email, experience_level, risk_level, is_verified, email_verified_at, onboarding_complete)
     VALUES (
         NEW.id,
-        COALESCE((NEW.raw_user_meta_data->>'first_name')::TEXT, NULL),
-        COALESCE((NEW.raw_user_meta_data->>'last_name')::TEXT, NULL),
-        COALESCE((NEW.raw_user_meta_data->>'age')::INTEGER, NULL),
+        resolved_first_name,
+        resolved_last_name,
+        COALESCE((meta->>'age')::INTEGER, NULL),
         NEW.email,
-        COALESCE((NEW.raw_user_meta_data->>'experience_level')::core.experience_level_enum, 'beginner'),
-        COALESCE((NEW.raw_user_meta_data->>'risk_level')::core.risk_level_enum, 'mid'),
+        COALESCE((meta->>'experience_level')::core.experience_level_enum, 'beginner'),
+        COALESCE((meta->>'risk_level')::core.risk_level_enum, 'mid'),
         COALESCE(NEW.email_confirmed_at IS NOT NULL, false),
         NEW.email_confirmed_at,
         FALSE  -- New users must complete onboarding
     )
     ON CONFLICT (auth_id) DO UPDATE SET
         email = COALESCE(EXCLUDED.email, core.users.email),
+        first_name = COALESCE(core.users.first_name, EXCLUDED.first_name),
+        last_name = COALESCE(core.users.last_name, EXCLUDED.last_name),
         is_verified = COALESCE(NEW.email_confirmed_at IS NOT NULL, core.users.is_verified),
         email_verified_at = COALESCE(NEW.email_confirmed_at, core.users.email_verified_at),
         updated_at = NOW();

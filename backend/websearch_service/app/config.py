@@ -41,13 +41,18 @@ class AppSettings:
 
 def get_app_settings() -> AppSettings:
     environment = (os.getenv("ENVIRONMENT", "development").strip().lower() or "development")
+    explicit_debug = os.getenv("ENABLE_DEBUG_ROUTES")
+    if explicit_debug is None:
+        enable_debug_routes = environment == "development"
+    else:
+        enable_debug_routes = is_truthy(explicit_debug)
 
     return AppSettings(
         environment=environment,
         app_version=os.getenv("APP_VERSION", "0.1.0"),
         cors_origins=parse_csv_env(os.getenv("CORS_ORIGINS")),
         trusted_hosts=parse_csv_env(os.getenv("TRUSTED_HOSTS")),
-        enable_debug_routes=is_truthy(os.getenv("ENABLE_DEBUG_ROUTES")),
+        enable_debug_routes=enable_debug_routes,
     )
 
 

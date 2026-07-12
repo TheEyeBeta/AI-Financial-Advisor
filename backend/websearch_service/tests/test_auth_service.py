@@ -9,6 +9,7 @@ import pytest
 from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket
 from fastapi.testclient import TestClient
 
+from .conftest import TEST_JWT_SECRET, supabase_test_issuer
 from app.services import auth as auth_mod
 from app.services.auth import (
     ASYMMETRIC_JWT_ALGORITHMS,
@@ -28,8 +29,6 @@ from app.services.auth import (
     require_auth,
     validate_auth_configuration,
 )
-from .conftest import TEST_JWT_SECRET
-
 
 # ─── environment helpers ────────────────────────────────────────────────────
 
@@ -185,8 +184,15 @@ def test_extract_websocket_token_returns_none_when_absent():
 # ─── _verify_supabase_jwt routing ───────────────────────────────────────────
 
 def _hs256(secret: str, role: str = "authenticated") -> str:
+    now = int(time.time())
     return pyjwt.encode(
-        {"sub": "u1", "role": role, "iat": int(time.time()), "exp": int(time.time()) + 60},
+        {
+            "sub": "u1",
+            "role": role,
+            "iat": now,
+            "exp": now + 60,
+            "iss": supabase_test_issuer(),
+        },
         secret,
         algorithm="HS256",
     )
@@ -310,6 +316,7 @@ def test_require_auth_accepts_valid_hs256_token(monkeypatch):
             "email": "u@test.local",
             "iat": int(time.time()),
             "exp": int(time.time()) + 60,
+            "iss": supabase_test_issuer(),
         },
         TEST_JWT_SECRET,
         algorithm="HS256",
@@ -338,6 +345,7 @@ def test_optional_auth_returns_user_when_token_valid(monkeypatch):
             "role": "authenticated",
             "iat": int(time.time()),
             "exp": int(time.time()) + 60,
+            "iss": supabase_test_issuer(),
         },
         TEST_JWT_SECRET,
         algorithm="HS256",

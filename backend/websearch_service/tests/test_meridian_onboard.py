@@ -228,7 +228,13 @@ async def test_meridian_onboard_then_chat_contextualised(client: TestClient):
         "usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15},
     }
     mock_http = AsyncMock()
-    mock_http.post = AsyncMock(return_value=MagicMock(status_code=200, json=lambda: mock_response_data, text=""))
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = mock_response_data
+    mock_response.text = ""
+    mock_http.post = AsyncMock(return_value=mock_response)
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
 
     with patch("app.services.meridian_context.supabase_client", new=mock_supabase), \
          patch("httpx.AsyncClient", return_value=mock_http):

@@ -17,10 +17,11 @@ test.describe('Smoke E2E: sign-in to core product surfaces', () => {
     
     // Fill and submit sign in form
     await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    await page.getByLabel('Email').waitFor({ state: 'visible', timeout: 5000 });
-    await page.getByLabel('Email').fill(testUser.email);
-    await page.getByLabel('Password').fill(testUser.password);
-    await page.getByRole('button', { name: 'Sign In', exact: false }).filter({ hasText: /Sign In/i }).last().click();
+    const dialog = page.getByRole('dialog', { name: /sign in/i });
+    await dialog.getByLabel('Email').waitFor({ state: 'visible', timeout: 5000 });
+    await dialog.getByLabel('Email').fill(testUser.email);
+    await dialog.getByLabel('Password').fill(testUser.password);
+    await dialog.getByRole('button', { name: /^sign in$/i }).click();
 
     // Wait for navigation after sign in
     await page.waitForURL(/\/(advisor|onboarding)/, { timeout: 10000 });

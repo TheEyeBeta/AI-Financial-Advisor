@@ -282,4 +282,4 @@ class TestDataapiQuery:
              patch("app.routes.admin.httpx.AsyncClient", return_value=http_client):
             client = TestClient(_app_no_auth(), raise_server_exceptions=False)
             resp = client.get("/api/admin/dataapi-query?q=SELECT+1")
-        assert resp.status_code == 500
+        assert resp.status_code == 502

@@ -7,13 +7,20 @@ import React from 'react';
 
 // Mock the useAuth hook
 const mockSignIn = vi.fn();
+const mockSignInWithGoogle = vi.fn();
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     signIn: mockSignIn,
+    signInWithGoogle: mockSignInWithGoogle,
     user: null,
     loading: false,
     isAuthenticated: false,
   }),
+}));
+
+const mockIsGoogleAuthEnabled = vi.fn(() => false);
+vi.mock('@/lib/env', () => ({
+  isGoogleAuthEnabled: () => mockIsGoogleAuthEnabled(),
 }));
 
 // Mock the toast hook
@@ -58,6 +65,24 @@ describe('SignInDialog', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockIsGoogleAuthEnabled.mockReturnValue(false);
+  });
+
+  it('shows Lens welcome message', () => {
+    renderWithProviders(<SignInDialog {...defaultProps} />);
+    expect(screen.getByText(/welcome back to lens/i)).toBeInTheDocument();
+  });
+
+  it('hides Google button when feature flag is disabled', () => {
+    renderWithProviders(<SignInDialog {...defaultProps} />);
+    expect(screen.queryByRole('button', { name: /continue with google/i })).not.toBeInTheDocument();
+  });
+
+  it('shows Google button and divider when feature flag is enabled', () => {
+    mockIsGoogleAuthEnabled.mockReturnValue(true);
+    renderWithProviders(<SignInDialog {...defaultProps} />);
+    expect(screen.getByRole('button', { name: /continue with google/i })).toBeInTheDocument();
+    expect(screen.getByText(/or continue with email/i)).toBeInTheDocument();
   });
 
   it('renders sign in form with email and password fields', () => {

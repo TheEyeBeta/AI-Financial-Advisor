@@ -727,7 +727,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "description": "Ticker symbol (e.g. AAPL, BRK.B)",
               "title": "Ticker"
             },
@@ -787,7 +787,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -851,7 +851,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1074,7 +1074,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           }
@@ -1119,7 +1119,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1176,7 +1176,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1233,7 +1233,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1290,7 +1290,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1347,7 +1347,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1404,7 +1404,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1493,7 +1493,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1582,7 +1582,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -1671,7 +1671,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           },
@@ -2009,7 +2009,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "title": "Ticker"
             }
           }
@@ -2135,7 +2135,7 @@
             "required": true,
             "schema": {
               "type": "string",
-              "pattern": "^[A-Z0-9.]{1,10}$",
+              "pattern": "^[A-Za-z0-9.]{1,10}$",
               "description": "Ticker symbol (e.g. AAPL, BRK.B)",
               "title": "Ticker"
             },

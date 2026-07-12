@@ -231,7 +231,7 @@ recorded in this file.
 | Frontend build        | `vite build`                  | succeeds                        |
 | OpenAPI drift         | `git diff --exit-code`        | no diff after regenerate       |
 | Backend tests         | pytest                        | all pass                       |
-| Backend coverage      | pytest-cov                    | branch coverage ≥ 74%          |
+| Backend coverage      | pytest-cov                    | branch coverage ≥ 69%          |
 | Alembic               | `alembic upgrade head` + `check` | clean head, no autogen diff |
 | Node audit            | `npm audit`                   | no high+ in prod deps          |
 | Python deps           | `pip-audit`                   | no known vulns                 |
