@@ -210,6 +210,29 @@ describe('chatApi', () => {
       expect(result).toEqual(mockMessage);
     });
   });
+
+  describe('getMessages', () => {
+    it('returns messages without deleting stale trailing user messages', async () => {
+      const staleUserMessage = {
+        id: 'msg-stale',
+        user_id: 'user-123',
+        chat_id: 'chat-123',
+        role: 'user',
+        content: 'Still waiting for a reply',
+        created_at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+      };
+
+      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = createChainableMock({
+        data: [staleUserMessage],
+        error: null,
+      });
+
+      const result = await chatApi.getMessages('chat-123');
+
+      expect(result).toEqual([staleUserMessage]);
+      expect(mockSchemaChainsBySchemaAndTable['ai.chat_messages'].delete).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('chatsApi', () => {
