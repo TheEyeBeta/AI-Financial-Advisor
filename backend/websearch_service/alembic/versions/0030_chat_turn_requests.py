@@ -3,7 +3,7 @@
 from alembic import op
 
 revision = "0030_chat_turn_requests"
-down_revision = "0029"
+down_revision = "0029_user_account_lifecycle"
 branch_labels = None
 depends_on = None
 
