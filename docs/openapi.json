@@ -2547,7 +2547,7 @@
           "admin"
         ],
         "summary": "Trigger Ranking",
-        "description": "Manually trigger a ranking cycle in the background and return immediately.",
+        "description": "Queue a ranking cycle for the durable admin job worker.",
         "operationId": "trigger_ranking_api_admin_trigger_ranking_post",
         "responses": {
           "200": {
@@ -2571,7 +2571,7 @@
           "admin"
         ],
         "summary": "Trigger Memory Scan",
-        "description": "Manually trigger a full history memory scan in the background and return immediately.",
+        "description": "Queue a full history memory scan for the durable admin job worker.",
         "operationId": "trigger_memory_scan_api_admin_trigger_memory_scan_post",
         "responses": {
           "200": {
@@ -2595,7 +2595,7 @@
           "admin"
         ],
         "summary": "Trigger Intelligence",
-        "description": "Manually trigger an intelligence cycle in the background and return immediately.",
+        "description": "Queue an intelligence cycle for the durable admin job worker.",
         "operationId": "trigger_intelligence_api_admin_trigger_intelligence_post",
         "responses": {
           "200": {
@@ -2619,7 +2619,7 @@
           "admin"
         ],
         "summary": "Trigger Memory Extraction",
-        "description": "Manually trigger a live memory extraction cycle in the background and return immediately.",
+        "description": "Queue a live memory extraction cycle for the durable admin job worker.",
         "operationId": "trigger_memory_extraction_api_admin_trigger_memory_extraction_post",
         "responses": {
           "200": {
@@ -2643,7 +2643,7 @@
           "admin"
         ],
         "summary": "Trigger Meridian Refresh",
-        "description": "Manually trigger a Meridian context refresh for all users in the background.",
+        "description": "Queue a Meridian context refresh for the durable admin job worker.",
         "operationId": "trigger_meridian_refresh_api_admin_trigger_meridian_refresh_post",
         "responses": {
           "200": {
@@ -2654,6 +2654,161 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Trigger Meridian Refresh Api Admin Trigger Meridian Refresh Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/jobs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Jobs List",
+        "description": "List recent durable admin jobs.",
+        "operationId": "admin_jobs_list_api_admin_jobs_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 20
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Admin Jobs List Api Admin Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Job Detail",
+        "description": "Return durable admin job status and result metadata.",
+        "operationId": "admin_job_detail_api_admin_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Admin Job Detail Api Admin Jobs  Job Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/jobs/{job_id}/retry": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Admin Job Retry",
+        "description": "Retry a failed durable admin job with a new idempotency key.",
+        "operationId": "admin_job_retry_api_admin_jobs__job_id__retry_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Admin Job Retry Api Admin Jobs  Job Id  Retry Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }

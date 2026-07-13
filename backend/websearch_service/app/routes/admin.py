@@ -31,10 +31,21 @@ from ..services.auth import (
     verify_service_role,
 )
 from ..services.dataapi_client import get_dataapi_client
-from ..services.intelligence_engine import run_intelligence_cycle
-from ..services.job_logger import log_job_run
-from ..services.memory_agent import run_history_scan, run_memory_extraction_cycle
-from ..services.meridian_context import refresh_all_users_context
+from ..services.admin_jobs import (
+    AdminJobError,
+    AdminJobNotFound,
+    AdminJobValidationError,
+    JOB_TYPE_INTELLIGENCE,
+    JOB_TYPE_MEMORY_EXTRACTION,
+    JOB_TYPE_MEMORY_SCAN,
+    JOB_TYPE_MERIDIAN_REFRESH,
+    JOB_TYPE_RANKING,
+    enqueue_admin_job,
+    get_admin_job,
+    list_admin_jobs,
+    retry_failed_job,
+)
+from ..middleware.correlation import get_correlation_id
 from ..services.orphan_user_cleanup import (
     OrphanCleanupError,
     create_dry_run_snapshot,
@@ -47,7 +58,6 @@ from ..services.user_account_lifecycle import (
     execute_delete_request,
     suspend_user_account,
 )
-from ..services.ranking_engine import run_ranking_cycle
 
 logger = logging.getLogger(__name__)
 
@@ -529,107 +539,127 @@ async def purge_orphaned_auth_users_execute(
     }
 
 
-async def _run_ranking_logged() -> None:
-    started_at = datetime.now(timezone.utc)
+def _idempotency_key(request: Request) -> str:
+    key = (request.headers.get("Idempotency-Key") or request.headers.get("X-Idempotency-Key") or "").strip()
+    if len(key) < 8:
+        raise HTTPException(
+            status_code=400,
+            detail="Idempotency-Key header is required (minimum 8 characters).",
+        )
+    return key
+
+
+def _enqueue_trigger_response(
+    *,
+    request: Request,
+    admin: str,
+    job_type: str,
+    parameters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     try:
-        summary = await run_ranking_cycle()
-        skipped = summary.get("skipped", False)
-        await log_job_run(
-            job_name="ranking_engine",
-            started_at=started_at,
-            status="skipped" if skipped else "success",
-            records_processed=summary.get("tickers_scored", 0),
-            raw_output=summary,
+        job, created = enqueue_admin_job(
+            job_type=job_type,
+            idempotency_key=_idempotency_key(request),
+            actor_id=admin,
+            parameters=parameters or {},
+            correlation_id=get_correlation_id(),
         )
-    except Exception as exc:
-        await log_job_run(
-            job_name="ranking_engine",
-            started_at=started_at,
-            status="error",
-            error=type(exc).__name__,
-        )
+    except AdminJobValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AdminJobError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-
-async def _run_intelligence_logged() -> None:
-    started_at = datetime.now(timezone.utc)
-    try:
-        summary = await run_intelligence_cycle()
-        skipped = summary.get("skipped", False)
-        await log_job_run(
-            job_name="intelligence_engine",
-            started_at=started_at,
-            status="skipped" if skipped else "success",
-            records_processed=summary.get("users_processed", 0),
-            raw_output=summary,
-        )
-    except Exception as exc:
-        await log_job_run(
-            job_name="intelligence_engine",
-            started_at=started_at,
-            status="error",
-            error=type(exc).__name__,
-        )
-
-
-async def _run_memory_extraction_logged() -> None:
-    started_at = datetime.now(timezone.utc)
-    try:
-        summary = await run_memory_extraction_cycle()
-        skipped = summary.get("skipped", False)
-        await log_job_run(
-            job_name="memory_extraction",
-            started_at=started_at,
-            status="skipped" if skipped else "success",
-            records_processed=summary.get("chats_processed", 0),
-            raw_output=summary,
-        )
-    except Exception as exc:
-        await log_job_run(
-            job_name="memory_extraction",
-            started_at=started_at,
-            status="error",
-            error=type(exc).__name__,
-        )
+    return {
+        "status": job.get("status"),
+        "job_id": job.get("id"),
+        "job_type": job.get("job_type"),
+        "duplicate": not created,
+        "correlation_id": job.get("correlation_id"),
+    }
 
 
 @router.post("/api/admin/trigger-ranking")
-async def trigger_ranking(admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Manually trigger a ranking cycle in the background and return immediately."""
-    asyncio.create_task(_run_ranking_logged())
-    logger.info("Admin %s triggered ranking cycle in background", admin)
-    return {"status": "started"}
+async def trigger_ranking(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Queue a ranking cycle for the durable admin job worker."""
+    return _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_RANKING)
 
 
 @router.post("/api/admin/trigger-memory-scan")
-async def trigger_memory_scan(admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Manually trigger a full history memory scan in the background and return immediately."""
-    asyncio.create_task(run_history_scan(limit=200))
-    logger.info("Admin %s triggered memory history scan (limit=200) in background", admin)
-    return {"status": "started", "limit": 200}
+async def trigger_memory_scan(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Queue a full history memory scan for the durable admin job worker."""
+    response = _enqueue_trigger_response(
+        request=request,
+        admin=admin,
+        job_type=JOB_TYPE_MEMORY_SCAN,
+        parameters={"limit": 200},
+    )
+    response["limit"] = 200
+    return response
 
 
 @router.post("/api/admin/trigger-intelligence")
-async def trigger_intelligence(admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Manually trigger an intelligence cycle in the background and return immediately."""
-    asyncio.create_task(_run_intelligence_logged())
-    logger.info("Admin %s triggered intelligence cycle in background", admin)
-    return {"status": "started"}
+async def trigger_intelligence(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Queue an intelligence cycle for the durable admin job worker."""
+    return _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_INTELLIGENCE)
 
 
 @router.post("/api/admin/trigger-memory-extraction")
-async def trigger_memory_extraction(admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Manually trigger a live memory extraction cycle in the background and return immediately."""
-    asyncio.create_task(_run_memory_extraction_logged())
-    logger.info("Admin %s triggered memory extraction cycle in background", admin)
-    return {"status": "started"}
+async def trigger_memory_extraction(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Queue a live memory extraction cycle for the durable admin job worker."""
+    return _enqueue_trigger_response(
+        request=request,
+        admin=admin,
+        job_type=JOB_TYPE_MEMORY_EXTRACTION,
+    )
 
 
 @router.post("/api/admin/trigger-meridian-refresh")
-async def trigger_meridian_refresh(admin: str = Depends(_require_admin)) -> dict[str, Any]:
-    """Manually trigger a Meridian context refresh for all users in the background."""
-    asyncio.create_task(refresh_all_users_context())
-    logger.info("Admin %s triggered Meridian context refresh in background", admin)
-    return {"status": "started"}
+async def trigger_meridian_refresh(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Queue a Meridian context refresh for the durable admin job worker."""
+    return _enqueue_trigger_response(
+        request=request,
+        admin=admin,
+        job_type=JOB_TYPE_MERIDIAN_REFRESH,
+    )
+
+
+@router.get("/api/admin/jobs")
+async def admin_jobs_list(
+    status: str | None = Query(default=None, max_length=20),
+    limit: int = Query(default=20, ge=1, le=100),
+    admin: str = Depends(_require_admin),
+) -> dict[str, Any]:
+    """List recent durable admin jobs."""
+    _ = admin
+    jobs = list_admin_jobs(status=status, limit=limit)
+    return {"jobs": jobs}
+
+
+@router.get("/api/admin/jobs/{job_id}")
+async def admin_job_detail(job_id: str, admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Return durable admin job status and result metadata."""
+    _ = admin
+    try:
+        return {"job": get_admin_job(job_id)}
+    except AdminJobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/admin/jobs/{job_id}/retry")
+async def admin_job_retry(
+    job_id: str,
+    request: Request,
+    admin: str = Depends(_require_admin),
+) -> dict[str, Any]:
+    """Retry a failed durable admin job with a new idempotency key."""
+    _ = request
+    try:
+        job = retry_failed_job(job_id, actor_id=admin)
+    except AdminJobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except AdminJobValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": job.get("status"), "job_id": job.get("id"), "retried_from": job_id}
 
 
 @router.get("/api/admin/job-run-logs")

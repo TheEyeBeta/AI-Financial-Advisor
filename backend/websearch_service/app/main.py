@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import sys
@@ -43,6 +44,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
 
 from .health_checks import assess_readiness, liveness_payload, mark_startup_complete
+from .middleware.correlation import CorrelationIdMiddleware
+from .observability import init_observability
 from .routes.admin import router as admin_router
 from .routes.ai_proxy import router as ai_proxy_router
 from .routes.search import router as search_router
@@ -56,6 +59,7 @@ from .scheduler_config import (
     scheduler_enabled,
 )
 from .services.auth import validate_auth_configuration
+from .services.admin_job_worker import run_admin_job_worker_loop
 from .services.rate_limit import validate_rate_limit_configuration
 
 logger = logging.getLogger(__name__)
@@ -87,6 +91,8 @@ async def _lifespan(app: FastAPI):
     logger.info("STARTUP: lifespan startup block reached, pid=%s", os.getpid())
 
     scheduler = None
+    admin_worker_stop: asyncio.Event | None = None
+    admin_worker_task: asyncio.Task | None = None
     if scheduler_enabled():
         scheduler = create_scheduler()
         scheduler.start()
@@ -94,6 +100,9 @@ async def _lifespan(app: FastAPI):
             "Schedulers started in this process (SCHEDULER_ENABLED=true; "
             "intelligence=6h, ranking=01:00 UTC, memory=15m)"
         )
+        admin_worker_stop = asyncio.Event()
+        admin_worker_task = asyncio.create_task(run_admin_job_worker_loop(admin_worker_stop))
+        logger.info("Admin job worker started in scheduler process")
     else:
         logger.info(
             "Schedulers disabled in this web worker. "
@@ -115,6 +124,14 @@ async def _lifespan(app: FastAPI):
     try:
         yield
     finally:
+        if admin_worker_stop is not None:
+            admin_worker_stop.set()
+        if admin_worker_task is not None:
+            admin_worker_task.cancel()
+            try:
+                await admin_worker_task
+            except asyncio.CancelledError:
+                pass
         if scheduler is not None:
             scheduler.shutdown(wait=True)
             logger.info("Schedulers shut down")
@@ -137,6 +154,7 @@ def create_app() -> FastAPI:
     """
     validate_auth_configuration()
     validate_rate_limit_configuration()
+    init_observability()
 
     app = FastAPI(
         title="AI Financial Advisor - Web Search Service",
@@ -185,6 +203,7 @@ def create_app() -> FastAPI:
         allow_creds = True
 
     app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CorrelationIdMiddleware)
 
     app.add_middleware(
         CORSMiddleware,
@@ -193,8 +212,8 @@ def create_app() -> FastAPI:
         # SECURITY: Only allow the methods the API actually uses.
         allow_methods=["GET", "POST", "OPTIONS"],
         # SECURITY: Enumerate allowed headers instead of wildcard.
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-        expose_headers=["X-RateLimit-Limit-Minute", "X-RateLimit-Remaining-Minute", "X-RateLimit-Reset-Minute",
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key", "X-Idempotency-Key"],
+        expose_headers=["X-Request-ID", "X-RateLimit-Limit-Minute", "X-RateLimit-Remaining-Minute", "X-RateLimit-Reset-Minute",
                         "X-RateLimit-Limit-Hour", "X-RateLimit-Remaining-Hour", "X-RateLimit-Reset-Hour",
                         "X-RateLimit-Limit-Day", "X-RateLimit-Remaining-Day", "X-RateLimit-Reset-Day"],
         max_age=600,  # 10 minutes — shorter preflight cache reduces stale-config window

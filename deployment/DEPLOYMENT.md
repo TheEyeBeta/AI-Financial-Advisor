@@ -55,37 +55,21 @@ This guide covers professional deployment strategies for the AI Financial Adviso
 
 3. **Deploy**
    - Push to `main` branch triggers automatic deployment
-   - Or use GitHub Actions workflow (configured in `.github/workflows/deploy.yml`)
+   - Production deploys are handled by Vercel's native GitHub integration
 
 ### Manual Deployment
 
-```bash
-# Install Vercel CLI
-npm i -g vercel
-
-# Login
-vercel login
-
-# Deploy
-vercel --prod
-```
+Use the Vercel dashboard to redeploy a previous commit or manually promote a deployment. This repository does not use Vercel CLI for production deploys.
 
 ## Backend Deployment
 
 ### Option 1: Railway (Recommended)
 
 1. **Create Railway Project**
-   ```bash
-   # Install Railway CLI
-   npm i -g @railway/cli
-   
-   # Login
-   railway login
-   
-   # Initialize project
-   cd backend/websearch_service
-   railway init
-   ```
+   - Go to the Railway dashboard.
+   - Create a project from the GitHub repository.
+   - Select `backend/websearch_service` as the service root when configuring the backend service.
+   - Railway should use `railway.json` and `backend/websearch_service/Dockerfile` from the repository.
 
 2. **Configure Environment Variables**
    In Railway dashboard → Variables:
@@ -109,9 +93,7 @@ vercel --prod
    - Do not run APScheduler in every web worker — only the dedicated scheduler process.
 
 3. **Deploy**
-   ```bash
-   railway up
-   ```
+   Push to the configured branch and let Railway's native GitHub integration deploy the backend.
 
 ### Option 2: Render
 
@@ -204,9 +186,9 @@ The staging branch is `staging`.
 2. Vercel should be configured to create preview deployments for `staging` pushes and pull requests.
 3. Railway should use a separate staging service with its own environment variables.
 4. Supabase should use a separate staging project so schema changes and test data stay isolated from production.
-5. `.github/workflows/deploy-staging.yml` deploys the Railway staging backend on `staging` pushes and runs the full E2E suite against the staging frontend URL.
+5. Railway and Vercel native GitHub integrations deploy staging from `staging` pushes; `.github/workflows/deploy-staging.yml` waits for the configured staging backend URL and runs the full E2E suite against the staging frontend URL.
 6. PRs targeting `staging` reuse the same workflow and post the E2E result as a PR comment.
-7. `.github/workflows/promote-to-prod.yml` merges `staging` into `main` after the production approval gate is satisfied, which then triggers the existing production deploy workflow.
+7. `.github/workflows/promote-to-prod.yml` merges `staging` into `main` after the production approval gate is satisfied, which then triggers native Vercel and Railway production deploys.
 
 ### Branch Conventions
 
@@ -233,14 +215,12 @@ The repository includes three workflows:
    - Builds Docker images
    - Security scanning
 
-2. **Deploy Pipeline** (`.github/workflows/deploy.yml`)
-   - Runs on push to `main`
-   - Builds and pushes Docker images
-   - Deploys to Vercel (frontend)
-   - Deploys to Railway/Render (backend)
+2. **Native Production Deploys**
+   - Vercel deploys the frontend from GitHub pushes to `main`
+   - Railway deploys the backend from GitHub pushes to `main`
 
 3. **Staging / Promotion Pipelines**
-   - `deploy-staging.yml` deploys Railway staging and runs the E2E suite against staging URLs
+   - `deploy-staging.yml` verifies staging health and runs the E2E suite against staging URLs
    - `promote-to-prod.yml` merges `staging` into `main` after environment approval
 
 ### Required Secrets
@@ -258,11 +238,6 @@ VITE_WEBSEARCH_API_URL
 OPENAI_API_KEY
 TAVILY_API_KEY
 
-# Deployment
-VERCEL_TOKEN
-RAILWAY_TOKEN (optional)
-RAILWAY_PROJECT_ID (optional)
-RAILWAY_STAGING_SERVICE
 STAGING_FRONTEND_URL
 STAGING_BACKEND_URL
 ```
@@ -271,7 +246,6 @@ STAGING_BACKEND_URL
 
 Use separate values for staging:
 
-- `RAILWAY_STAGING_SERVICE` points to the Railway staging service name or id.
 - `STAGING_FRONTEND_URL` points to the Vercel preview or staging frontend URL used by E2E.
 - `STAGING_BACKEND_URL` points to the Railway staging backend URL used for health checks.
 - Supabase staging credentials should live in the staging project and should not be reused from production.
@@ -358,20 +332,12 @@ Vercel automatically scales based on traffic. No configuration needed.
 
 ### Frontend (Vercel)
 
-```bash
-# Via CLI
-vercel rollback [deployment-url]
-
-# Via Dashboard
-# Go to Deployments → Select deployment → Rollback
-```
+Use the Vercel dashboard: go to Deployments, select the previous deployment, and roll back or promote it.
 
 ### Backend
 
 #### Railway
-```bash
-railway rollback
-```
+Use the Railway dashboard: open the backend service deployments, select a previous successful deployment, and redeploy or roll back it.
 
 #### Render
 - Go to Deployments → Select previous deployment → Rollback

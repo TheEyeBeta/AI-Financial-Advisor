@@ -1160,43 +1160,57 @@ export interface JobRunLog {
   created_at: string;
 }
 
-async function _getAdminAuthHeaders(): Promise<HeadersInit> {
+async function _getAdminAuthHeaders(idempotencyKey?: string): Promise<HeadersInit> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
   if (!token) throw new Error("Not authenticated — please sign in again");
   return {
     "Authorization": `Bearer ${token}`,
     "Content-Type": "application/json",
+    ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}),
   };
 }
 
+function _adminIdempotencyKey(action: string): string {
+  return `${action}-${crypto.randomUUID()}`;
+}
+
+export interface AdminJobResponse {
+  status: string;
+  job_id?: string;
+  job_type?: string;
+  duplicate?: boolean;
+  correlation_id?: string;
+  limit?: number;
+}
+
 export const adminApi = {
-  async triggerRanking(): Promise<{ status: string }> {
-    const headers = await _getAdminAuthHeaders();
+  async triggerRanking(): Promise<AdminJobResponse> {
+    const headers = await _getAdminAuthHeaders(_adminIdempotencyKey("ranking"));
     const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-ranking`, { method: "POST", headers });
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
-    return resp.json() as Promise<{ status: string }>;
+    return resp.json() as Promise<AdminJobResponse>;
   },
 
-  async triggerIntelligence(): Promise<{ status: string }> {
-    const headers = await _getAdminAuthHeaders();
+  async triggerIntelligence(): Promise<AdminJobResponse> {
+    const headers = await _getAdminAuthHeaders(_adminIdempotencyKey("intelligence"));
     const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-intelligence`, { method: "POST", headers });
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
-    return resp.json() as Promise<{ status: string }>;
+    return resp.json() as Promise<AdminJobResponse>;
   },
 
-  async triggerMemoryExtraction(): Promise<{ status: string }> {
-    const headers = await _getAdminAuthHeaders();
+  async triggerMemoryExtraction(): Promise<AdminJobResponse> {
+    const headers = await _getAdminAuthHeaders(_adminIdempotencyKey("memory-extraction"));
     const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-memory-extraction`, { method: "POST", headers });
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
-    return resp.json() as Promise<{ status: string }>;
+    return resp.json() as Promise<AdminJobResponse>;
   },
 
-  async triggerMeridianRefresh(): Promise<{ status: string }> {
-    const headers = await _getAdminAuthHeaders();
+  async triggerMeridianRefresh(): Promise<AdminJobResponse> {
+    const headers = await _getAdminAuthHeaders(_adminIdempotencyKey("meridian-refresh"));
     const resp = await fetch(`${getPythonApiUrl()}/api/admin/trigger-meridian-refresh`, { method: "POST", headers });
     if (!resp.ok) throw new Error(await resp.text() || `HTTP ${resp.status}`);
-    return resp.json() as Promise<{ status: string }>;
+    return resp.json() as Promise<AdminJobResponse>;
   },
 
   async getSchedulerStatus(): Promise<{ jobs: SchedulerJob[] }> {
