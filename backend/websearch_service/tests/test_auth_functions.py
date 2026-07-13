@@ -172,13 +172,14 @@ class TestExtractWebsocketToken:
         ws = self._ws(headers={"Authorization": "Bearer ws-token"})
         assert _extract_websocket_token(ws) == "ws-token"
 
-    def test_from_token_query_param(self):
+    def test_token_query_param_no_longer_accepted(self):
+        # SECURITY (#205): bearer JWTs must not travel in websocket URLs.
         ws = self._ws(query="token=my-ws-token")
-        assert _extract_websocket_token(ws) == "my-ws-token"
+        assert _extract_websocket_token(ws) is None
 
-    def test_from_access_token_query_param(self):
+    def test_access_token_query_param_no_longer_accepted(self):
         ws = self._ws(query="access_token=my-access-token")
-        assert _extract_websocket_token(ws) == "my-access-token"
+        assert _extract_websocket_token(ws) is None
 
     def test_no_token_returns_none(self):
         ws = self._ws()
@@ -575,12 +576,19 @@ class TestVerifyJwtWithSupabaseJwks:
 
 # ── require_websocket_auth ────────────────────────────────────────────────────
 
-def _mock_websocket(auth_header: str | None = None, query_params: dict | None = None):
+def _mock_websocket(
+    auth_header: str | None = None,
+    query_params: dict | None = None,
+    origin: str | None = None,
+):
     ws = MagicMock()
+    headers = {}
+    if auth_header is not None:
+        headers["Authorization"] = auth_header
+    if origin is not None:
+        headers["Origin"] = origin
     ws.headers = MagicMock()
-    ws.headers.get = lambda key, default="": (
-        auth_header if key == "Authorization" and auth_header is not None else default
-    )
+    ws.headers.get = lambda key, default="": headers.get(key, default)
     ws.query_params = MagicMock()
     ws.query_params.get = lambda key: (query_params or {}).get(key)
     return ws
@@ -614,15 +622,56 @@ class TestRequireWebsocketAuth:
         result = run_async(require_websocket_auth(ws))
         assert result.auth_id == "ws-user-id"
 
-    def test_valid_token_in_query_param_returns_user(self, monkeypatch):
+    def test_jwt_in_query_param_no_longer_authenticates(self, monkeypatch):
+        # SECURITY (#205): a valid Supabase JWT in ?token= must be rejected.
         monkeypatch.setenv("AUTH_REQUIRED", "true")
         monkeypatch.setenv("ENVIRONMENT", "development")
         monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
         token = _jwt(role="authenticated", sub="ws-query-user")
-        import asyncio
         ws = _mock_websocket(query_params={"token": token})
+        with pytest.raises(HTTPException) as exc_info:
+            run_async(require_websocket_auth(ws))
+        assert exc_info.value.status_code == 401
+
+    def test_valid_ticket_authenticates(self, monkeypatch):
+        monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        from app.services.ws_tickets import get_ws_ticket_store, reset_ws_ticket_store
+        reset_ws_ticket_store()
+        ticket, _ = get_ws_ticket_store().issue(user_id="ticket-user", endpoint="/ws/live")
+        ws = _mock_websocket(query_params={"ticket": ticket})
         result = run_async(require_websocket_auth(ws))
-        assert result.auth_id == "ws-query-user"
+        assert result.auth_id == "ticket-user"
+
+    def test_replayed_ticket_rejected(self, monkeypatch):
+        monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        from app.services.ws_tickets import get_ws_ticket_store, reset_ws_ticket_store
+        reset_ws_ticket_store()
+        ticket, _ = get_ws_ticket_store().issue(user_id="ticket-user", endpoint="/ws/live")
+        ws = _mock_websocket(query_params={"ticket": ticket})
+        run_async(require_websocket_auth(ws))
+        with pytest.raises(HTTPException) as exc_info:
+            run_async(require_websocket_auth(ws))
+        assert exc_info.value.status_code == 401
+
+    def test_disallowed_origin_rejected_with_403(self, monkeypatch):
+        monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        ws = _mock_websocket(origin="https://evil.example.com")
+        with pytest.raises(HTTPException) as exc_info:
+            run_async(require_websocket_auth(ws))
+        assert exc_info.value.status_code == 403
+
+    def test_allowed_dev_origin_passes_origin_check(self, monkeypatch):
+        monkeypatch.setenv("AUTH_REQUIRED", "true")
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        from app.services.ws_tickets import get_ws_ticket_store, reset_ws_ticket_store
+        reset_ws_ticket_store()
+        ticket, _ = get_ws_ticket_store().issue(user_id="origin-user", endpoint="/ws/live")
+        ws = _mock_websocket(query_params={"ticket": ticket}, origin="http://localhost:8080")
+        result = run_async(require_websocket_auth(ws))
+        assert result.auth_id == "origin-user"
 
     def test_token_missing_sub_raises_401(self, monkeypatch):
         monkeypatch.setenv("AUTH_REQUIRED", "true")

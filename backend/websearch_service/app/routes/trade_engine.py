@@ -18,6 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, WebSocket, W
 from pydantic import BaseModel
 
 from ..services.auth import (
+    WS_CLOSE_FORBIDDEN_ORIGIN,
+    WS_CLOSE_UNAUTHORIZED,
     AuthenticatedUser,
     get_backend_anon_key,
     get_backend_service_role_key,
@@ -26,6 +28,7 @@ from ..services.auth import (
     require_websocket_auth,
 )
 from ..services.dataapi_client import get_dataapi_client
+from ..services.ws_tickets import get_ws_ticket_store
 
 logger = logging.getLogger(__name__)
 
@@ -1079,6 +1082,33 @@ async def get_ticker_details(
     }
 
 
+class WebSocketTicketResponse(BaseModel):
+    """Single-use ticket for authenticating a WebSocket connection (#205)."""
+
+    ticket: str
+    expires_in: int
+    endpoint: str = "/ws/live"
+
+
+@router.post("/api/v1/ws/ticket")
+async def create_websocket_ticket(
+    user: AuthenticatedUser = Depends(require_auth),
+) -> WebSocketTicketResponse:
+    """
+    Issue a short-lived, single-use WebSocket ticket over authenticated HTTPS.
+
+    Connect with ``wss://.../ws/live?ticket=<ticket>`` before it expires.
+    The ticket is bound to the requesting user and the /ws/live endpoint,
+    and is consumed atomically on first use.
+    """
+    ticket, expires_in = get_ws_ticket_store().issue(
+        user_id=user.auth_id,
+        endpoint="/ws/live",
+        email=user.email,
+    )
+    return WebSocketTicketResponse(ticket=ticket, expires_in=expires_in)
+
+
 @router.websocket("/ws/live")
 async def websocket_live(websocket: WebSocket) -> None:
     """
@@ -1091,12 +1121,15 @@ async def websocket_live(websocket: WebSocket) -> None:
     try:
         await require_websocket_auth(websocket)
     except HTTPException as exc:
+        # Explicit close codes so clients can distinguish auth failures (4401)
+        # from origin rejection (4403). Reasons never echo credential values.
+        code = WS_CLOSE_FORBIDDEN_ORIGIN if exc.status_code == 403 else WS_CLOSE_UNAUTHORIZED
         reason = exc.detail if isinstance(exc.detail, str) else "Authentication required."
-        await websocket.close(code=4401, reason=reason[:123])
+        await websocket.close(code=code, reason=reason[:123])
         return
     except Exception as exc:
         logger.warning("Unexpected WebSocket auth error: %s", type(exc).__name__)
-        await websocket.close(code=4401, reason="Authentication error.")
+        await websocket.close(code=WS_CLOSE_UNAUTHORIZED, reason="Authentication error.")
         return
 
     await websocket.accept()

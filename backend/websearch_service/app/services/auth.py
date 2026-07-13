@@ -124,18 +124,24 @@ def _extract_bearer_token(request: Request) -> Optional[str]:
 
 
 def _extract_websocket_token(websocket: WebSocket) -> Optional[str]:
-    """Pull a JWT from websocket headers or query params."""
+    """Pull a JWT from the websocket Authorization header.
+
+    SECURITY (#205): bearer JWTs are no longer accepted via ``?token=`` /
+    ``?access_token=`` query parameters — URLs leak into proxy logs, browser
+    history, and monitoring. Browser clients use single-use tickets instead
+    (see ``app/services/ws_tickets.py``).
+    """
     auth_header = websocket.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:].strip()
         return token if token else None
-
-    for key in ("token", "access_token"):
-        token = (websocket.query_params.get(key) or "").strip()
-        if token:
-            return token
-
     return None
+
+
+def _extract_websocket_ticket(websocket: WebSocket) -> Optional[str]:
+    """Pull a single-use connection ticket from the websocket query string."""
+    ticket = (websocket.query_params.get("ticket") or "").strip()
+    return ticket or None
 
 
 # ── JWT validation ─────────────────────────────────────────────────────────────
@@ -477,14 +483,53 @@ async def optional_auth(request: Request) -> Optional[AuthenticatedUser]:
         return None
 
 
-async def require_websocket_auth(websocket: WebSocket) -> AuthenticatedUser:
-    """
-    Validate websocket auth using the same Supabase JWT rules as HTTP endpoints.
+# WebSocket close codes (4000-4999 are application-defined).
+WS_CLOSE_UNAUTHORIZED = 4401
+WS_CLOSE_FORBIDDEN_ORIGIN = 4403
 
-    Browsers cannot set arbitrary websocket Authorization headers reliably, so
-    a bearer token may also be supplied as ``?token=...`` or
-    ``?access_token=...`` on the websocket URL.
+
+def validate_websocket_origin(websocket: WebSocket) -> None:
     """
+    Reject browser websocket handshakes from unapproved origins (#205).
+
+    Browsers always send an ``Origin`` header on WebSocket handshakes; when
+    present it must match the CORS allowlist. Handshakes without an Origin
+    header come from non-browser clients, which cannot be victims of
+    cross-site WebSocket hijacking, so they pass this check and still must
+    authenticate.
+    """
+    origin = (websocket.headers.get("Origin") or "").strip()
+    if not origin:
+        return
+
+    from ..config import resolve_allowed_origins
+
+    allowed = resolve_allowed_origins()
+    if origin.rstrip("/") not in {o.rstrip("/") for o in allowed}:
+        logger.warning("WebSocket handshake rejected: origin %r not in allowlist", origin)
+        raise HTTPException(status_code=403, detail="Origin not allowed.")
+
+
+async def require_websocket_auth(
+    websocket: WebSocket,
+    *,
+    endpoint: str = "/ws/live",
+) -> AuthenticatedUser:
+    """
+    Validate websocket auth for browsers and API clients (#205).
+
+    Accepted credentials, in order:
+    1. ``Authorization: Bearer <jwt>`` header (non-browser clients).
+    2. ``?ticket=<single-use ticket>`` issued by ``POST /api/v1/ws/ticket``
+       over authenticated HTTPS. Tickets are short-lived, bound to the user
+       and endpoint, and consumed atomically — replay or expiry fails.
+
+    Supabase JWTs in ``?token=`` / ``?access_token=`` query parameters are no
+    longer accepted. The Origin header, when present, must match the CORS
+    allowlist (raises 403; callers close with WS_CLOSE_FORBIDDEN_ORIGIN).
+    """
+    validate_websocket_origin(websocket)
+
     if not _auth_required():
         logger.warning(
             "AUTH_REQUIRED=false — websocket authentication is DISABLED. "
@@ -493,21 +538,36 @@ async def require_websocket_auth(websocket: WebSocket) -> AuthenticatedUser:
         return AuthenticatedUser(auth_id=DEV_BYPASS_USER_ID)
 
     token = _extract_websocket_token(websocket)
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing websocket authentication token.")
+    if token:
+        payload = _verify_supabase_jwt(
+            token,
+            required_claims=("sub", "exp", "iat", "role"),
+            allow_rest_fallback=True,
+        )
+        auth_id = payload.get("sub")
+        if not auth_id:
+            raise HTTPException(status_code=401, detail="Authentication token missing subject claim.")
+        return AuthenticatedUser(auth_id=str(auth_id), email=payload.get("email"))
 
-    payload = _verify_supabase_jwt(
-        token,
-        required_claims=("sub", "exp", "iat", "role"),
-        allow_rest_fallback=True,
+    ticket = _extract_websocket_ticket(websocket)
+    if ticket:
+        from .ws_tickets import get_ws_ticket_store
+
+        claims = get_ws_ticket_store().consume(ticket, endpoint=endpoint)
+        if claims is None:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid, expired, or already-used websocket ticket.",
+            )
+        return AuthenticatedUser(auth_id=claims.user_id, email=claims.email)
+
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "Missing websocket credentials. Obtain a single-use ticket from "
+            "POST /api/v1/ws/ticket and connect with ?ticket=<ticket>."
+        ),
     )
-    auth_id = payload.get("sub")
-    email = payload.get("email")
-
-    if not auth_id:
-        raise HTTPException(status_code=401, detail="Authentication token missing subject claim.")
-
-    return AuthenticatedUser(auth_id=str(auth_id), email=email)
 
 
 # ── Service-role JWT dependency (replaces static X-Admin-Key) ─────────────────

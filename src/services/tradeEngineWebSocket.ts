@@ -3,7 +3,7 @@
  * Provides real-time price updates, trading signals, and engine status
  */
 
-import { getPythonWebSocketUrl } from '@/lib/env';
+import { getPythonApiUrl, getPythonWebSocketUrl } from '@/lib/env';
 import { supabase } from '@/lib/supabase';
 import {
   WSConnectedMessage,
@@ -114,6 +114,30 @@ class TradeEngineWebSocket {
     });
   }
 
+  /**
+   * Exchange the Supabase session for a short-lived single-use WebSocket
+   * ticket over authenticated HTTPS (#205). The long-lived JWT never
+   * appears in the WebSocket URL, so it cannot leak via proxy logs or
+   * browser history; the ticket is consumed server-side on first use.
+   */
+  private async fetchConnectionTicket(): Promise<string | null> {
+    const { data: { session } } = await supabase.auth.getSession();
+    const accessToken = session?.access_token;
+    if (!accessToken) {
+      return null;
+    }
+
+    const response = await fetch(`${getPythonApiUrl()}/api/v1/ws/ticket`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) {
+      throw new Error(`Ticket request failed with status ${response.status}`);
+    }
+    const payload: { ticket?: string } = await response.json();
+    return payload.ticket ?? null;
+  }
+
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN || this.ws?.readyState === WebSocket.CONNECTING) {
       return;
@@ -121,13 +145,12 @@ class TradeEngineWebSocket {
 
     this.setConnectionState('connecting');
 
-    void supabase.auth.getSession()
-      .then(({ data: { session } }) => {
-        const accessToken = session?.access_token;
-        const tokenQuery = accessToken ? `?token=${encodeURIComponent(accessToken)}` : "";
+    void this.fetchConnectionTicket()
+      .then((ticket) => {
+        const ticketQuery = ticket ? `?ticket=${encodeURIComponent(ticket)}` : "";
 
         try {
-          this.ws = new WebSocket(`${this.baseUrl}/ws/live${tokenQuery}`);
+          this.ws = new WebSocket(`${this.baseUrl}/ws/live${ticketQuery}`);
 
           this.ws.onopen = () => {
             this.reconnectAttempts = 0;
@@ -170,7 +193,7 @@ class TradeEngineWebSocket {
         }
       })
       .catch((error) => {
-        console.error('[TradeEngine WS] Failed to read auth session:', error);
+        console.error('[TradeEngine WS] Failed to obtain connection ticket:', error);
         this.setConnectionState('disconnected');
       });
   }

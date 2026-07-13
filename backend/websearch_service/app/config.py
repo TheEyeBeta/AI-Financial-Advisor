@@ -56,6 +56,27 @@ def get_app_settings() -> AppSettings:
     )
 
 
+# Default origins for local development. Production never falls back to these:
+# validate_app_settings() requires an explicit CORS_ORIGINS list there.
+DEFAULT_DEV_ORIGINS = [
+    "http://localhost:8080",   # Vite on custom port (this project)
+    "http://localhost:5173",   # Vite default
+    "http://localhost:3000",   # CRA / other
+    "http://127.0.0.1:8080",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+
+
+def resolve_allowed_origins(settings: AppSettings | None = None) -> list[str]:
+    """Origins allowed for CORS and WebSocket Origin validation."""
+    settings = settings or get_app_settings()
+    if settings.is_production:
+        return list(settings.cors_origins)
+    # dict.fromkeys preserves insertion order and deduplicates
+    return list(dict.fromkeys(DEFAULT_DEV_ORIGINS + settings.cors_origins))
+
+
 def validate_app_settings(settings: AppSettings) -> None:
     if not settings.is_production:
         return

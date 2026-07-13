@@ -729,6 +729,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ws/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Websocket Ticket
+         * @description Issue a short-lived, single-use WebSocket ticket over authenticated HTTPS.
+         *
+         *     Connect with ``wss://.../ws/live?ticket=<ticket>`` before it expires.
+         *     The ticket is bound to the requesting user and the /ws/live endpoint,
+         *     and is consumed atomically on first use.
+         */
+        post: operations["create_websocket_ticket_api_v1_ws_ticket_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/stocks/ranking": {
         parameters: {
             query?: never;
@@ -1738,6 +1762,21 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * WebSocketTicketResponse
+         * @description Single-use ticket for authenticating a WebSocket connection (#205).
+         */
+        WebSocketTicketResponse: {
+            /** Ticket */
+            ticket: string;
+            /** Expires In */
+            expires_in: number;
+            /**
+             * Endpoint
+             * @default /ws/live
+             */
+            endpoint: string;
         };
     };
     responses: never;
@@ -2993,6 +3032,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_websocket_ticket_api_v1_ws_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSocketTicketResponse"];
                 };
             };
         };

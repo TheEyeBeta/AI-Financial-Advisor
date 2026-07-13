@@ -2040,6 +2040,28 @@
         }
       }
     },
+    "/api/v1/ws/ticket": {
+      "post": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Create Websocket Ticket",
+        "description": "Issue a short-lived, single-use WebSocket ticket over authenticated HTTPS.\n\nConnect with ``wss://.../ws/live?ticket=<ticket>`` before it expires.\nThe ticket is bound to the requesting user and the /ws/live endpoint,\nand is consumed atomically on first use.",
+        "operationId": "create_websocket_ticket_api_v1_ws_ticket_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSocketTicketResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/stocks/ranking": {
       "get": {
         "tags": [
@@ -4903,6 +4925,30 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WebSocketTicketResponse": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "title": "Ticket"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint",
+            "default": "/ws/live"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket",
+          "expires_in"
+        ],
+        "title": "WebSocketTicketResponse",
+        "description": "Single-use ticket for authenticating a WebSocket connection (#205)."
       }
     }
   }
