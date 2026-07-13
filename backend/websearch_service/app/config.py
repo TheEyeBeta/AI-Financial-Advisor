@@ -77,9 +77,57 @@ def resolve_allowed_origins(settings: AppSettings | None = None) -> list[str]:
     return list(dict.fromkeys(DEFAULT_DEV_ORIGINS + settings.cors_origins))
 
 
+# Secrets/config that production cannot start without (#210). Optional or
+# feature-gated settings (Redis, DataAPI, Tavily/Perplexity, Sentry) are
+# deliberately NOT here — their absence degrades a feature, not safety.
+REQUIRED_PRODUCTION_ENV = (
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "SUPABASE_JWT_SECRET",
+    "OPENAI_API_KEY",
+)
+
+PLACEHOLDER_MARKERS = (
+    "your-",
+    "your_",
+    "change-me",
+    "changeme",
+    "placeholder",
+    "sk-your",
+    "xxxx",
+)
+
+
+def looks_like_placeholder(value: str) -> bool:
+    lowered = value.strip().lower()
+    return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
+
+
+def validate_required_production_env() -> None:
+    """Fail fast (never at first request) when production config is absent or template junk."""
+    missing = [key for key in REQUIRED_PRODUCTION_ENV if not (os.getenv(key) or "").strip()]
+    if missing:
+        raise RuntimeError(
+            "FATAL: Missing required production configuration: "
+            f"{', '.join(missing)}. Set these in the deployment environment "
+            "(see backend/websearch_service/.env.example for descriptions)."
+        )
+
+    placeholder_keys = [
+        key for key in REQUIRED_PRODUCTION_ENV if looks_like_placeholder(os.getenv(key) or "")
+    ]
+    if placeholder_keys:
+        raise RuntimeError(
+            "FATAL: Production configuration still contains template placeholder "
+            f"values for: {', '.join(placeholder_keys)}. Replace them with real values."
+        )
+
+
 def validate_app_settings(settings: AppSettings) -> None:
     if not settings.is_production:
         return
+
+    validate_required_production_env()
 
     if not settings.cors_origins or "*" in settings.cors_origins:
         raise RuntimeError(

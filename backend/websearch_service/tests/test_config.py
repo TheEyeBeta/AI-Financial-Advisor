@@ -205,3 +205,57 @@ def test_validate_app_settings_rejects_malformed_trusted_hosts():
 def test_validate_app_settings_happy_path():
     # Fully valid production settings — must not raise.
     validate_app_settings(_settings())
+
+
+# ─── validate_required_production_env (#210) ─────────────────────────────────
+
+def test_validate_app_settings_requires_production_env(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        validate_app_settings(_settings())
+
+
+def test_validate_app_settings_lists_every_missing_variable(monkeypatch):
+    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="SUPABASE_JWT_SECRET, OPENAI_API_KEY"):
+        validate_app_settings(_settings())
+
+
+def test_validate_app_settings_rejects_placeholder_values(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-your-openai-key-here")
+    with pytest.raises(RuntimeError, match="placeholder"):
+        validate_app_settings(_settings())
+
+
+def test_looks_like_placeholder():
+    from app.config import looks_like_placeholder
+
+    assert looks_like_placeholder("your-supabase-jwt-secret-here") is True
+    assert looks_like_placeholder("change-me") is True
+    assert looks_like_placeholder("sk-proj-A1b2C3d4E5f6") is False
+    assert looks_like_placeholder("") is False
+
+
+def test_required_env_not_enforced_outside_production(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    validate_app_settings(_settings(environment="development"))  # should not raise
+
+
+# ─── resolve_allowed_origins (#205/#210) ─────────────────────────────────────
+
+def test_resolve_allowed_origins_production_is_exact_list():
+    from app.config import resolve_allowed_origins
+
+    settings = _settings(cors_origins=["https://app.example.com"])
+    assert resolve_allowed_origins(settings) == ["https://app.example.com"]
+
+
+def test_resolve_allowed_origins_dev_includes_defaults_and_extras():
+    from app.config import DEFAULT_DEV_ORIGINS, resolve_allowed_origins
+
+    settings = _settings(environment="development", cors_origins=["https://preview.example.com"])
+    resolved = resolve_allowed_origins(settings)
+    for origin in DEFAULT_DEV_ORIGINS:
+        assert origin in resolved
+    assert "https://preview.example.com" in resolved
