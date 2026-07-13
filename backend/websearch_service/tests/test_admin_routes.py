@@ -9,10 +9,25 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.routes.admin import (
+    JOB_TYPE_RANKING,
     router as admin_router,
     _require_admin,
     _get_supabase_rest_config,
 )
+
+_IDEMPOTENCY_HEADERS = {"Idempotency-Key": "test-idempotency-key-001"}
+
+
+def _queued_job(job_type: str) -> tuple[dict, bool]:
+    return (
+        {
+            "id": "job-test-1",
+            "status": "queued",
+            "job_type": job_type,
+            "correlation_id": "corr-test-1",
+        },
+        True,
+    )
 
 
 # ── Test app that skips auth ───────────────────────────────────────────────────
@@ -30,61 +45,105 @@ def _app_no_auth() -> FastAPI:
 
 class TestTriggerRanking:
     def test_returns_started(self):
-        with patch("app.routes.admin.run_ranking_cycle", new=AsyncMock(return_value={})), \
-             patch("asyncio.create_task"):
+        with patch(
+            "app.routes.admin.enqueue_admin_job",
+            return_value=_queued_job(JOB_TYPE_RANKING),
+        ):
             client = TestClient(_app_no_auth())
-            resp = client.post("/api/admin/trigger-ranking")
+            resp = client.post("/api/admin/trigger-ranking", headers=_IDEMPOTENCY_HEADERS)
         assert resp.status_code == 200
-        assert resp.json()["status"] == "started"
+        assert resp.json()["status"] == "queued"
 
-    def test_creates_background_task(self):
-        with patch("app.routes.admin.run_ranking_cycle", new=AsyncMock(return_value={})) as mock_fn, \
-             patch("asyncio.create_task") as mock_task:
+    def test_enqueues_durable_job(self):
+        with patch(
+            "app.routes.admin.enqueue_admin_job",
+            return_value=_queued_job(JOB_TYPE_RANKING),
+        ) as enqueue_mock:
             client = TestClient(_app_no_auth())
-            client.post("/api/admin/trigger-ranking")
-        mock_task.assert_called_once()
+            client.post("/api/admin/trigger-ranking", headers=_IDEMPOTENCY_HEADERS)
+        enqueue_mock.assert_called_once()
 
 
 class TestTriggerMemoryScan:
     def test_returns_started(self):
-        with patch("app.routes.admin.run_history_scan", new=AsyncMock(return_value={})), \
-             patch("asyncio.create_task"):
+        with patch(
+            "app.routes.admin.enqueue_admin_job",
+            return_value=_queued_job("memory_history_scan"),
+        ):
             client = TestClient(_app_no_auth())
-            resp = client.post("/api/admin/trigger-memory-scan")
+            resp = client.post("/api/admin/trigger-memory-scan", headers=_IDEMPOTENCY_HEADERS)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "started"
+        assert data["status"] == "queued"
         assert data["limit"] == 200
 
 
 class TestTriggerIntelligence:
     def test_returns_started(self):
-        with patch("app.routes.admin.run_intelligence_cycle", new=AsyncMock(return_value={})), \
-             patch("asyncio.create_task"):
+        with patch(
+            "app.routes.admin.enqueue_admin_job",
+            return_value=_queued_job("intelligence_engine"),
+        ):
             client = TestClient(_app_no_auth())
-            resp = client.post("/api/admin/trigger-intelligence")
+            resp = client.post("/api/admin/trigger-intelligence", headers=_IDEMPOTENCY_HEADERS)
         assert resp.status_code == 200
-        assert resp.json()["status"] == "started"
+        assert resp.json()["status"] == "queued"
 
 
 class TestTriggerMemoryExtraction:
     def test_returns_started(self):
-        with patch("app.routes.admin.run_memory_extraction_cycle", new=AsyncMock(return_value={})), \
-             patch("asyncio.create_task"):
+        with patch(
+            "app.routes.admin.enqueue_admin_job",
+            return_value=_queued_job("memory_extraction"),
+        ):
             client = TestClient(_app_no_auth())
-            resp = client.post("/api/admin/trigger-memory-extraction")
+            resp = client.post("/api/admin/trigger-memory-extraction", headers=_IDEMPOTENCY_HEADERS)
         assert resp.status_code == 200
-        assert resp.json()["status"] == "started"
+        assert resp.json()["status"] == "queued"
 
 
 class TestTriggerMeridianRefresh:
     def test_returns_started(self):
-        with patch("app.routes.admin.refresh_all_users_context", new=AsyncMock(return_value={})), \
-             patch("asyncio.create_task"):
+        with patch(
+            "app.routes.admin.enqueue_admin_job",
+            return_value=_queued_job("meridian_refresh"),
+        ):
             client = TestClient(_app_no_auth())
-            resp = client.post("/api/admin/trigger-meridian-refresh")
+            resp = client.post("/api/admin/trigger-meridian-refresh", headers=_IDEMPOTENCY_HEADERS)
         assert resp.status_code == 200
-        assert resp.json()["status"] == "started"
+        assert resp.json()["status"] == "queued"
+
+
+class TestAdminJobRoutes:
+    def test_list_jobs(self):
+        with patch(
+            "app.routes.admin.list_admin_jobs",
+            return_value=[{"id": "job-1", "status": "queued"}],
+        ):
+            client = TestClient(_app_no_auth())
+            resp = client.get("/api/admin/jobs")
+        assert resp.status_code == 200
+        assert resp.json()["jobs"][0]["id"] == "job-1"
+
+    def test_get_job_detail(self):
+        with patch(
+            "app.routes.admin.get_admin_job",
+            return_value={"id": "job-1", "status": "failed"},
+        ):
+            client = TestClient(_app_no_auth())
+            resp = client.get("/api/admin/jobs/job-1")
+        assert resp.status_code == 200
+        assert resp.json()["job"]["status"] == "failed"
+
+    def test_retry_job(self):
+        with patch(
+            "app.routes.admin.retry_failed_job",
+            return_value={"id": "job-2", "status": "queued"},
+        ):
+            client = TestClient(_app_no_auth())
+            resp = client.post("/api/admin/jobs/job-1/retry")
+        assert resp.status_code == 200
+        assert resp.json()["retried_from"] == "job-1"
 
 
 # ── Scheduler status ───────────────────────────────────────────────────────────
@@ -183,14 +242,16 @@ class TestRequireAdminEdgeCases:
         verify_mock = AsyncMock(return_value={"role": "service_role", "sub": "svc"})
         monkeypatch.setattr("app.routes.admin.verify_service_role", verify_mock)
 
-        with patch("app.routes.admin.run_ranking_cycle", new=AsyncMock(return_value={})), \
-             patch("asyncio.create_task"):
+        with patch(
+            "app.routes.admin.enqueue_admin_job",
+            return_value=_queued_job(JOB_TYPE_RANKING),
+        ):
             app = FastAPI()
             app.include_router(admin_router)
             client = TestClient(app)
             resp = client.post(
                 "/api/admin/trigger-ranking",
-                headers={"Authorization": "Bearer test-token"},
+                headers={"Authorization": "Bearer test-token", **_IDEMPOTENCY_HEADERS},
             )
         assert resp.status_code == 200
 
@@ -212,14 +273,14 @@ class TestCheckSupabase:
         monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-key")
         with patch("app.routes.admin.httpx.AsyncClient", return_value=self._fake_http(200)):
-            result = asyncio.get_event_loop().run_until_complete(_check_supabase())
+            result = asyncio.run(_check_supabase())
         assert result["status"] == "connected"
 
     def test_not_configured_when_no_url(self, monkeypatch):
         from app.routes.admin import _check_supabase
         monkeypatch.delenv("SUPABASE_URL", raising=False)
         monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
-        result = asyncio.get_event_loop().run_until_complete(_check_supabase())
+        result = asyncio.run(_check_supabase())
         assert result["status"] == "not_configured"
 
     def test_error_on_http_failure(self, monkeypatch):
@@ -227,7 +288,7 @@ class TestCheckSupabase:
         monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
         monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-key")
         with patch("app.routes.admin.httpx.AsyncClient", return_value=self._fake_http(503)):
-            result = asyncio.get_event_loop().run_until_complete(_check_supabase())
+            result = asyncio.run(_check_supabase())
         assert result["status"] == "error"
 
     def test_exception_returns_error(self, monkeypatch):
@@ -239,7 +300,7 @@ class TestCheckSupabase:
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)
         with patch("app.routes.admin.httpx.AsyncClient", return_value=mock_client):
-            result = asyncio.get_event_loop().run_until_complete(_check_supabase())
+            result = asyncio.run(_check_supabase())
         assert result["status"] == "error"
 
 

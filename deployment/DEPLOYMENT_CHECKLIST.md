@@ -15,7 +15,7 @@
 
 ### CI/CD Pipelines
 - [x] GitHub Actions CI workflow (`.github/workflows/ci.yml`)
-- [x] GitHub Actions Deploy workflow (`.github/workflows/deploy.yml`)
+- [x] Native Vercel and Railway GitHub deploy integrations
 - [x] Docker build workflow (`.github/workflows/docker-build.yml`)
 
 ### Platform Configurations
@@ -53,29 +53,14 @@ Add these secrets in GitHub → Settings → Secrets and variables → Actions:
 
 **Required Secrets:**
 ```bash
-# Vercel
-VERCEL_TOKEN=your_vercel_token
-
-# Railway (if using Railway)
-RAILWAY_TOKEN=your_railway_token
-RAILWAY_PROJECT_ID=your_project_id  # Optional, can auto-detect
-
-# Environment Variables (for build)
+# Environment Variables
 VITE_SUPABASE_URL=https://your-project.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 VITE_PYTHON_API_URL=https://your-backend.railway.app  # Set after backend deploys
 VITE_WEBSEARCH_API_URL=https://your-backend.railway.app
 ```
 
-**How to get Vercel token:**
-1. Go to https://vercel.com/account/tokens
-2. Create new token
-3. Copy token to GitHub secrets
-
-**How to get Railway token:**
-1. Go to Railway dashboard → Settings → Tokens
-2. Create new token
-3. Copy token to GitHub secrets
+Vercel and Railway deploy from their native GitHub integrations. Do not add CLI deploy tokens unless a future workflow explicitly needs them.
 
 ### 2. Backend Environment Variables (Railway/Render)
 
@@ -237,7 +222,7 @@ done
 
 ### Issue: Railway deployment fails
 **Solution:**
-1. Check Railway logs: `railway logs`
+1. Check the Railway dashboard deployment logs
 2. Verify `requirements.txt` is in `backend/websearch_service/`
 3. Check Dockerfile path matches `railway.json`
 4. Verify Python version compatibility (3.12)
@@ -310,19 +295,6 @@ done
 ## 📝 Quick Commands Reference
 
 ```bash
-# Railway CLI
-railway login
-railway init
-railway up
-railway logs
-railway variables
-
-# Vercel CLI
-vercel login
-vercel --prod
-vercel env ls
-vercel logs
-
 # Docker (local testing)
 docker-compose up -d
 docker-compose logs -f backend

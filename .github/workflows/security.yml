@@ -24,8 +24,7 @@ jobs:
       - name: Auto-remediate lockfile vulnerabilities (prod deps)
         run: npm audit fix --package-lock-only --omit=dev --omit=optional || true
       - name: Audit production dependencies
-        # --omit=optional: vercel and @railway/cli are optional CLI tools,
-        # not runtime deps — their transitive vulns are not exploitable.
+        # --omit=optional keeps optional local tooling out of runtime dependency audits.
         run: npm audit --omit=dev --omit=optional --audit-level=high
 
   python-audit:

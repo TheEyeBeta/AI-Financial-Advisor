@@ -1,8 +1,7 @@
-"""Tests for admin trigger endpoints — auth guard and background dispatch."""
+"""Tests for admin trigger endpoints — auth guard and durable job enqueue."""
 from __future__ import annotations
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -20,10 +19,11 @@ def _service_role_app_and_client(monkeypatch) -> TestClient:
 
 
 def _service_role_headers(service_role_jwt) -> dict[str, str]:
-    return {"Authorization": f"Bearer {service_role_jwt}"}
+    return {
+        "Authorization": f"Bearer {service_role_jwt}",
+        "Idempotency-Key": "test-idempotency-key-001",
+    }
 
-
-# ─── Auth guard: endpoints reject missing tokens ───────────────────────────
 
 @pytest.mark.parametrize(
     "endpoint",
@@ -41,94 +41,69 @@ def test_trigger_endpoints_reject_missing_token(monkeypatch, endpoint: str):
     assert resp.status_code in (401, 403)
 
 
-# ─── Service-role trigger endpoints ────────────────────────────────────────
-
-async def _noop_coroutine() -> dict:
-    """Coroutine that resolves immediately without doing work."""
-    return {"ok": True}
-
-
-def _consume(coro):
-    """Close the coroutine so pytest's resource warnings stay clean."""
-    coro.close()
+def test_trigger_endpoints_require_idempotency_key(monkeypatch, service_role_jwt):
+    client = _service_role_app_and_client(monkeypatch)
+    resp = client.post(
+        "/api/admin/trigger-ranking",
+        headers={"Authorization": f"Bearer {service_role_jwt}"},
+    )
+    assert resp.status_code == 400
 
 
-def test_trigger_ranking_dispatches_background_task(monkeypatch, service_role_jwt):
+def test_trigger_ranking_enqueues_durable_job(monkeypatch, service_role_jwt):
     client = _service_role_app_and_client(monkeypatch)
 
-    # The route schedules `_run_ranking_logged()` on the loop; `_consume` closes
-    # the coroutine without running it, so we assert on the wrapper itself
-    # rather than the underlying `run_ranking_cycle` it would have awaited.
-    wrapper_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "_run_ranking_logged", new=wrapper_mock), \
-         patch.object(admin_route.asyncio, "create_task", side_effect=_consume) as ct_mock:
+    with patch.object(
+        admin_route,
+        "enqueue_admin_job",
+        return_value=(
+            {
+                "id": "job-123",
+                "status": "queued",
+                "job_type": admin_route.JOB_TYPE_RANKING,
+                "correlation_id": "corr-1",
+            },
+            True,
+        ),
+    ) as enqueue_mock:
         resp = client.post(
-            "/api/admin/trigger-ranking", headers=_service_role_headers(service_role_jwt),
-        )
-
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "started"}
-    wrapper_mock.assert_called_once()
-    ct_mock.assert_called_once()
-
-
-def test_trigger_memory_scan_uses_200_limit(monkeypatch, service_role_jwt):
-    client = _service_role_app_and_client(monkeypatch)
-
-    scan_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "run_history_scan", new=scan_mock), \
-         patch.object(admin_route.asyncio, "create_task", side_effect=_consume):
-        resp = client.post(
-            "/api/admin/trigger-memory-scan", headers=_service_role_headers(service_role_jwt),
-        )
-
-    assert resp.status_code == 200
-    assert resp.json() == {"status": "started", "limit": 200}
-    scan_mock.assert_called_once_with(limit=200)
-
-
-def test_trigger_intelligence_dispatches_task(monkeypatch, service_role_jwt):
-    client = _service_role_app_and_client(monkeypatch)
-
-    wrapper_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "_run_intelligence_logged", new=wrapper_mock), \
-         patch.object(admin_route.asyncio, "create_task", side_effect=_consume):
-        resp = client.post(
-            "/api/admin/trigger-intelligence", headers=_service_role_headers(service_role_jwt),
-        )
-
-    assert resp.status_code == 200
-    wrapper_mock.assert_called_once()
-
-
-def test_trigger_memory_extraction_dispatches_task(monkeypatch, service_role_jwt):
-    client = _service_role_app_and_client(monkeypatch)
-
-    wrapper_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "_run_memory_extraction_logged", new=wrapper_mock), \
-         patch.object(admin_route.asyncio, "create_task", side_effect=_consume):
-        resp = client.post(
-            "/api/admin/trigger-memory-extraction",
+            "/api/admin/trigger-ranking",
             headers=_service_role_headers(service_role_jwt),
         )
 
     assert resp.status_code == 200
-    wrapper_mock.assert_called_once()
+    body = resp.json()
+    assert body["status"] == "queued"
+    assert body["job_id"] == "job-123"
+    assert body["duplicate"] is False
+    enqueue_mock.assert_called_once()
 
 
-def test_trigger_meridian_refresh_dispatches_task(monkeypatch, service_role_jwt):
+def test_trigger_memory_scan_enqueues_with_limit(monkeypatch, service_role_jwt):
     client = _service_role_app_and_client(monkeypatch)
 
-    refresh_mock = MagicMock(side_effect=lambda *a, **kw: _noop_coroutine())
-    with patch.object(admin_route, "refresh_all_users_context", new=refresh_mock), \
-         patch.object(admin_route.asyncio, "create_task", side_effect=_consume):
+    with patch.object(
+        admin_route,
+        "enqueue_admin_job",
+        return_value=(
+            {
+                "id": "job-scan",
+                "status": "queued",
+                "job_type": admin_route.JOB_TYPE_MEMORY_SCAN,
+                "correlation_id": "corr-2",
+            },
+            True,
+        ),
+    ) as enqueue_mock:
         resp = client.post(
-            "/api/admin/trigger-meridian-refresh",
+            "/api/admin/trigger-memory-scan",
             headers=_service_role_headers(service_role_jwt),
         )
 
     assert resp.status_code == 200
-    refresh_mock.assert_called_once()
+    assert resp.json()["limit"] == 200
+    enqueue_mock.assert_called_once()
+    assert enqueue_mock.call_args.kwargs["parameters"] == {"limit": 200}
 
 
 # ─── Admin dataapi-query input validation ─────────────────────────────────
@@ -138,7 +113,7 @@ def test_dataapi_query_rejects_non_select(monkeypatch, service_role_jwt):
     resp = client.get(
         "/api/admin/dataapi-query",
         params={"q": "DELETE FROM trades"},
-        headers=_service_role_headers(service_role_jwt),
+        headers={"Authorization": f"Bearer {service_role_jwt}"},
     )
     assert resp.status_code == 400
 
@@ -148,9 +123,8 @@ def test_dataapi_query_rejects_mutation_keywords_inside_cte(monkeypatch, service
     resp = client.get(
         "/api/admin/dataapi-query",
         params={"q": "WITH x AS (DELETE FROM trades) SELECT * FROM x"},
-        headers=_service_role_headers(service_role_jwt),
+        headers={"Authorization": f"Bearer {service_role_jwt}"},
     )
-    # Blocked by the keyword regex (DELETE present).
     assert resp.status_code == 400
 
 
@@ -159,7 +133,6 @@ def test_dataapi_query_requires_min_length(monkeypatch, service_role_jwt):
     resp = client.get(
         "/api/admin/dataapi-query",
         params={"q": ""},
-        headers=_service_role_headers(service_role_jwt),
+        headers={"Authorization": f"Bearer {service_role_jwt}"},
     )
-    # FastAPI rejects empty query string via min_length=1.
     assert resp.status_code == 422

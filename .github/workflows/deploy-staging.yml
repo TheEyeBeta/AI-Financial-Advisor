@@ -18,8 +18,8 @@ env:
   STAGING_BACKEND_URL: ${{ secrets.STAGING_BACKEND_URL }}
 
 jobs:
-  deploy-backend:
-    name: Deploy Backend to Railway Staging
+  verify-staging:
+    name: Verify Staging Backend
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -31,17 +31,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Install Railway CLI
-        if: github.event_name != 'pull_request'
-        run: npm install -g @railway/cli
-
-      - name: Deploy to Railway staging
-        if: github.event_name != 'pull_request'
-        working-directory: ./backend/websearch_service
-        run: railway up --service "${{ secrets.RAILWAY_STAGING_SERVICE }}" --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Resolve staging endpoints
         id: endpoints
@@ -69,8 +58,8 @@ jobs:
   e2e:
     name: Run Full E2E Suite
     runs-on: ubuntu-latest
-    if: needs.deploy-backend.result == 'success'
-    needs: deploy-backend
+    if: needs.verify-staging.result == 'success'
+    needs: verify-staging
     permissions:
       contents: read
       issues: write

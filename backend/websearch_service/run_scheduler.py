@@ -33,6 +33,7 @@ logging.basicConfig(
 )
 
 from app.scheduler_config import create_scheduler, scheduler_enabled  # noqa: E402
+from app.services.admin_job_worker import run_admin_job_worker_loop  # noqa: E402
 
 
 async def _main() -> None:
@@ -46,6 +47,7 @@ async def _main() -> None:
     )
 
     stop = asyncio.Event()
+    worker_task = asyncio.create_task(run_admin_job_worker_loop(stop))
 
     def _handle_signal(*_args: object) -> None:
         stop.set()
@@ -58,6 +60,11 @@ async def _main() -> None:
             signal.signal(sig, lambda *_: stop.set())
 
     await stop.wait()
+    worker_task.cancel()
+    try:
+        await worker_task
+    except asyncio.CancelledError:
+        pass
     scheduler.shutdown(wait=True)
     logging.getLogger(__name__).info("Dedicated scheduler shut down cleanly")
 

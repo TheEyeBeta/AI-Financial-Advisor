@@ -668,14 +668,21 @@ export default function Admin() {
     setJobStatuses((prev) => ({ ...prev, [jobId]: "running" }));
     setJobMessages((prev) => ({ ...prev, [jobId]: "" }));
     try {
-      if (jobId === "ranking") await adminApi.triggerRanking();
-      else if (jobId === "memory_extraction") await adminApi.triggerMemoryExtraction();
-      else if (jobId === "intelligence") await adminApi.triggerIntelligence();
-      else if (jobId === "meridian_refresh") await adminApi.triggerMeridianRefresh();
+      let result;
+      if (jobId === "ranking") result = await adminApi.triggerRanking();
+      else if (jobId === "memory_extraction") result = await adminApi.triggerMemoryExtraction();
+      else if (jobId === "intelligence") result = await adminApi.triggerIntelligence();
+      else if (jobId === "meridian_refresh") result = await adminApi.triggerMeridianRefresh();
       else throw new Error(`Unknown job: ${jobId}`);
       const time = new Date().toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       setJobStatuses((prev) => ({ ...prev, [jobId]: "success" }));
-      setJobMessages((prev) => ({ ...prev, [jobId]: `Completed at ${time}` }));
+      const jobRef = result.job_id ? ` (job ${result.job_id.slice(0, 8)})` : "";
+      setJobMessages((prev) => ({
+        ...prev,
+        [jobId]: result.duplicate
+          ? `Already queued${jobRef}`
+          : `Queued at ${time}${jobRef}`,
+      }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       setJobStatuses((prev) => ({ ...prev, [jobId]: "error" }));

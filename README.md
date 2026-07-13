@@ -80,26 +80,6 @@ An AI-powered financial education platform with paper trading capabilities.
 
 The backend will be available at `http://localhost:8000` with API docs at `http://localhost:8000/docs`
 
-### Backend Setup With Railway Variables (Optional)
-
-This is a local-only developer workflow. It does not change Vercel behavior.
-
-1. Link the backend directory to your Railway project and service:
-   ```bash
-   npm run railway:backend:link-project
-   npm run railway:backend:link-service
-   ```
-2. Start the backend locally with Railway-managed environment variables:
-   ```bash
-   npm run start:backend:railway
-   ```
-3. If you want an interactive shell with the same Railway variables:
-   ```bash
-   npm run railway:backend:shell
-   ```
-
-This uses the linked Railway service from `backend/websearch_service` and still serves the API locally on `http://127.0.0.1:8000`.
-
 ### Running Both Services
 
 **Terminal 1 - Frontend:**
@@ -197,19 +177,10 @@ See [deployment/DEPLOYMENT.md](./deployment/DEPLOYMENT.md) for comprehensive dep
 
 ### Quick Deploy
 
-**Frontend (Vercel)**:
-```bash
-npm i -g vercel
-vercel --prod
-```
+Use the platform GitHub integrations instead of local or GitHub Actions CLI deploys:
 
-**Backend (Railway)**:
-```bash
-npm i -g @railway/cli
-cd backend/websearch_service
-railway init
-railway up
-```
+- **Frontend (Vercel)**: connect the repository in the Vercel dashboard and deploy on pushes to `main`.
+- **Backend (Railway)**: connect the repository in the Railway dashboard and deploy from `railway.json` / `backend/websearch_service/Dockerfile`.
 
 ## Project Structure
 

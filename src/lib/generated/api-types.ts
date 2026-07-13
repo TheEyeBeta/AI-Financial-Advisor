@@ -971,7 +971,7 @@ export interface paths {
         put?: never;
         /**
          * Trigger Ranking
-         * @description Manually trigger a ranking cycle in the background and return immediately.
+         * @description Queue a ranking cycle for the durable admin job worker.
          */
         post: operations["trigger_ranking_api_admin_trigger_ranking_post"];
         delete?: never;
@@ -991,7 +991,7 @@ export interface paths {
         put?: never;
         /**
          * Trigger Memory Scan
-         * @description Manually trigger a full history memory scan in the background and return immediately.
+         * @description Queue a full history memory scan for the durable admin job worker.
          */
         post: operations["trigger_memory_scan_api_admin_trigger_memory_scan_post"];
         delete?: never;
@@ -1011,7 +1011,7 @@ export interface paths {
         put?: never;
         /**
          * Trigger Intelligence
-         * @description Manually trigger an intelligence cycle in the background and return immediately.
+         * @description Queue an intelligence cycle for the durable admin job worker.
          */
         post: operations["trigger_intelligence_api_admin_trigger_intelligence_post"];
         delete?: never;
@@ -1031,7 +1031,7 @@ export interface paths {
         put?: never;
         /**
          * Trigger Memory Extraction
-         * @description Manually trigger a live memory extraction cycle in the background and return immediately.
+         * @description Queue a live memory extraction cycle for the durable admin job worker.
          */
         post: operations["trigger_memory_extraction_api_admin_trigger_memory_extraction_post"];
         delete?: never;
@@ -1051,9 +1051,69 @@ export interface paths {
         put?: never;
         /**
          * Trigger Meridian Refresh
-         * @description Manually trigger a Meridian context refresh for all users in the background.
+         * @description Queue a Meridian context refresh for the durable admin job worker.
          */
         post: operations["trigger_meridian_refresh_api_admin_trigger_meridian_refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Jobs List
+         * @description List recent durable admin jobs.
+         */
+        get: operations["admin_jobs_list_api_admin_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/jobs/{job_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin Job Detail
+         * @description Return durable admin job status and result metadata.
+         */
+        get: operations["admin_job_detail_api_admin_jobs__job_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/jobs/{job_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Admin Job Retry
+         * @description Retry a failed durable admin job with a new idempotency key.
+         */
+        post: operations["admin_job_retry_api_admin_jobs__job_id__retry_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3386,6 +3446,106 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    admin_jobs_list_api_admin_jobs_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_job_detail_api_admin_jobs__job_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    admin_job_retry_api_admin_jobs__job_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
