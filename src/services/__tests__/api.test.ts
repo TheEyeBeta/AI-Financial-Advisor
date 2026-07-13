@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { chatApi, chatsApi } from '../chat-api';
+import { ChatTurnActiveError, chatApi, chatsApi, chatTurnApi } from '../chat-api';
 import { newsApi } from '../news-api';
 import { portfolioApi, tradesApi } from '../trading-api';
 import { learningApi } from '../user-data-api';
@@ -26,6 +26,7 @@ const createChainableMock = (finalResult: { data: unknown; error: unknown }) => 
 let mockChain = createChainableMock({ data: [], error: null });
 let mockChainsByTable: Record<string, ReturnType<typeof createChainableMock>> = {};
 let mockSchemaChainsBySchemaAndTable: Record<string, ReturnType<typeof createChainableMock>> = {};
+let mockRpc = vi.fn().mockResolvedValue({ data: null, error: null });
 
 vi.mock('@/lib/supabase', () => {
   const schema = vi.fn((schemaName: string) => ({
@@ -39,6 +40,7 @@ vi.mock('@/lib/supabase', () => {
     },
     aiDb: {
       from: vi.fn((table: string) => mockSchemaChainsBySchemaAndTable[`ai.${table}`] ?? mockChainsByTable[table] ?? mockChain),
+      rpc: (...args: unknown[]) => mockRpc(...args),
     },
     getCurrentUserId: vi.fn().mockResolvedValue('user-123'),
   };
@@ -48,6 +50,7 @@ beforeEach(() => {
   mockChain = createChainableMock({ data: [], error: null });
   mockChainsByTable = {};
   mockSchemaChainsBySchemaAndTable = {};
+  mockRpc = vi.fn().mockResolvedValue({ data: null, error: null });
 });
 
 describe('tradesApi', () => {
@@ -231,6 +234,84 @@ describe('chatApi', () => {
 
       expect(result).toEqual([staleUserMessage]);
       expect(mockSchemaChainsBySchemaAndTable['ai.chat_messages'].delete).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('chatTurnApi', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  describe('createProcessing', () => {
+    it('creates a new turn when the idempotency key is unused', async () => {
+      const turnRow = {
+        id: 'turn-1',
+        user_id: 'user-123',
+        chat_id: 'chat-123',
+        user_message_id: 'msg-1',
+        correlation_id: 'corr-1',
+        idempotency_key: 'idem-1',
+        status: 'processing',
+      };
+      mockSchemaChainsBySchemaAndTable['ai.chat_turn_requests'] = createChainableMock({
+        data: turnRow,
+        error: null,
+      });
+
+      const result = await chatTurnApi.createProcessing('user-123', 'chat-123', 'msg-1', 'corr-1', 'idem-1');
+
+      expect(result).toEqual({ turn: turnRow, created: true });
+    });
+
+    it('returns the existing turn instead of throwing on a duplicate submission', async () => {
+      const existingTurn = {
+        id: 'turn-1',
+        chat_id: 'chat-123',
+        idempotency_key: 'idem-1',
+        status: 'completed',
+      };
+      const chain = createChainableMock({
+        data: null,
+        error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_chat_turn_requests_chat_idempotency"' },
+      });
+      chain.single = vi.fn()
+        .mockResolvedValueOnce({ data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_chat_turn_requests_chat_idempotency"' } })
+        .mockResolvedValueOnce({ data: existingTurn, error: null });
+      mockSchemaChainsBySchemaAndTable['ai.chat_turn_requests'] = chain;
+
+      const result = await chatTurnApi.createProcessing('user-123', 'chat-123', 'msg-1', 'corr-1', 'idem-1');
+
+      expect(result).toEqual({ turn: existingTurn, created: false });
+    });
+
+    it('throws ChatTurnActiveError when another turn is already in flight for the chat', async () => {
+      mockSchemaChainsBySchemaAndTable['ai.chat_turn_requests'] = createChainableMock({
+        data: null,
+        error: { code: '23505', message: 'duplicate key value violates unique constraint "idx_chat_turn_requests_one_active"' },
+      });
+
+      await expect(
+        chatTurnApi.createProcessing('user-123', 'chat-123', 'msg-1', 'corr-1', 'idem-2'),
+      ).rejects.toThrow(ChatTurnActiveError);
+    });
+  });
+
+  describe('completeAtomic', () => {
+    it('calls the complete_chat_turn RPC and returns the assistant message', async () => {
+      const assistantMessage = { id: 'msg-2', chat_id: 'chat-123', role: 'assistant', content: 'Hello back' };
+      mockRpc.mockResolvedValueOnce({ data: assistantMessage, error: null });
+
+      const result = await chatTurnApi.completeAtomic('turn-1', 'Hello back');
+
+      expect(mockRpc).toHaveBeenCalledWith('complete_chat_turn', { p_turn_id: 'turn-1', p_content: 'Hello back' });
+      expect(result).toEqual(assistantMessage);
+    });
+
+    it('throws when the RPC returns an error', async () => {
+      mockRpc.mockResolvedValueOnce({ data: null, error: new Error('turn not found') });
+
+      await expect(chatTurnApi.completeAtomic('turn-missing', 'content')).rejects.toThrow('turn not found');
     });
   });
 });

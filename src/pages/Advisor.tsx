@@ -11,6 +11,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { useChat, useChats, useCreateChat, useSendChatMessage, useIntelligenceDigests, useOpenPositions } from "@/hooks/use-data";
+import { ChatTurnActiveError } from "@/services/chat-api";
 import { stockSnapshotsApi } from "@/services/stock-snapshots-api";
 import type { IntelligenceDigest } from "@/types/database";
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -67,6 +68,9 @@ const Advisor = () => {
   const [composerValue, setComposerValue] = useState("");
   const [sendError, setSendError] = useState<string | null>(null);
   const isNewChatRef = useRef(false);
+  // Guards against a fast double-click/double-submit firing two mutateAsync
+  // calls before React re-renders the composer's disabled state.
+  const isSendingRef = useRef(false);
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -145,6 +149,10 @@ const Advisor = () => {
       });
       return false;
     }
+    if (isSendingRef.current) return false;
+    isSendingRef.current = true;
+
+    const idempotencyKey = crypto.randomUUID();
 
     setSendError(null);
     setPendingMessage(trimmedContent);
@@ -172,6 +180,7 @@ const Advisor = () => {
         chatId,
         message: trimmedContent,
         isFirstMessage,
+        idempotencyKey,
         onChunk: (chunk) => {
           receivedChunk = true;
           streamedResponse += chunk;
@@ -193,7 +202,10 @@ const Advisor = () => {
       return true;
     } catch (error) {
       console.error("Error sending message:", error);
-      const message = getErrorMessage(error) || "Your message could not be sent. Please try again.";
+      const isActiveTurnConflict = error instanceof ChatTurnActiveError;
+      const message = isActiveTurnConflict
+        ? "A response is already generating for this conversation. Please wait for it to finish."
+        : getErrorMessage(error) || "Your message could not be sent. Please try again.";
       AnalyticsEvents.chatResponseFailed({
         chat_id: chatId,
         is_first_message: isFirstMessage,
@@ -215,6 +227,8 @@ const Advisor = () => {
         setHasReceivedFirstChunk(false);
       }
       return false;
+    } finally {
+      isSendingRef.current = false;
     }
   };
 
