@@ -5,10 +5,11 @@ import { portfolioApi, tradesApi } from '../trading-api';
 import { learningApi } from '../user-data-api';
 
 // Mock supabase with a more robust mock
-const createChainableMock = (finalResult: { data: unknown; error: unknown }) => {
+const createChainableMock = (finalResult: { data: unknown; error: unknown; count?: number | null }) => {
   const chain = {
     select: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    or: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     single: vi.fn().mockResolvedValue(finalResult),
     insert: vi.fn().mockReturnThis(),
@@ -16,6 +17,7 @@ const createChainableMock = (finalResult: { data: unknown; error: unknown }) => 
     delete: vi.fn().mockReturnThis(),
     in: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
+    abortSignal: vi.fn().mockReturnThis(),
     upsert: vi.fn().mockReturnThis(),
     maybeSingle: vi.fn().mockResolvedValue(finalResult),
     then: (resolve: (val: typeof finalResult) => void) => Promise.resolve(resolve(finalResult)),
@@ -236,6 +238,52 @@ describe('chatApi', () => {
       expect(mockSchemaChainsBySchemaAndTable['ai.chat_messages'].delete).not.toHaveBeenCalled();
     });
   });
+
+  describe('getMessagesPage', () => {
+    const message = (i: number) => ({
+      id: `msg-${i}`,
+      user_id: 'user-123',
+      chat_id: 'chat-123',
+      role: 'user',
+      content: `Message ${i}`,
+      created_at: `2024-01-0${i}T00:00:00Z`,
+    });
+
+    it('bounds the query, returns ascending order, and emits an older-page cursor', async () => {
+      // Backend returns newest-first; 3 rows for a limit of 2 signals more history.
+      const chain = createChainableMock({
+        data: [message(3), message(2), message(1)],
+        error: null,
+      });
+      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = chain;
+
+      const page = await chatApi.getMessagesPage('chat-123', { limit: 2 });
+
+      expect(chain.limit).toHaveBeenCalledWith(3); // limit + 1 lookahead
+      expect(page.messages.map((m) => m.id)).toEqual(['msg-2', 'msg-3']);
+      expect(page.nextCursor).not.toBeNull();
+    });
+
+    it('applies the keyset cursor filter when paging older history', async () => {
+      const chain = createChainableMock({ data: [message(3), message(2), message(1)], error: null });
+      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = chain;
+      const first = await chatApi.getMessagesPage('chat-123', { limit: 2 });
+
+      await chatApi.getMessagesPage('chat-123', { limit: 2, cursor: first.nextCursor! });
+      expect(chain.or).toHaveBeenCalledWith(
+        'created_at.lt.2024-01-02T00:00:00Z,and(created_at.eq.2024-01-02T00:00:00Z,id.lt.msg-2)',
+      );
+    });
+
+    it('returns no cursor on the final page', async () => {
+      const chain = createChainableMock({ data: [message(2), message(1)], error: null });
+      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = chain;
+
+      const page = await chatApi.getMessagesPage('chat-123', { limit: 2 });
+      expect(page.messages).toHaveLength(2);
+      expect(page.nextCursor).toBeNull();
+    });
+  });
 });
 
 describe('chatTurnApi', () => {
@@ -410,43 +458,64 @@ describe('chatsApi', () => {
   });
 
   describe('ai schema access', () => {
-    it('loads chats and messages from ai.chats and ai.chat_messages only', async () => {
-      const aiChats = createChainableMock({
-        data: [
-          {
-            id: 'chat-ai',
-            user_id: 'user-123',
-            title: 'AI Chat',
-            created_at: '2024-01-16T00:00:00Z',
-            updated_at: '2024-01-17T00:00:00Z',
-          },
-        ],
-        error: null,
+    const chatPageRow = (overrides: Record<string, unknown> = {}) => ({
+      id: 'chat-ai',
+      user_id: 'user-123',
+      title: 'AI Chat',
+      created_at: '2024-01-16T00:00:00Z',
+      updated_at: '2024-01-17T00:00:00Z',
+      message_count: 3,
+      last_message_id: 'msg-ai',
+      last_message_role: 'assistant',
+      last_message_content: 'AI message',
+      last_message_created_at: '2024-01-17T00:00:00Z',
+      ...overrides,
+    });
+
+    it('loads the chat list page via ai.get_chat_page with exact counts', async () => {
+      mockRpc = vi.fn().mockResolvedValue({ data: [chatPageRow()], error: null });
+
+      const page = await chatsApi.getPage('user-123');
+
+      expect(mockRpc).toHaveBeenCalledWith('get_chat_page', {
+        p_limit: 31,
+        p_cursor_updated_at: null,
+        p_cursor_id: null,
       });
-      const aiMessages = createChainableMock({
-        data: [
-          {
-            id: 'msg-ai',
-            user_id: 'user-123',
-            chat_id: 'chat-ai',
-            role: 'assistant',
-            content: 'AI message',
-            created_at: '2024-01-17T00:00:00Z',
-          },
-        ],
-        error: null,
-      });
-
-      mockSchemaChainsBySchemaAndTable['ai.chats'] = aiChats;
-      mockSchemaChainsBySchemaAndTable['ai.chat_messages'] = aiMessages;
-
-      const result = await chatsApi.getAll('user-123');
-
-      expect(aiChats.eq).toHaveBeenCalledWith('user_id', 'user-123');
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('chat-ai');
-      expect(result[0].lastMessage?.id).toBe('msg-ai');
+      expect(page.chats).toHaveLength(1);
+      expect(page.chats[0].id).toBe('chat-ai');
+      expect(page.chats[0].messageCount).toBe(3);
+      expect(page.chats[0].lastMessage?.id).toBe('msg-ai');
+      expect(page.nextCursor).toBeNull();
       expect(mockSchemaChainsBySchemaAndTable['public.chats']).toBeUndefined();
+    });
+
+    it('returns a next cursor when more chats exist and honors it on the next call', async () => {
+      const rows = Array.from({ length: 3 }, (_, i) =>
+        chatPageRow({ id: `chat-${i}`, updated_at: `2024-01-1${7 - i}T00:00:00Z` }),
+      );
+      mockRpc = vi.fn().mockResolvedValue({ data: rows, error: null });
+
+      const page = await chatsApi.getPage('user-123', { limit: 2 });
+      expect(page.chats).toHaveLength(2);
+      expect(page.nextCursor).not.toBeNull();
+
+      await chatsApi.getPage('user-123', { limit: 2, cursor: page.nextCursor! });
+      expect(mockRpc).toHaveBeenLastCalledWith('get_chat_page', {
+        p_limit: 3,
+        p_cursor_updated_at: '2024-01-16T00:00:00Z',
+        p_cursor_id: 'chat-1',
+      });
+    });
+
+    it('returns an empty page when the RPC is missing (migration not applied)', async () => {
+      mockRpc = vi.fn().mockResolvedValue({
+        data: null,
+        error: { code: '42883', message: 'function ai.get_chat_page does not exist' },
+      });
+
+      const page = await chatsApi.getPage('user-123');
+      expect(page).toEqual({ chats: [], nextCursor: null });
     });
 
     it('returns null when a chat does not exist', async () => {

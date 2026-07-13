@@ -2,7 +2,8 @@ import { getPythonApiUrl } from '@/lib/env';
 import { apiClient, ApiError } from '@/lib/api-client';
 
 export interface TradeEngineNewsItem {
-  id: number;
+  /** Stable content-derived id assigned by the backend (#211). */
+  id: string;
   ticker: string | null;
   headline: string;
   summary: string | null;
@@ -10,6 +11,15 @@ export interface TradeEngineNewsItem {
   url: string | null;
   published_at: string;
   sentiment_score: number | null;
+}
+
+export interface TradeEngineNewsPage {
+  items: TradeEngineNewsItem[];
+  next_cursor: string | null;
+  availability_status: 'ok' | 'degraded';
+  stale: boolean;
+  as_of: string;
+  data_source: string;
 }
 
 export interface TradeEngineTechnicalIndicators {
@@ -195,32 +205,17 @@ export const tradeEngineApi = {
     return getPythonApiUrl();
   },
 
-  async getNews(limit: number = 15, cursor?: string): Promise<{ items: TradeEngineNewsItem[]; next_cursor: string | null }> {
+  /**
+   * Cursor-paginated market news (#211). Provider failures PROPAGATE as
+   * errors — an empty page means the feed is genuinely empty, never that the
+   * provider silently failed. Callers that want the Supabase news table as a
+   * fallback must do so explicitly on error.
+   */
+  async getNews(limit: number = 15, cursor?: string): Promise<TradeEngineNewsPage> {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (cursor) params.append('cursor', cursor);
 
-    try {
-      const data = await apiClient.get<{ items: TradeEngineNewsItem[]; next_cursor: string | null; message?: string }>(
-        `/api/news?${params}`,
-        { skipRetry: true },
-      );
-      if (data.items && data.items.length === 0 && data.message && import.meta.env.DEV) {
-        console.log('Backend news endpoint is a stub, using Supabase instead');
-      }
-      return data;
-    } catch (error) {
-      if (error instanceof ApiError) {
-        console.warn('News endpoint not available, using Supabase news table instead');
-      } else {
-        const isCspOrNetwork = error instanceof TypeError && error.message === 'Failed to fetch';
-        if (isCspOrNetwork) {
-          console.warn('[TradeEngine] News fetch blocked (CSP or network). Falling back to Supabase. Backend URL:', this.baseUrl);
-        } else {
-          console.warn('[TradeEngine] Failed to fetch news from backend, using Supabase instead:', error);
-        }
-      }
-      return { items: [], next_cursor: null };
-    }
+    return apiClient.get<TradeEngineNewsPage>(`/api/news?${params}`, { skipRetry: true });
   },
 
   async getTechnicalIndicators(ticker: string, date?: string): Promise<TradeEngineTechnicalIndicators> {

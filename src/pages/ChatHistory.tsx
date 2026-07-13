@@ -52,7 +52,7 @@ function getPreviewText(chat: ChatWithMessages): string {
 
 const ChatHistory = () => {
   const navigate = useNavigate();
-  const { data: chats = [], isLoading, error } = useChats();
+  const { data: chats = [], isLoading, error, fetchNextPage, hasNextPage, isFetchingNextPage } = useChats();
   const deleteChatMutation = useDeleteChat();
   const updateTitleMutation = useUpdateChatTitle();
 
@@ -204,10 +204,10 @@ const ChatHistory = () => {
 
           <div className="mt-5 flex flex-wrap gap-2 text-sm">
             <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
-              <span className="font-semibold text-foreground">{chats.length}</span> conversations
+              <span className="font-semibold text-foreground">{chats.length}{hasNextPage ? "+" : ""}</span> conversations
             </div>
             <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
-              <span className="font-semibold text-foreground">{totalMessages}</span> messages
+              <span className="font-semibold text-foreground">{totalMessages}{hasNextPage ? "+" : ""}</span> messages
             </div>
             <div className="rounded-full border border-border/70 bg-muted/40 px-3 py-2 text-muted-foreground">
               <span className="font-semibold text-foreground">{recentActivity}</span>
@@ -395,6 +395,18 @@ const ChatHistory = () => {
                 </div>
               </section>
             ))}
+            {hasNextPage && (
+              <div className="flex justify-center pt-2">
+                <Button
+                  variant="outline"
+                  onClick={() => void fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="rounded-full px-6"
+                >
+                  {isFetchingNextPage ? "Loading..." : "Load more conversations"}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

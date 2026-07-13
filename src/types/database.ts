@@ -118,6 +118,21 @@ export interface Database {
         Args: { p_turn_id: string; p_content: string };
         Returns: { id: string; user_id: string; role: string; content: string; created_at: string | null; chat_id: string | null };
       };
+      get_chat_page: {
+        Args: { p_limit?: number; p_cursor_updated_at?: string | null; p_cursor_id?: string | null };
+        Returns: {
+          id: string;
+          user_id: string;
+          title: string;
+          created_at: string;
+          updated_at: string;
+          message_count: number;
+          last_message_id: string | null;
+          last_message_role: string | null;
+          last_message_content: string | null;
+          last_message_created_at: string | null;
+        }[];
+      };
     };
   };
   core: {
@@ -344,9 +359,12 @@ export type StockSnapshot = Database['market']['Tables']['stock_snapshots']['Row
 export type IntelligenceDigest = Database['meridian']['Tables']['intelligence_digests']['Row'];
 
 export interface ChatWithMessages extends Chat {
+  /** Bounded message window (newest MESSAGE_PAGE_SIZE messages, ascending). */
   messages: ChatMessage[];
   messageCount: number;
   lastMessage?: ChatMessage;
+  /** Cursor for fetching messages older than the loaded window (#212). */
+  olderMessagesCursor?: string | null;
 }
 
 // ── Stock Ranking (market.trending_stocks via GET /api/stocks/ranking) ────────

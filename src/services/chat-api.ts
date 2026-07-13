@@ -161,56 +161,47 @@ const CHAT_SETUP_ERROR =
   'Chat is unavailable: the ai schema is missing required GRANT permissions. ' +
   'Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor to fix this.';
 
-async function fetchChatsForUser(userId: string): Promise<ChatWithMessages[]> {
-  const { data: chats, error: chatsError } = await fromAiChats()
-    .select('*')
-    .eq('user_id', userId)
-    .order('updated_at', { ascending: false });
+// ── Bounded retrieval (#212) ─────────────────────────────────────────────────
+// Conversation lists and message history are cursor-paginated on stable
+// keyset orders — (updated_at, id) for chats, (created_at, id) for messages —
+// so a large account never triggers unbounded queries or unbounded browser
+// memory. Composite indexes live in Alembic revision 0033.
 
-  if (chatsError) {
-    if (isSchemaOrTableNotFound(chatsError)) {
-      console.warn(
-        'ai.chats returned 404. The table exists and the schema is exposed, so the likely cause is missing GRANT permissions. Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning empty chat list.',
-      );
-      return [];
-    }
-    throw chatsError;
+export const CHAT_LIST_PAGE_SIZE = 30;
+export const MESSAGE_PAGE_SIZE = 50;
+/** Newest messages sent to the model as conversation context. */
+export const MESSAGE_CONTEXT_LIMIT = 50;
+
+export interface ChatListPage {
+  chats: ChatWithMessages[];
+  nextCursor: string | null;
+}
+
+export interface ChatMessagesPage {
+  /** Ascending (oldest → newest) within the page for direct rendering. */
+  messages: ChatMessage[];
+  /** Cursor for the next OLDER page; null when history is exhausted. */
+  nextCursor: string | null;
+}
+
+interface PageOptions {
+  cursor?: string | null;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+function encodeCursor(payload: Record<string, string>): string {
+  return btoa(JSON.stringify(payload));
+}
+
+function decodeCursor(cursor: string): Record<string, string> {
+  try {
+    const parsed = JSON.parse(atob(cursor)) as Record<string, string>;
+    if (!parsed || typeof parsed !== 'object') throw new Error('bad cursor');
+    return parsed;
+  } catch {
+    throw new Error('Invalid pagination cursor');
   }
-  if (!Array.isArray(chats) || chats.length === 0) return [];
-
-  const chatIds = chats.map((chat) => chat.id);
-  const { data: messages, error: messagesError } = await fromAiChatMessages()
-    .select('*')
-    .in('chat_id', chatIds)
-    .order('created_at', { ascending: false });
-
-  if (messagesError) {
-    if (isSchemaOrTableNotFound(messagesError)) {
-      console.warn(
-        'ai.chat_messages returned 404. Missing GRANT permissions. Run sql/fix_ai_chat_grants.sql in the Supabase SQL Editor. Returning chats without messages.',
-      );
-      return chats.map((chat) => ({ ...chat, messages: [], messageCount: 0, lastMessage: undefined }));
-    }
-    throw messagesError;
-  }
-
-  const messagesByChat = (messages || []).reduce(
-    (accumulator, message) => {
-      if (!accumulator[message.chat_id!]) {
-        accumulator[message.chat_id!] = [];
-      }
-      accumulator[message.chat_id!].push(message);
-      return accumulator;
-    },
-    {} as Record<string, ChatMessage[]>,
-  );
-
-  return chats.map((chat) => ({
-    ...chat,
-    messages: [...(messagesByChat[chat.id] || [])].reverse(),
-    messageCount: (messagesByChat[chat.id] || []).length,
-    lastMessage: (messagesByChat[chat.id] || [])[0],
-  }));
 }
 
 async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
@@ -231,9 +222,81 @@ async function fetchMessagesForUser(userId: string): Promise<ChatMessage[]> {
   return data || [];
 }
 
+type ChatPageRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+  last_message_id: string | null;
+  last_message_role: string | null;
+  last_message_content: string | null;
+  last_message_created_at: string | null;
+};
+
+function chatPageRowToChat(row: ChatPageRow): ChatWithMessages {
+  const lastMessage: ChatMessage | undefined = row.last_message_id
+    ? {
+        id: row.last_message_id,
+        user_id: row.user_id,
+        chat_id: row.id,
+        role: row.last_message_role ?? 'assistant',
+        content: row.last_message_content ?? '',
+        created_at: row.last_message_created_at,
+      }
+    : undefined;
+
+  return {
+    id: row.id,
+    user_id: row.user_id,
+    title: row.title,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    messages: lastMessage ? [lastMessage] : [],
+    messageCount: Number(row.message_count ?? 0),
+    lastMessage,
+  };
+}
+
 export const chatsApi = {
-  async getAll(userId: string): Promise<ChatWithMessages[]> {
-    return fetchChatsForUser(userId);
+  /**
+   * One page of the user's conversations, newest-updated first, with exact
+   * message counts and last-message previews via `ai.get_chat_page`
+   * (SECURITY INVOKER — RLS scopes rows to the caller).
+   */
+  async getPage(_userId: string, options: PageOptions = {}): Promise<ChatListPage> {
+    const limit = Math.min(Math.max(options.limit ?? CHAT_LIST_PAGE_SIZE, 1), 100);
+    const cursor = options.cursor ? decodeCursor(options.cursor) : null;
+
+    let query = aiDb.rpc('get_chat_page', {
+      p_limit: limit + 1,
+      p_cursor_updated_at: cursor?.u ?? null,
+      p_cursor_id: cursor?.i ?? null,
+    });
+    if (options.signal) {
+      query = query.abortSignal(options.signal);
+    }
+    const { data, error } = await query;
+
+    if (error) {
+      if (isSchemaOrTableNotFound(error) || (error as { code?: string }).code === '42883') {
+        console.warn(
+          'ai.get_chat_page unavailable (missing grants or Alembic revision 0033 not applied). Returning empty chat list.',
+        );
+        return { chats: [], nextCursor: null };
+      }
+      throw error;
+    }
+
+    const rows = (data ?? []) as ChatPageRow[];
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      chats: page.map(chatPageRowToChat),
+      nextCursor: hasMore && last ? encodeCursor({ u: last.updated_at, i: last.id }) : null,
+    };
   },
 
   async create(userId: string, title?: string): Promise<Chat> {
@@ -275,6 +338,12 @@ export const chatsApi = {
     if (error) throw error;
   },
 
+  /**
+   * One chat with its NEWEST message window (bounded, #212). Older history is
+   * available via `chatApi.getMessagesPage(chatId, { cursor:
+   * olderMessagesCursor })`. `messageCount` is the exact total, not the
+   * window size.
+   */
   async getWithMessages(chatId: string): Promise<ChatWithMessages | null> {
     const { data: chat, error: chatError } = await fromAiChats()
       .select('*')
@@ -287,41 +356,84 @@ export const chatsApi = {
     }
     if (!chat) return null;
 
-    const { data: messages, error: messagesError } = await fromAiChatMessages()
-      .select('*')
-      .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
-
-    if (messagesError) {
-      if (isSchemaOrTableNotFound(messagesError)) {
-        return { ...chat, messages: [], messageCount: 0, lastMessage: undefined };
+    let window: ChatMessagesPage;
+    try {
+      window = await chatApi.getMessagesPage(chatId, { limit: MESSAGE_PAGE_SIZE });
+    } catch (error) {
+      if (isSchemaOrTableNotFound(error)) {
+        return { ...chat, messages: [], messageCount: 0, lastMessage: undefined, olderMessagesCursor: null };
       }
-      throw messagesError;
+      throw error;
     }
+
+    const { count, error: countError } = await fromAiChatMessages()
+      .select('id', { count: 'exact', head: true })
+      .eq('chat_id', chatId);
+    if (countError && !isSchemaOrTableNotFound(countError)) throw countError;
 
     return {
       ...chat,
-      messages: messages || [],
-      messageCount: (messages || []).length,
-      lastMessage: messages?.[messages.length - 1],
+      messages: window.messages,
+      messageCount: count ?? window.messages.length,
+      lastMessage: window.messages[window.messages.length - 1],
+      olderMessagesCursor: window.nextCursor,
     };
   },
 };
 
 export const chatApi = {
-  async getMessages(chatId: string): Promise<ChatMessage[]> {
-    const { data, error } = await fromAiChatMessages()
+  /**
+   * The NEWEST `limit` messages of a chat in ascending order (#212).
+   * Used for model context and post-retry lookups; rendering paginates via
+   * `getMessagesPage` instead.
+   */
+  async getMessages(chatId: string, limit: number = MESSAGE_CONTEXT_LIMIT): Promise<ChatMessage[]> {
+    const { messages } = await chatApi.getMessagesPage(chatId, { limit });
+    return messages;
+  },
+
+  /**
+   * Keyset-paginated message history: the newest window first, then older
+   * pages via the returned cursor. Ordering key is (created_at, id)
+   * descending; each page is returned ascending for direct rendering.
+   */
+  async getMessagesPage(chatId: string, options: PageOptions = {}): Promise<ChatMessagesPage> {
+    const limit = Math.min(Math.max(options.limit ?? MESSAGE_PAGE_SIZE, 1), 200);
+
+    let query = fromAiChatMessages()
       .select('*')
       .eq('chat_id', chatId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(limit + 1);
 
+    if (options.cursor) {
+      const cursor = decodeCursor(options.cursor);
+      query = query.or(
+        `created_at.lt.${cursor.c},and(created_at.eq.${cursor.c},id.lt.${cursor.i})`,
+      );
+    }
+    if (options.signal) {
+      query = query.abortSignal(options.signal);
+    }
+
+    const { data, error } = await query;
     if (error) {
-      if (isSchemaOrTableNotFound(error)) return [];
+      if (isSchemaOrTableNotFound(error)) return { messages: [], nextCursor: null };
       throw error;
     }
 
-    const messages = data || [];
-    return messages;
+    const rows = data || [];
+    const hasMore = rows.length > limit;
+    const page = rows.slice(0, limit);
+    const oldest = page[page.length - 1];
+    return {
+      messages: [...page].reverse(),
+      nextCursor:
+        hasMore && oldest && oldest.created_at
+          ? encodeCursor({ c: oldest.created_at, i: oldest.id })
+          : null,
+    };
   },
 
   async getAllUserMessages(userId: string): Promise<ChatMessage[]> {

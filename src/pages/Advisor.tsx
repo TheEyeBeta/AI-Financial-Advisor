@@ -11,9 +11,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "@/hooks/use-toast";
 import { useChat, useChats, useCreateChat, useSendChatMessage, useIntelligenceDigests, useOpenPositions } from "@/hooks/use-data";
-import { ChatTurnActiveError } from "@/services/chat-api";
+import { ChatTurnActiveError, chatApi } from "@/services/chat-api";
 import { stockSnapshotsApi } from "@/services/stock-snapshots-api";
-import type { IntelligenceDigest } from "@/types/database";
+import type { ChatMessage, IntelligenceDigest } from "@/types/database";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { getErrorMessage } from "@/lib/error";
@@ -62,6 +62,13 @@ const Advisor = () => {
   const { data: currentChat, isLoading: chatLoading, error: chatError } = useChat(currentChatId);
 
   const [showTopics, setShowTopics] = useState(true);
+  // Older-than-the-loaded-window history (#212): fetched on demand and
+  // prepended to the bounded window that useChat loads.
+  const [olderHistory, setOlderHistory] = useState<{ messages: ChatMessage[]; cursor: string | null | undefined }>({
+    messages: [],
+    cursor: undefined,
+  });
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [streamingResponseContent, setStreamingResponseContent] = useState<string | null>(null);
   const [hasReceivedFirstChunk, setHasReceivedFirstChunk] = useState(false);
@@ -272,7 +279,45 @@ const Advisor = () => {
     setHasReceivedFirstChunk(false);
   };
 
-  const messages = currentChat?.messages || [];
+  // Reset older-history state whenever the active conversation changes.
+  useEffect(() => {
+    setOlderHistory({ messages: [], cursor: undefined });
+    setIsLoadingOlder(false);
+  }, [currentChatId]);
+
+  // undefined = "use the cursor from the loaded window"; null = exhausted.
+  const olderCursor = olderHistory.cursor === undefined
+    ? currentChat?.olderMessagesCursor ?? null
+    : olderHistory.cursor;
+  const canLoadOlder = Boolean(olderCursor) && !isLoadingOlder;
+
+  const handleLoadOlderMessages = async () => {
+    if (!currentChatId || !olderCursor) return;
+    setIsLoadingOlder(true);
+    try {
+      const page = await chatApi.getMessagesPage(currentChatId, { cursor: olderCursor });
+      setOlderHistory((previous) => ({
+        messages: [...page.messages, ...previous.messages],
+        cursor: page.nextCursor,
+      }));
+    } catch (error) {
+      console.error("Failed to load earlier messages:", error);
+      toast({
+        title: "Could not load earlier messages",
+        description: getErrorMessage(error) || "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  };
+
+  const windowMessages = currentChat?.messages || [];
+  const loadedIds = new Set(windowMessages.map((msg) => msg.id));
+  const messages = [
+    ...olderHistory.messages.filter((msg) => !loadedIds.has(msg.id)),
+    ...windowMessages,
+  ];
   const chatMessages: Array<{ role: "user" | "assistant"; content: string; isStreaming?: boolean }> = messages.map((msg) => ({
     role: msg.role as "user" | "assistant",
     content: msg.content,
@@ -495,6 +540,24 @@ const Advisor = () => {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4 sm:px-6">
+              {(canLoadOlder || isLoadingOlder) && (
+                <div className="flex justify-center pb-3">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void handleLoadOlderMessages()}
+                    disabled={isLoadingOlder}
+                    className="rounded-full px-4 text-muted-foreground"
+                  >
+                    {isLoadingOlder ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Clock3 className="h-4 w-4" />
+                    )}
+                    Load earlier messages
+                  </Button>
+                </div>
+              )}
               <ChatInterface
                 messages={displayMessages}
                 isThinking={isThinking}
