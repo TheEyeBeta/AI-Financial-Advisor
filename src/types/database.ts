@@ -107,6 +107,17 @@ export interface Database {
         Insert: { user_id: string; updated_at?: string | null; profile_summary?: Record<string, unknown> | null; active_goals?: Record<string, unknown> | null; active_alerts?: Record<string, unknown> | null; plan_status?: Record<string, unknown> | null; knowledge_tier?: number | null };
         Update: { user_id?: string; updated_at?: string | null; profile_summary?: Record<string, unknown> | null; active_goals?: Record<string, unknown> | null; active_alerts?: Record<string, unknown> | null; plan_status?: Record<string, unknown> | null; knowledge_tier?: number | null };
       };
+      chat_turn_requests: {
+        Row: { id: string; user_id: string; chat_id: string; user_message_id: string; assistant_message_id: string | null; correlation_id: string; retry_of_request_id: string | null; idempotency_key: string; status: string; failure_code: string | null; failure_reason: string | null; created_at: string; updated_at: string; completed_at: string | null };
+        Insert: { id?: string; user_id: string; chat_id: string; user_message_id: string; assistant_message_id?: string | null; correlation_id?: string; retry_of_request_id?: string | null; idempotency_key: string; status?: string; failure_code?: string | null; failure_reason?: string | null; created_at?: string; updated_at?: string; completed_at?: string | null };
+        Update: { id?: string; user_id?: string; chat_id?: string; user_message_id?: string; assistant_message_id?: string | null; correlation_id?: string; retry_of_request_id?: string | null; idempotency_key?: string; status?: string; failure_code?: string | null; failure_reason?: string | null; created_at?: string; updated_at?: string; completed_at?: string | null };
+      };
+    };
+    Functions: {
+      complete_chat_turn: {
+        Args: { p_turn_id: string; p_content: string };
+        Returns: { id: string; user_id: string; role: string; content: string; created_at: string | null; chat_id: string | null };
+      };
     };
   };
   core: {

@@ -122,12 +122,29 @@ export interface ChatTurnRequest {
   assistant_message_id: string | null;
   correlation_id: string;
   retry_of_request_id: string | null;
+  idempotency_key: string;
   status: ChatTurnStatus;
   failure_code: string | null;
   failure_reason: string | null;
   created_at: string;
   updated_at: string;
   completed_at: string | null;
+}
+
+/** Thrown when a chat already has a turn in `pending`/`processing` state. */
+export class ChatTurnActiveError extends Error {
+  constructor(chatId: string) {
+    super(`A response is already generating for chat ${chatId}.`);
+    this.name = 'ChatTurnActiveError';
+  }
+}
+
+function isUniqueViolation(error: unknown): error is { code: string; message: string } {
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    (error as { code?: string }).code === '23505'
+  );
 }
 
 function isSchemaOrTableNotFound(error: unknown): boolean {
@@ -355,12 +372,23 @@ export const chatApi = {
 };
 
 export const chatTurnApi = {
+  /**
+   * Create (or, for a retried submission, return) the turn request for one
+   * chat message. `idempotencyKey` must be stable across retries of the same
+   * logical submission — a fresh key per call defeats deduplication.
+   *
+   * Returns `{ turn, created: false }` when a turn for this exact
+   * `(chatId, idempotencyKey)` already exists, so the caller can skip
+   * re-invoking the AI provider. Throws `ChatTurnActiveError` if a different
+   * turn is already active for this chat.
+   */
   async createProcessing(
     userId: string,
     chatId: string,
     userMessageId: string,
     correlationId: string,
-  ): Promise<ChatTurnRequest | null> {
+    idempotencyKey: string,
+  ): Promise<{ turn: ChatTurnRequest; created: boolean } | null> {
     const now = new Date().toISOString();
     const { data, error } = await fromAiChatTurnRequests()
       .insert({
@@ -368,6 +396,7 @@ export const chatTurnApi = {
         chat_id: chatId,
         user_message_id: userMessageId,
         correlation_id: correlationId,
+        idempotency_key: idempotencyKey,
         status: 'processing',
         updated_at: now,
       })
@@ -376,23 +405,38 @@ export const chatTurnApi = {
 
     if (error) {
       if (isSchemaOrTableNotFound(error)) return null;
+
+      if (isUniqueViolation(error)) {
+        if (error.message.includes('idx_chat_turn_requests_chat_idempotency')) {
+          const { data: existing, error: selectError } = await fromAiChatTurnRequests()
+            .select('*')
+            .eq('chat_id', chatId)
+            .eq('idempotency_key', idempotencyKey)
+            .single();
+          if (selectError) throw selectError;
+          return { turn: existing as ChatTurnRequest, created: false };
+        }
+        if (error.message.includes('idx_chat_turn_requests_one_active')) {
+          throw new ChatTurnActiveError(chatId);
+        }
+      }
       throw error;
     }
-    return data as ChatTurnRequest;
+    return { turn: data as ChatTurnRequest, created: true };
   },
 
-  async markCompleted(turnId: string, assistantMessageId: string): Promise<void> {
-    const now = new Date().toISOString();
-    const { error } = await fromAiChatTurnRequests()
-      .update({
-        status: 'completed',
-        assistant_message_id: assistantMessageId,
-        updated_at: now,
-        completed_at: now,
-      })
-      .eq('id', turnId);
-
-    if (error && !isSchemaOrTableNotFound(error)) throw error;
+  /**
+   * Persist the assistant message and mark the turn completed in one
+   * database transaction via `ai.complete_chat_turn`, so the two writes
+   * can never diverge on a crash/refresh between them.
+   */
+  async completeAtomic(turnId: string, content: string): Promise<ChatMessage> {
+    const { data, error } = await aiDb.rpc('complete_chat_turn', {
+      p_turn_id: turnId,
+      p_content: content,
+    });
+    if (error) throw error;
+    return data as ChatMessage;
   },
 
   async markFailed(turnId: string, failureCode: string, failureReason: string): Promise<void> {

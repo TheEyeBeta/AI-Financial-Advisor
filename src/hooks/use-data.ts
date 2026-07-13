@@ -205,10 +205,12 @@ export function useSendChatMessage() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ chatId, message, isFirstMessage, onChunk }: {
+    mutationFn: async ({ chatId, message, isFirstMessage, idempotencyKey, onChunk }: {
       chatId: string;
       message: string;
       isFirstMessage?: boolean;
+      /** Stable per-submission key; reusing it across retries dedupes the turn. */
+      idempotencyKey: string;
       onChunk?: (chunk: string) => void;
     }) => {
       if (!userId) throw new Error('Not authenticated');
@@ -227,13 +229,21 @@ export function useSendChatMessage() {
       try {
         // Save user message (preserved even when AI generation fails)
         const userMessage = await chatApi.addMessage(userId, chatId, 'user', message);
-        const turnRequest = await chatTurnApi.createProcessing(
+        const turnResult = await chatTurnApi.createProcessing(
           userId,
           chatId,
           userMessage.id,
           correlationId,
+          idempotencyKey,
         );
-        turnRequestId = turnRequest?.id ?? null;
+        turnRequestId = turnResult?.turn.id ?? null;
+
+        if (turnResult && !turnResult.created && turnResult.turn.status === 'completed') {
+          // Retried submission whose turn already finished — surface the existing result.
+          const existing = await chatApi.getMessages(chatId);
+          const existingAssistantMessage = existing.find((m) => m.id === turnResult.turn.assistant_message_id);
+          return { message, response: existingAssistantMessage?.content ?? '' };
+        }
 
         // Fetch market data context using the user's preferred data source
         const src = sourceParam(dataSource);
@@ -253,9 +263,10 @@ export function useSendChatMessage() {
           onChunk,
         );
 
-        const assistantMessage = await chatApi.addMessage(userId, chatId, 'assistant', aiResponse);
         if (turnRequestId) {
-          await chatTurnApi.markCompleted(turnRequestId, assistantMessage.id);
+          await chatTurnApi.completeAtomic(turnRequestId, aiResponse);
+        } else {
+          await chatApi.addMessage(userId, chatId, 'assistant', aiResponse);
         }
 
         // Auto-generate title on first message
