@@ -2369,6 +2369,61 @@
         }
       }
     },
+    "/api/admin/users/{auth_id}/restore": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Restore User",
+        "description": "Reverse a suspension and reactivate the account.",
+        "operationId": "restore_user_api_admin_users__auth_id__restore_post",
+        "parameters": [
+          {
+            "name": "auth_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Auth Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Restore User Api Admin Users  Auth Id  Restore Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/admin/users/{auth_id}/delete-request": {
       "post": {
         "tags": [
@@ -4033,6 +4088,20 @@
           "total"
         ],
         "title": "RankingResponse"
+      },
+      "RestoreUserRequest": {
+        "properties": {
+          "confirmation_email": {
+            "type": "string",
+            "minLength": 3,
+            "title": "Confirmation Email"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirmation_email"
+        ],
+        "title": "RestoreUserRequest"
       },
       "SignalsData": {
         "properties": {

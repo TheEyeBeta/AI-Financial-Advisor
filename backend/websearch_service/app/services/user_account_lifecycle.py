@@ -220,6 +220,74 @@ async def suspend_user_account(
     }
 
 
+async def restore_user_account(
+    *,
+    supabase_url: str,
+    service_role_key: str,
+    caller: AdminCaller,
+    target_auth_id: str,
+    confirmation_email: str,
+) -> dict[str, Any]:
+    """Reverse a suspension: lift the auth ban and reactivate the profile."""
+    enforce_recent_authentication(caller)
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        target_row = await _fetch_user_row(
+            http, supabase_url=supabase_url, headers=headers, auth_id=target_auth_id
+        )
+        if target_row is None:
+            raise UserLifecycleError("target user not found", status_code=404)
+
+        target_email = (target_row.get("email") or "").strip()
+        if confirmation_email.strip().lower() != target_email.lower():
+            raise UserLifecycleError("confirmation email does not match target user", status_code=400)
+
+        status = target_row.get("account_status") or "active"
+        if status != "suspended":
+            raise UserLifecycleError(
+                "only a suspended account can be restored", status_code=409
+            )
+
+        unban_resp = await http.put(
+            f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
+            headers=headers,
+            json={"ban_duration": "none"},
+        )
+        if unban_resp.status_code not in (200, 201):
+            raise UserLifecycleError("failed to lift auth suspension", status_code=502)
+
+        patch_resp = await http.patch(
+            f"{supabase_url}/rest/v1/users",
+            params={"auth_id": f"eq.{target_auth_id}"},
+            headers={**headers, "Accept-Profile": "core", "Prefer": "return=minimal"},
+            json={
+                "account_status": "active",
+                "suspended_at": None,
+                "suspension_reason": None,
+            },
+        )
+        if patch_resp.status_code not in (200, 204):
+            raise UserLifecycleError("failed to update application user status", status_code=502)
+
+    request_id = str(uuid.uuid4())
+    logger.info(
+        "User restored actor=%s target=%s request_id=%s",
+        caller.principal,
+        target_auth_id,
+        request_id,
+    )
+    return {
+        "status": "active",
+        "auth_id": target_auth_id,
+        "email": target_email,
+        "request_id": request_id,
+    }
+
+
 async def create_delete_request(
     *,
     supabase_url: str,

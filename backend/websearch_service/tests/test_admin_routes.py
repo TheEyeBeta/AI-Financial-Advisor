@@ -12,8 +12,10 @@ from app.routes.admin import (
     JOB_TYPE_RANKING,
     router as admin_router,
     _require_admin,
+    _require_admin_caller,
     _get_supabase_rest_config,
 )
+from app.services.user_account_lifecycle import AdminCaller, UserLifecycleError
 
 _IDEMPOTENCY_HEADERS = {"Idempotency-Key": "test-idempotency-key-001"}
 
@@ -305,6 +307,57 @@ class TestCheckSupabase:
 
 
 # ── _get_supabase_rest_config ──────────────────────────────────────────────────
+
+class TestRestoreUserRoute:
+    def _app(self):
+        app = FastAPI()
+        app.include_router(admin_router)
+        app.dependency_overrides[_require_admin_caller] = lambda: AdminCaller(
+            principal="service-role",
+            auth_user_id=None,
+            email=None,
+            jwt_iat=None,
+            is_service_role=True,
+        )
+        return app
+
+    def test_restore_success(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-key")
+        with patch(
+            "app.routes.admin.restore_user_account",
+            new=AsyncMock(return_value={"status": "active", "auth_id": "user-1", "email": "u@example.com"}),
+        ):
+            client = TestClient(self._app())
+            resp = client.post(
+                "/api/admin/users/user-1/restore",
+                json={"confirmation_email": "u@example.com"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "active"
+
+    def test_restore_propagates_lifecycle_error(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-key")
+        with patch(
+            "app.routes.admin.restore_user_account",
+            new=AsyncMock(side_effect=UserLifecycleError("only a suspended account can be restored", status_code=409)),
+        ):
+            client = TestClient(self._app())
+            resp = client.post(
+                "/api/admin/users/user-1/restore",
+                json={"confirmation_email": "u@example.com"},
+            )
+        assert resp.status_code == 409
+
+    def test_restore_rejects_short_email(self):
+        client = TestClient(self._app())
+        resp = client.post(
+            "/api/admin/users/user-1/restore",
+            json={"confirmation_email": ""},
+        )
+        assert resp.status_code == 422
+
 
 class TestGetSupabaseRestConfig:
     def test_raises_when_unconfigured(self, monkeypatch):
