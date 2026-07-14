@@ -12,7 +12,7 @@ npm run dev
 ```bash
 cd backend/websearch_service
 python -m venv .venv && source .venv/bin/activate  # or .venv\Scripts\activate on Windows
-pip install -r requirements.txt
+pip install --require-hashes -r requirements.txt -r requirements-dev.txt
 uvicorn app.main:app --reload --port 8000
 # Health check: http://localhost:8000/health
 ```

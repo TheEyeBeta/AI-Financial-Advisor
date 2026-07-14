@@ -1,3 +1,11 @@
+> **ARCHIVED (2026-07-13).** Snapshot from an early test audit; counts and
+> estimates below are stale (the suite has since grown to 200+ frontend tests,
+> 980+ backend tests, and a multi-browser Playwright matrix). Coverage is
+> enforced by CI floors (`vite.config.ts` thresholds, `pytest.ini`
+> `--cov-fail-under`), not estimated. Current quality gates:
+> [`docs/OPERATIONS.md`](../OPERATIONS.md) and
+> [`docs/tests/BETA_SUPPORT_MATRIX.md`](./BETA_SUPPORT_MATRIX.md).
+
 # Comprehensive Test Summary
 
 ## Executive Summary
@@ -322,7 +330,7 @@ npm run test:e2e:debug
 - **E2E Tests**: 1 smoke test configured
 
 ### Coverage Goals
-- **Unit Tests**: 80%+ (Current: ~40% estimated)
+- **Unit Tests**: enforced floors in CI (see banner above)
 - **Integration Tests**: 60%+ (Current: 0%)
 - **E2E Tests**: Critical user flows (Current: 1 flow)
 
@@ -342,6 +350,6 @@ The test suite has been significantly improved with:
 
 ---
 
-**Test Audit Date**: 2025-01-XX
+**Test Audit Date**: early project audit (archived)
 **Auditor**: Senior Software Tester
 **Status**: ✅ Critical Issues Fixed, Test Suite Significantly Enhanced

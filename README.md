@@ -29,11 +29,12 @@ An AI-powered financial education platform with paper trading capabilities.
    ```bash
    cp config/env.example .env
    ```
-4. Run SQL setup in Supabase SQL Editor:
-   - `sql/schema.sql` (core runtime bootstrap for `core`, `ai`, `trading`, and `market`)
-   - `sql/fix_rls_policies_schema.sql` (aligns RLS with the runtime multi-schema layout)
-   - `sql/fix_ai_chat_grants.sql` (restores PostgREST access to `ai.chats` and `ai.chat_messages`)
-   - `sql/verify_runtime_schema_readiness.sql` (production-readiness verification)
+4. Apply the database schema with Alembic (the single migration path — no
+   manual SQL Editor steps; `sql/` is reference-only, see `sql/README.md`):
+   ```bash
+   cd backend/websearch_service
+   ALEMBIC_DATABASE_URL=postgresql+psycopg://... alembic -c alembic.ini upgrade head
+   ```
 5. Start the frontend development server:
    ```bash
    npm run dev
@@ -54,9 +55,9 @@ An AI-powered financial education platform with paper trading capabilities.
    source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
-3. Install dependencies:
+3. Install dependencies (runtime + test locks, hash-verified):
    ```bash
-   pip install -r requirements.txt
+   pip install --require-hashes -r requirements.txt -r requirements-dev.txt
    ```
 
 4. Set up environment variables:
@@ -181,6 +182,13 @@ Use the platform GitHub integrations instead of local or GitHub Actions CLI depl
 
 - **Frontend (Vercel)**: connect the repository in the Vercel dashboard and deploy on pushes to `main`.
 - **Backend (Railway)**: connect the repository in the Railway dashboard and deploy from `railway.json` / `backend/websearch_service/Dockerfile`.
+
+## Documentation
+
+- **Operations (canonical):** [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) — architecture, environments, quality gates, deploy/rollback, release checklist
+- **Database recovery:** [`docs/DB_RECOVERY.md`](./docs/DB_RECOVERY.md)
+- **Beta support matrix & quality checks:** [`docs/tests/BETA_SUPPORT_MATRIX.md`](./docs/tests/BETA_SUPPORT_MATRIX.md)
+- **Telemetry privacy / secret scanning:** [`docs/security/`](./docs/security)
 
 ## Project Structure
 
