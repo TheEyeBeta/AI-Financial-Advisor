@@ -19,7 +19,7 @@ not to prescribe order.
 | Email verification | — | — | GAP |
 | Email sign-in | `integration/test_auth.py`, `use-auth.test.tsx`, `SignInDialog.test.tsx` | `e2e/utils/sign-in.ts` used across journeys | Covered |
 | Google sign-in | — | `e2e/journeys/google-auth.spec.ts` (46 lines, 1 test — mocked OAuth) | Partial |
-| Password reset | `src/pages/ResetPassword.tsx` exists; no dedicated test found | — | GAP |
+| Password reset | **Was broken, not just untested.** `ResetPassword.tsx` had two real bugs: (1) its link-validity check only recognized `#access_token` hash tokens, but this project's Supabase client uses the default PKCE flow (`?code=` param) — the shared `hasAuthCallbackParams()` helper already handles both and is used correctly by the OAuth callback, but `ResetPassword.tsx` reimplemented a narrower check that missed `code` entirely, meaning legitimate reset links were likely rejected as "invalid" before the user could set a password. (2) Its JS length check required 6 characters while the UI/`minLength` and sign-up's canonical rule both require 10 — inconsistent, and would accept a password the UI claims is too short if HTML validation were ever bypassed. Both fixed this session. Tests: `src/pages/__tests__/ResetPassword.test.tsx` (invalid link, valid `?code=` link, length rejection, mismatch rejection, success path). | `ResetPassword.test.tsx` (5 tests) | Covered (was broken; now fixed + tested) |
 | Sign-out | `use-auth.test.tsx` | — | Partial |
 | Expired session | `test_user_account_lifecycle.py::test_stale_session_forbidden` (admin re-auth only, not general session expiry) | — | GAP (general case) |
 | OAuth cancellation | — | — | GAP |
