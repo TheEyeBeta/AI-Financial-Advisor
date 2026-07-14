@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/auth.fixture';
+import { expectNoBlockingViolations } from '../utils/a11y';
 
 test.describe('User Journey: Paper Trading Lifecycle', () => {
   test('open position, close it, verify history and journal', async ({ authenticatedPage: page }) => {
@@ -138,6 +139,8 @@ test.describe('User Journey: Paper Trading Lifecycle', () => {
     // Step 1: Open a BUY position on AAPL via the journal form
     const symbolInput = page.getByLabel('Symbol');
     if (await symbolInput.isVisible({ timeout: 5_000 }).catch(() => false)) {
+      // Accessibility gate (#213): scan paper trading with its data mocks.
+      await expectNoBlockingViolations(page, 'paper trading (journey)');
       await symbolInput.fill('AAPL');
 
       const quantityInput = page.getByLabel('Quantity');

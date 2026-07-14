@@ -47,7 +47,7 @@ export default function PrivacyPolicy() {
         <h2 className="text-lg font-semibold text-foreground">Contact</h2>
         <p className="mt-2">
           For privacy-related questions, contact us at{" "}
-          <a href={`mailto:${supportEmail}`} className="text-primary hover:underline">
+          <a href={`mailto:${supportEmail}`} className="text-primary underline underline-offset-2">
             {supportEmail}
           </a>
           .

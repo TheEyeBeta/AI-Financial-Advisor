@@ -40,9 +40,43 @@ export default defineConfig({
     navigationTimeout: 15_000,
   },
   projects: [
+    // Full suite on the primary engine. PLAYWRIGHT_CHROMIUM_EXECUTABLE lets
+    // sandboxed environments point at a system Chromium instead of
+    // downloading the pinned revision; unset (the default) in CI/local dev.
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: {
+          executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+        },
+      },
+    },
+    // Blocking critical suite on the beta support matrix (#213, see
+    // docs/tests/BETA_SUPPORT_MATRIX.md): mobile Chromium and one
+    // independent engine run the smoke + journey + accessibility specs.
+    {
+      name: 'mobile-chromium',
+      use: {
+        ...devices['Pixel 7'],
+        launchOptions: {
+          executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE || undefined,
+        },
+      },
+      testMatch: [
+        '**/smoke-landing.spec.ts',
+        '**/journeys/**/*.spec.ts',
+        '**/a11y.spec.ts',
+      ],
+    },
+    {
+      name: 'firefox',
+      use: { ...devices['Desktop Firefox'] },
+      testMatch: [
+        '**/smoke-landing.spec.ts',
+        '**/journeys/**/*.spec.ts',
+        '**/a11y.spec.ts',
+      ],
     },
   ],
   webServer: [

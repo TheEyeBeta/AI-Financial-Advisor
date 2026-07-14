@@ -24,7 +24,9 @@ jobs:
         run: npm ci --ignore-scripts
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        # chromium covers the desktop + mobile-chromium projects; firefox is
+        # the independent-engine leg of the beta support matrix (#213).
+        run: npx playwright install --with-deps chromium firefox
 
       - name: Build frontend
         run: npm run build

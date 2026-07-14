@@ -40,7 +40,7 @@ export default function TermsOfService() {
         <h2 className="text-lg font-semibold text-foreground">Contact</h2>
         <p className="mt-2">
           For questions about these terms, contact us at{" "}
-          <a href={`mailto:${supportEmail}`} className="text-primary hover:underline">
+          <a href={`mailto:${supportEmail}`} className="text-primary underline underline-offset-2">
             {supportEmail}
           </a>
           .
