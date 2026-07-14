@@ -254,12 +254,12 @@ function getTodayStr(): string {
 // ── Component ────────────────────────────────────────────────────────────────
 
 const Onboarding = () => {
-  const { authUserId, appUserId, userProfile, refreshProfile, onboardingComplete } = useAuth();
+  const { authUserId, userProfile, refreshProfile, onboardingComplete } = useAuth();
   const navigate = useNavigate();
 
   const [currentStep, setCurrentStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [hasExistingProfile, setHasExistingProfile] = useState<boolean | null>(null);
+  const [profileLoaded, setProfileLoaded] = useState(false);
 
   // Step 1
   const [step1, setStep1] = useState<Step1Data>({
@@ -297,23 +297,85 @@ const Onboarding = () => {
     }
   }, [onboardingComplete, navigate]);
 
-  // Check for existing Meridian profile
+  // Load any in-progress profile (from a previous step or a refresh) and
+  // resume where the user left off instead of restarting from step 1.
   useEffect(() => {
-    if (!appUserId) return;
+    if (!authUserId) return;
     coreDb
       .from("user_profiles")
-      .select("id")
-      .eq("user_id", appUserId)
+      .select(
+        "age_range, income_range, dependants, monthly_expenses, total_debt, " +
+        "emergency_fund_months, monthly_investable, risk_profile, investment_horizon"
+      )
+      .eq("user_id", authUserId)
       .maybeSingle()
       .then(({ data }) => {
-        setHasExistingProfile(!!data);
+        if (data) {
+          setStep1((prev) => ({
+            ...prev,
+            age_range: (data.age_range as AgeRange) ?? prev.age_range,
+            income_range: (data.income_range as IncomeRange) ?? prev.income_range,
+            dependants: data.dependants ?? prev.dependants,
+            monthly_expenses:
+              data.monthly_expenses !== null && data.monthly_expenses !== undefined
+                ? String(data.monthly_expenses)
+                : prev.monthly_expenses,
+            total_debt:
+              data.total_debt !== null && data.total_debt !== undefined
+                ? String(data.total_debt)
+                : prev.total_debt,
+          }));
+          setStep2((prev) => ({
+            ...prev,
+            emergency_fund_months:
+              data.emergency_fund_months !== null && data.emergency_fund_months !== undefined
+                ? String(data.emergency_fund_months)
+                : prev.emergency_fund_months,
+            monthly_investable:
+              data.monthly_investable !== null && data.monthly_investable !== undefined
+                ? String(data.monthly_investable)
+                : prev.monthly_investable,
+          }));
+          if (data.risk_profile) setComputedRisk(data.risk_profile as RiskProfile);
+          if (data.investment_horizon) setHorizon(data.investment_horizon as InvestmentHorizon);
+
+          // Resume at the first step that isn't filled in yet.
+          if (!data.age_range || !data.income_range || data.monthly_expenses === null || data.total_debt === null) {
+            setCurrentStep(1);
+          } else if (data.emergency_fund_months === null || data.monthly_investable === null) {
+            setCurrentStep(2);
+          } else if (!data.risk_profile) {
+            setCurrentStep(3);
+          } else if (!data.investment_horizon) {
+            setCurrentStep(4);
+          } else {
+            setCurrentStep(5);
+          }
+        }
+        setProfileLoaded(true);
       })
-      .catch(() => setHasExistingProfile(false));
-  }, [appUserId]);
+      .catch(() => setProfileLoaded(true));
+  }, [authUserId]);
+
+  // Persist whatever has been filled in so far — refreshing mid-onboarding
+  // does not lose progress, and each step's data is durable once completed.
+  const saveStepProgress = async (fields: Record<string, unknown>) => {
+    if (!authUserId) return;
+    try {
+      await coreDb.from("user_profiles").upsert(
+        { user_id: authUserId, ...fields, updated_at: new Date().toISOString() },
+        { onConflict: "user_id" }
+      );
+    } catch (error) {
+      // Non-fatal: the user can still proceed and the final submit will
+      // persist everything. Surface nothing disruptive here.
+      console.warn("Failed to save onboarding step progress:", error);
+    }
+  };
 
   // ── Already completed ────────────────────────────────────────────────────
 
-  if (hasExistingProfile === true) {
+  if (onboardingComplete === true) {
     return (
       <div className="flex min-h-screen items-center justify-center p-4 bg-gradient-to-br from-background to-muted/20">
         <Card className="w-full max-w-lg text-center">
@@ -345,7 +407,7 @@ const Onboarding = () => {
 
   // ── Loading state ────────────────────────────────────────────────────────
 
-  if (hasExistingProfile === null) {
+  if (!profileLoaded) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -389,10 +451,31 @@ const Onboarding = () => {
   };
 
   const handleNext = () => {
+    if (currentStep === 1) {
+      saveStepProgress({
+        age_range: step1.age_range,
+        income_range: step1.income_range,
+        dependants: step1.dependants,
+        monthly_expenses: parseFloat(step1.monthly_expenses),
+        total_debt: parseFloat(step1.total_debt),
+      });
+    } else if (currentStep === 2) {
+      const emergencyMonths =
+        EMERGENCY_FUND_OPTIONS.find((o) => o.value === step2.emergency_fund_months)?.numeric ?? 0;
+      saveStepProgress({
+        emergency_fund_months: emergencyMonths,
+        monthly_investable: parseFloat(step2.monthly_investable),
+      });
+    } else if (currentStep === 4) {
+      saveStepProgress({ investment_horizon: horizon });
+    }
+
     if (currentStep === 3 && !computedRisk) {
       // Compute risk before moving to step 4
       const profile = computeRiskProfile(quizAnswers);
       setComputedRisk(profile);
+      saveStepProgress({ risk_profile: profile });
+      return;
     }
     if (currentStep < totalSteps) {
       setCurrentStep(currentStep + 1);

@@ -31,10 +31,10 @@ not to prescribe order.
 |---|---|---|
 | New user reaches onboarding | `e2e/journeys/onboarding.spec.ts:5` | Covered |
 | Incomplete user cannot bypass onboarding | `ProtectedRoute.test.tsx` (onboarding redirect logic) | Covered |
-| All five onboarding steps save | — | GAP |
-| Refresh during onboarding does not destroy progress | — | GAP |
-| Completion changes `onboarding_complete` exactly once | — | GAP |
-| Returning user does not repeat onboarding | — | NOT YET AUDITED |
+| All five onboarding steps save | **Was a complete gap: `Onboarding.tsx` only wrote to the database once, at final submit on step 5 — steps 1-4 were React state only.** Fixed this session: `saveStepProgress()` upserts `core.user_profiles` after each of steps 1, 2, 3 (risk quiz), 4; step 5 (goals) persists at final submit alongside `onboarding_complete`, matching the existing single-shot goals-insert design. Test: `src/pages/__tests__/Onboarding.test.tsx::persists step 4`. | Covered (new) |
+| Refresh during onboarding does not destroy progress | Fixed alongside the above: on mount, `Onboarding.tsx` now loads any partial `user_profiles` row and resumes at the first incomplete step instead of restarting at step 1. This also fixed a latent bug where the old "already complete" gate keyed off *row existence* rather than `onboarding_complete` — once partial rows exist, that gate would have falsely told a mid-onboarding user they were done; it now keys off `onboardingComplete` from `AuthContext`. Tests: `Onboarding.test.tsx::starts fresh`, `::resumes at step 3`, `::resumes at step 5`. | Covered (new) |
+| Completion changes `onboarding_complete` exactly once | `handleSubmit` sets it in a single guarded UPDATE; `isSubmitting` prevents double-fire from the same click, and the `onboardingComplete === true` redirect effect prevents re-entry once set. No direct test asserting exactly-once semantics under e.g. a double-tap or two-tab race. | Partial |
+| Returning user does not repeat onboarding | `onboardingComplete === true` redirect effect (`Onboarding.tsx`) + `ProtectedRoute` gate | Covered |
 
 ## IRIS (AI chat)
 
