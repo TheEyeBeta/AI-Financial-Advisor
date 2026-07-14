@@ -402,7 +402,7 @@
           "news"
         ],
         "summary": "Get News",
-        "description": "Return market news from DataAPI when configured.\n\nClients should use Supabase `news_articles` when this endpoint returns 503.",
+        "description": "Return market news from DataAPI when configured, newest first.\n\nReturns 400 for invalid cursors, 503 when the provider is not configured\n(clients should use Supabase `news_articles`), 504 on provider timeout,\nand 502 on provider failure. Empty feeds are a successful empty list.",
         "operationId": "get_news_api_news_get",
         "parameters": [
           {
@@ -432,10 +432,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Pagination cursor",
+              "description": "Opaque pagination cursor from a previous response's next_cursor. Ordering is (published_at, id) descending.",
               "title": "Cursor"
             },
-            "description": "Pagination cursor"
+            "description": "Opaque pagination cursor from a previous response's next_cursor. Ordering is (published_at, id) descending."
           }
         ],
         "responses": {
@@ -444,9 +444,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get News Api News Get"
+                  "$ref": "#/components/schemas/NewsFeedResponse"
                 }
               }
             }
@@ -2033,6 +2031,28 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/ws/ticket": {
+      "post": {
+        "tags": [
+          "trade-engine"
+        ],
+        "summary": "Create Websocket Ticket",
+        "description": "Issue a short-lived, single-use WebSocket ticket over authenticated HTTPS.\n\nConnect with ``wss://.../ws/live?ticket=<ticket>`` before it expires.\nThe ticket is bound to the requesting user and the /ws/live endpoint,\nand is consumed atomically on first use.",
+        "operationId": "create_websocket_ticket_api_v1_ws_ticket_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebSocketTicketResponse"
                 }
               }
             }
@@ -3701,6 +3721,132 @@
         ],
         "title": "Message"
       },
+      "NewsFeedItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "ticker": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ticker"
+          },
+          "headline": {
+            "type": "string",
+            "title": "Headline"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "published_at": {
+            "type": "string",
+            "title": "Published At"
+          },
+          "sentiment_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sentiment Score"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "headline",
+          "published_at"
+        ],
+        "title": "NewsFeedItem",
+        "description": "One news article with a stable, content-derived id."
+      },
+      "NewsFeedResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NewsFeedItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "data_source": {
+            "type": "string",
+            "title": "Data Source",
+            "default": "dataapi"
+          },
+          "availability_status": {
+            "type": "string",
+            "title": "Availability Status",
+            "default": "ok"
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
+          },
+          "as_of": {
+            "type": "string",
+            "title": "As Of"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "as_of"
+        ],
+        "title": "NewsFeedResponse"
+      },
       "NewsItemFull": {
         "properties": {
           "headline": {
@@ -4903,6 +5049,30 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WebSocketTicketResponse": {
+        "properties": {
+          "ticket": {
+            "type": "string",
+            "title": "Ticket"
+          },
+          "expires_in": {
+            "type": "integer",
+            "title": "Expires In"
+          },
+          "endpoint": {
+            "type": "string",
+            "title": "Endpoint",
+            "default": "/ws/live"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ticket",
+          "expires_in"
+        ],
+        "title": "WebSocketTicketResponse",
+        "description": "Single-use ticket for authenticating a WebSocket connection (#205)."
       }
     }
   }

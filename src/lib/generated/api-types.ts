@@ -221,9 +221,11 @@ export interface paths {
         };
         /**
          * Get News
-         * @description Return market news from DataAPI when configured.
+         * @description Return market news from DataAPI when configured, newest first.
          *
-         *     Clients should use Supabase `news_articles` when this endpoint returns 503.
+         *     Returns 400 for invalid cursors, 503 when the provider is not configured
+         *     (clients should use Supabase `news_articles`), 504 on provider timeout,
+         *     and 502 on provider failure. Empty feeds are a successful empty list.
          */
         get: operations["get_news_api_news_get"];
         put?: never;
@@ -723,6 +725,30 @@ export interface paths {
         get: operations["get_ticker_details_api_v1_ai_ticker__ticker__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ws/ticket": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Websocket Ticket
+         * @description Issue a short-lived, single-use WebSocket ticket over authenticated HTTPS.
+         *
+         *     Connect with ``wss://.../ws/live?ticket=<ticket>`` before it expires.
+         *     The ticket is bound to the requesting user and the /ws/live endpoint,
+         *     and is consumed atomically on first use.
+         */
+        post: operations["create_websocket_ticket_api_v1_ws_ticket_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1463,6 +1489,52 @@ export interface components {
             content: string;
         };
         /**
+         * NewsFeedItem
+         * @description One news article with a stable, content-derived id.
+         */
+        NewsFeedItem: {
+            /** Id */
+            id: string;
+            /** Ticker */
+            ticker?: string | null;
+            /** Headline */
+            headline: string;
+            /** Summary */
+            summary?: string | null;
+            /** Source */
+            source?: string | null;
+            /** Url */
+            url?: string | null;
+            /** Published At */
+            published_at: string;
+            /** Sentiment Score */
+            sentiment_score?: number | null;
+        };
+        /** NewsFeedResponse */
+        NewsFeedResponse: {
+            /** Items */
+            items: components["schemas"]["NewsFeedItem"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Data Source
+             * @default dataapi
+             */
+            data_source: string;
+            /**
+             * Availability Status
+             * @default ok
+             */
+            availability_status: string;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** As Of */
+            as_of: string;
+        };
+        /**
          * NewsItemFull
          * @description News item matching frontend interface.
          */
@@ -1738,6 +1810,21 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /**
+         * WebSocketTicketResponse
+         * @description Single-use ticket for authenticating a WebSocket connection (#205).
+         */
+        WebSocketTicketResponse: {
+            /** Ticket */
+            ticket: string;
+            /** Expires In */
+            expires_in: number;
+            /**
+             * Endpoint
+             * @default /ws/live
+             */
+            endpoint: string;
         };
     };
     responses: never;
@@ -2072,7 +2159,7 @@ export interface operations {
             query?: {
                 /** @description Maximum number of news items to return */
                 limit?: number;
-                /** @description Pagination cursor */
+                /** @description Opaque pagination cursor from a previous response's next_cursor. Ordering is (published_at, id) descending. */
                 cursor?: string | null;
             };
             header?: never;
@@ -2087,9 +2174,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    };
+                    "application/json": components["schemas"]["NewsFeedResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2993,6 +3078,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_websocket_ticket_api_v1_ws_ticket_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSocketTicketResponse"];
                 };
             };
         };

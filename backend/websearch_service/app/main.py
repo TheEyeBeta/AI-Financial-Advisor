@@ -43,6 +43,7 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
 
+from .config import get_app_settings, resolve_allowed_origins, validate_app_settings
 from .health_checks import assess_readiness, liveness_payload, mark_startup_complete
 from .middleware.correlation import CorrelationIdMiddleware
 from .observability import init_observability
@@ -152,6 +153,11 @@ def create_app() -> FastAPI:
     - Run this service on its own URL, e.g. https://websearch.yourdomain.com
     - Point your AI orchestration logic at /api/search on this service.
     """
+    # Typed settings with fail-fast production validation (#210):
+    # required env vars present and non-placeholder, explicit CORS origins,
+    # explicit trusted-host allowlist — no unsafe production defaults.
+    settings = get_app_settings()
+    validate_app_settings(settings)
     validate_auth_configuration()
     validate_rate_limit_configuration()
     init_observability()
@@ -171,36 +177,12 @@ def create_app() -> FastAPI:
     )
     
     # CORS middleware
-    # SECURITY: In production, CORS_ORIGINS must be set to the exact frontend origin(s).
-    # Wildcard CORS in production would allow any website to make credentialled requests.
-    # If CORS_ORIGINS is not set in production, the app refuses to start.
-    is_production = os.getenv("ENVIRONMENT") == "production"
-    cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
-
-    if is_production:
-        if not cors_origins_env or cors_origins_env == "*":
-            raise RuntimeError(
-                "FATAL: CORS_ORIGINS must be set to an explicit list of allowed origins in "
-                "production (e.g. 'https://yourdomain.com'). Wildcard '*' is not permitted."
-            )
-        allowed_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
-        allow_creds = True
-    else:
-        # Development: use an explicit list of common local dev ports so that
-        # allow_credentials=True works correctly (wildcard '*' is incompatible
-        # with credentialed requests that carry an Authorization header).
-        default_dev_origins = [
-            "http://localhost:8080",   # Vite on custom port (this project)
-            "http://localhost:5173",   # Vite default
-            "http://localhost:3000",   # CRA / other
-            "http://127.0.0.1:8080",
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:3000",
-        ]
-        extra_origins = [o.strip() for o in cors_origins_env.split(",") if o.strip()]
-        # dict.fromkeys preserves insertion order and deduplicates
-        allowed_origins = list(dict.fromkeys(default_dev_origins + extra_origins))
-        allow_creds = True
+    # SECURITY: In production, CORS_ORIGINS must be set to the exact frontend
+    # origin(s) — validate_app_settings() above refuses to start otherwise.
+    # The same allowlist backs WebSocket Origin validation (#205), so both
+    # policies can never drift apart.
+    allowed_origins = resolve_allowed_origins(settings)
+    allow_creds = True
 
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(CorrelationIdMiddleware)
@@ -219,14 +201,14 @@ def create_app() -> FastAPI:
         max_age=600,  # 10 minutes — shorter preflight cache reduces stale-config window
     )
     
-    # Trusted host middleware (production only)
-    if os.getenv("ENVIRONMENT") == "production":
-        trusted_hosts = os.getenv("TRUSTED_HOSTS", "").split(",")
-        if trusted_hosts and trusted_hosts[0]:
-            app.add_middleware(
-                TrustedHostMiddleware,
-                allowed_hosts=trusted_hosts,
-            )
+    # Trusted host middleware (production only). TRUSTED_HOSTS is mandatory in
+    # production (#210) — validate_app_settings() already rejected empty or
+    # wildcard values, so this middleware is always active there.
+    if settings.is_production:
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=settings.trusted_hosts,
+        )
 
     @app.get("/")
     async def root() -> dict[str, str]:

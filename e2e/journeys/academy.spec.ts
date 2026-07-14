@@ -1,4 +1,5 @@
 import { test, expect } from '../fixtures/auth.fixture';
+import { expectNoBlockingViolations } from '../utils/a11y';
 
 test.describe('User Journey: Academy Progression', () => {
   test('navigate to academy, select tier, open lesson, take quiz', async ({ authenticatedPage: page }) => {
@@ -162,6 +163,11 @@ test.describe('User Journey: Academy Progression', () => {
     // Step 1: Verify academy page loaded
     const bodyText = await page.textContent('body');
     expect(bodyText).toBeTruthy();
+
+    // Accessibility gate (#213): scan the academy page with its data mocks.
+    if (await page.getByText('Beginner', { exact: false }).first().isVisible({ timeout: 5_000 }).catch(() => false)) {
+      await expectNoBlockingViolations(page, 'academy (journey)');
+    }
 
     // Step 2: Click on Beginner tier
     const beginnerLink = page.getByText('Beginner', { exact: false }).first();

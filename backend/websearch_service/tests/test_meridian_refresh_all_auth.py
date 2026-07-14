@@ -60,6 +60,9 @@ def test_refresh_all_rejects_legacy_cron_secret_in_production(monkeypatch):
     monkeypatch.setenv("WORKERS", "1")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
     monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
+    # TRUSTED_HOSTS is mandatory in production since #210. TestClient sends
+    # Host: testserver, so allow it here.
+    monkeypatch.setenv("TRUSTED_HOSTS", "testserver")
     monkeypatch.setenv("MERIDIAN_CRON_SECRET", "legacy-secret")
 
     refresh_mock = AsyncMock(return_value={"updated_users": 1})

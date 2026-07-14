@@ -25,7 +25,9 @@
     --secondary-foreground: 215 25% 25%;
 
     --muted: 210 15% 95%;
-    --muted-foreground: 215 15% 50%;
+    /* 45% lightness ≈ 5.0:1 on white — WCAG AA for body text (#213);
+       50% measured 4.24:1 and failed axe color-contrast. */
+    --muted-foreground: 215 15% 45%;
 
     --accent: 215 60% 95%;
     --accent-foreground: 215 70% 40%;

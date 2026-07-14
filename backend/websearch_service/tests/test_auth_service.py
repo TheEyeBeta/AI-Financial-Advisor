@@ -157,20 +157,22 @@ def test_extract_websocket_token_from_header():
     assert _extract_websocket_token(_Stub()) == "ws-token"
 
 
-def test_extract_websocket_token_from_query_param():
+def test_extract_websocket_token_ignores_token_query_param():
+    # SECURITY (#205): JWTs in query strings leak into logs/history and are
+    # no longer accepted — only the Authorization header carries raw JWTs.
     class _Stub:
         headers = {"Authorization": ""}
         query_params = {"token": "query-token"}
 
-    assert _extract_websocket_token(_Stub()) == "query-token"
+    assert _extract_websocket_token(_Stub()) is None
 
 
-def test_extract_websocket_token_from_access_token_query_param():
+def test_extract_websocket_token_ignores_access_token_query_param():
     class _Stub:
         headers = {"Authorization": ""}
         query_params = {"access_token": "access-token"}
 
-    assert _extract_websocket_token(_Stub()) == "access-token"
+    assert _extract_websocket_token(_Stub()) is None
 
 
 def test_extract_websocket_token_returns_none_when_absent():

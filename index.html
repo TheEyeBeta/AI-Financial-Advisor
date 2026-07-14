@@ -6,7 +6,11 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="alternate icon" href="/favicon.ico" />
     <title>Lens — AI Financial Advisor</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* https://*.supabase.co wss://*.supabase.co https://*.up.railway.app wss://*.up.railway.app https://ai-financial-advisor-backend-production.up.railway.app https://*.ingest.de.sentry.io https://us.i.posthog.com https://*.posthog.com; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
+    <!-- Dev-fallback CSP. script-src keeps 'unsafe-inline' ONLY for the Vite/React
+         dev-refresh preamble; production enforcement is the stricter header in
+         vercel.json (browsers apply the intersection of both policies, so
+         'unsafe-inline' here does not weaken production). -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' http://localhost:* ws://localhost:* https://*.supabase.co wss://*.supabase.co https://*.up.railway.app wss://*.up.railway.app https://ai-financial-advisor-backend-production.up.railway.app https://*.ingest.de.sentry.io https://us.i.posthog.com https://*.posthog.com; object-src 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests" />
     <meta name="description" content="Educational market analysis, ranked stock signals, guided learning, and paper trading in one disciplined investor workspace." />
     <meta name="author" content="Lens" />
     <meta name="theme-color" content="#f9fafb" media="(prefers-color-scheme: light)" />

@@ -1,0 +1,17 @@
+# Gitleaks configuration (issue #209).
+# Extends the default ruleset; only deliberate fake fixtures are allowlisted.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Deliberate fake secrets used as test fixtures and documentation placeholders"
+paths = [
+  # Redaction tests intentionally embed a fake JWT (the public jwt.io example)
+  # and fake provider-key shapes to prove they get scrubbed from telemetry.
+  '''src/lib/__tests__/telemetry\.test\.ts''',
+]
+regexes = [
+  # Placeholder keys in env templates (all-x padding, zero entropy).
+  '''(phc|sk-proj|pplx|tvly)[-_]?x{8,}''',
+]

@@ -1,5 +1,7 @@
 # Multi-stage Dockerfile for React frontend
-FROM node:20-alpine AS builder
+# Base images pinned by immutable digest (#206). To update: pick the new tag,
+# resolve its digest, and update the tag+digest pair together.
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
 
 # Set working directory
 WORKDIR /app
@@ -28,8 +30,8 @@ ENV VITE_WEBSEARCH_API_URL=$VITE_WEBSEARCH_API_URL
 # Build the application
 RUN npm run build
 
-# Production stage with nginx
-FROM nginx:alpine
+# Production stage with nginx (explicit minor version + digest, #206)
+FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 
 # Copy built files from builder
 COPY --from=builder /app/dist /usr/share/nginx/html

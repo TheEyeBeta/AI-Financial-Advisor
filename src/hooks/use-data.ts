@@ -1,4 +1,5 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { chatApi, chatsApi, chatTurnApi, markDigestRead } from '@/services/chat-api';
 import { newsApi } from '@/services/news-api';
 import { apiClient } from '@/lib/api-client';
@@ -153,18 +154,44 @@ export function useCreateJournalEntry() {
 
 // Chat hooks
 
-// Get all chats for the current user
+// Get the user's chats, newest-updated first, one bounded page at a time
+// (#212). `data` is the flattened, deduplicated list of loaded pages;
+// call `fetchNextPage` to load older conversations.
 export function useChats() {
   const { userId } = useAuth();
-  
-  return useQuery({
+
+  const query = useInfiniteQuery({
     queryKey: ['chats', userId],
-    queryFn: () => chatsApi.getAll(userId!),
+    queryFn: ({ pageParam, signal }) =>
+      chatsApi.getPage(userId!, { cursor: pageParam ?? undefined, signal }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: !!userId,
   });
+
+  const chats = useMemo(() => {
+    const seen = new Set<string>();
+    return (query.data?.pages ?? [])
+      .flatMap((page) => page.chats)
+      .filter((chat) => {
+        if (seen.has(chat.id)) return false;
+        seen.add(chat.id);
+        return true;
+      });
+  }, [query.data]);
+
+  return {
+    data: chats,
+    isLoading: query.isLoading,
+    error: query.error,
+    fetchNextPage: query.fetchNextPage,
+    hasNextPage: query.hasNextPage,
+    isFetchingNextPage: query.isFetchingNextPage,
+  };
 }
 
-// Get a specific chat with its messages
+// Get a specific chat with its newest message window (bounded, #212).
+// Older history: chatApi.getMessagesPage(chatId, { cursor: data.olderMessagesCursor }).
 export function useChat(chatId: string | null) {
   return useQuery({
     queryKey: ['chat', chatId],
@@ -173,13 +200,39 @@ export function useChat(chatId: string | null) {
   });
 }
 
-// Get messages for the current chat
+// Message history for a chat: newest window first, older pages on demand (#212).
 export function useChatMessages(chatId: string | null) {
-  return useQuery({
+  const query = useInfiniteQuery({
     queryKey: ['chat-messages', chatId],
-    queryFn: () => chatApi.getMessages(chatId!),
+    queryFn: ({ pageParam, signal }) =>
+      chatApi.getMessagesPage(chatId!, { cursor: pageParam ?? undefined, signal }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.nextCursor,
     enabled: !!chatId,
   });
+
+  // Pages arrive newest-window-first; render order is oldest → newest.
+  const messages = useMemo(() => {
+    const seen = new Set<string>();
+    return [...(query.data?.pages ?? [])]
+      .reverse()
+      .flatMap((page) => page.messages)
+      .filter((message) => {
+        if (seen.has(message.id)) return false;
+        seen.add(message.id);
+        return true;
+      });
+  }, [query.data]);
+
+  return {
+    data: messages,
+    isLoading: query.isLoading,
+    error: query.error,
+    /** Loads the next OLDER page of history. */
+    fetchOlderMessages: query.fetchNextPage,
+    hasOlderMessages: query.hasNextPage,
+    isFetchingOlderMessages: query.isFetchingNextPage,
+  };
 }
 
 // Create a new chat
@@ -432,15 +485,48 @@ export function useRecentNews(hours: number = 12, limit: number = 150) {
 // Trade Engine API Hooks - Direct connection to TheEyeBetaLocal
 // ============================================================
 
-// Fetch news from Trade Engine (live from backend, not Supabase)
+// Cursor-paginated news from the backend (#211). Provider failures surface
+// as query errors (distinguishable from a genuinely empty feed); callers that
+// want the Supabase news table should fall back on `error`, not on emptiness.
 export function useTradeEngineNews(limit: number = 15) {
-  return useQuery({
+  const query = useInfiniteQuery({
     queryKey: ['trade-engine-news', limit],
-    queryFn: () => tradeEngineApi.getNews(limit),
-    refetchInterval: 60 * 1000, // Refetch every minute
+    queryFn: ({ pageParam }) => tradeEngineApi.getNews(limit, pageParam ?? undefined),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
+    // Background refetch of an infinite query re-fetches EVERY cached page
+    // sequentially, so polling cost would grow with pagination depth. Poll
+    // only while a single page is loaded; deeper reads refresh on remount.
+    refetchInterval: (q) => ((q.state.data?.pages.length ?? 0) > 1 ? false : 60 * 1000),
     staleTime: 30 * 1000, // Consider data fresh for 30 seconds
     retry: 2,
   });
+
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    return (query.data?.pages ?? [])
+      .flatMap((page) => page.items)
+      .filter((item) => {
+        if (seen.has(item.id)) return false;
+        seen.add(item.id);
+        return true;
+      });
+  }, [query.data]);
+
+  // pages[0] holds the newest items — its flags describe current feed health;
+  // later pages are older history and would mislead after "load more".
+  const newestPage = query.data?.pages[0];
+  return {
+    data: items,
+    isLoading: query.isLoading,
+    error: query.error,
+    fetchNextPage: query.fetchNextPage,
+    hasNextPage: query.hasNextPage,
+    isFetchingNextPage: query.isFetchingNextPage,
+    /** True when the backend served a bounded-age cache after a provider failure. */
+    isStale: newestPage?.stale ?? false,
+    availabilityStatus: newestPage?.availability_status ?? 'ok',
+  };
 }
 
 // Fetch technical indicators from Trade Engine

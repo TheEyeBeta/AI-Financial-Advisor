@@ -774,7 +774,8 @@ export const pythonApi = {
 
 // Trade Engine REST API - Direct connection to TheEyeBetaLocal backend
 export interface TradeEngineNewsItem {
-  id: number;
+  /** Stable content-derived id assigned by the backend (#211). */
+  id: string;
   ticker: string | null;
   headline: string;
   summary: string | null;
@@ -808,35 +809,18 @@ export const tradeEngineApi = {
     return getPythonApiUrl();
   },
 
-  // Fetch news from Trade Engine (or stub endpoint)
-  async getNews(limit: number = 15, cursor?: string): Promise<{ items: TradeEngineNewsItem[]; next_cursor: string | null }> {
+  // Cursor-paginated market news (#211). Provider failures propagate as
+  // errors — an empty page means the feed is genuinely empty. Callers that
+  // want the Supabase news table as a fallback must handle the error.
+  async getNews(limit: number = 15, cursor?: string): Promise<{ items: TradeEngineNewsItem[]; next_cursor: string | null; availability_status: 'ok' | 'degraded'; stale: boolean; as_of: string }> {
     const params = new URLSearchParams({ limit: limit.toString() });
     if (cursor) params.append('cursor', cursor);
 
-    try {
-      const response = await fetch(`${this.baseUrl}/api/news?${params}`);
-      if (!response.ok) {
-        // If endpoint doesn't exist or returns error, return empty results
-        // News should come from Supabase instead
-        console.warn('News endpoint not available, using Supabase news table instead');
-        return { items: [], next_cursor: null };
-      }
-      const data = await response.json();
-      // If backend returns empty items with a message, it's a stub
-      if (data.items && data.items.length === 0 && data.message) {
-        // stub response — UI will fall back to Supabase
-      }
-      return data;
-    } catch (error) {
-      // Network or CSP error — return empty results so the UI can fall back to Supabase
-      const isCspOrNetwork = error instanceof TypeError && error.message === 'Failed to fetch';
-      if (isCspOrNetwork) {
-        console.warn('[TradeEngine] News fetch blocked (CSP or network). Falling back to Supabase. Backend URL:', this.baseUrl);
-      } else {
-        console.warn('[TradeEngine] Failed to fetch news from backend, using Supabase instead:', error);
-      }
-      return { items: [], next_cursor: null };
+    const response = await fetch(`${this.baseUrl}/api/news?${params}`);
+    if (!response.ok) {
+      throw new Error(`News endpoint failed with status ${response.status}`);
     }
+    return response.json();
   },
 
   // Fetch technical indicators for a ticker

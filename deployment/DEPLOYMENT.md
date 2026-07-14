@@ -74,15 +74,24 @@ Use the Vercel dashboard to redeploy a previous commit or manually promote a dep
 2. **Configure Environment Variables**
    In Railway dashboard → Variables:
    ```
+   # REQUIRED — production refuses to start without these (#210, app/config.py)
+   SUPABASE_URL=https://<project-ref>.supabase.co
+   SUPABASE_ANON_KEY=...
+   SUPABASE_SERVICE_ROLE_KEY=...
+   SUPABASE_JWT_SECRET=...
    OPENAI_API_KEY=sk-...
+   ENVIRONMENT=production
+   CORS_ORIGINS=https://your-frontend.vercel.app   # exact origins, comma-separated, no wildcard
+   TRUSTED_HOSTS=your-backend.up.railway.app        # bare hostnames, comma-separated, no wildcard
+
+   # Recommended / optional
    PERPLEXITY_API_KEY=pplx-...  # Optional: Fallback when OpenAI hits limits
    TAVILY_API_KEY=tvly-...
-   APP_VERSION=0.1.0
-   ENVIRONMENT=production
+   APP_VERSION=<git SHA of the deploy>
    AI_AUDIT_LOG_PATH=/app/logs/audit.jsonl
    PORT=8000
    WORKERS=1
-   REDIS_URL=redis://...            # Required for multi-worker; strongly recommended in prod
+   REDIS_URL=redis://...            # Required for multi-worker rate limits + WebSocket tickets
    ALLOW_IN_MEMORY_RATE_LIMIT=true  # Only when WORKERS=1 and Redis intentionally omitted
    SCHEDULER_ENABLED=false          # Web service — do NOT enable on API replicas
    ```

@@ -63,6 +63,70 @@ async def _ping_supabase(timeout: float) -> dict[str, Any]:
         return {"status": "error", "detail": type(exc).__name__}
 
 
+_expected_revision_cache: str | None = None
+
+
+def expected_schema_revision() -> str | None:
+    """Head revision of the Alembic history shipped with this build (#208)."""
+    global _expected_revision_cache
+    if _expected_revision_cache is None:
+        try:
+            from pathlib import Path
+
+            from alembic.config import Config
+            from alembic.script import ScriptDirectory
+
+            ini_path = Path(__file__).resolve().parent.parent / "alembic.ini"
+            script_dir = ScriptDirectory.from_config(Config(str(ini_path)))
+            _expected_revision_cache = script_dir.get_current_head() or ""
+        except Exception:
+            _expected_revision_cache = ""
+    return _expected_revision_cache or None
+
+
+async def _check_schema_revision(timeout: float) -> dict[str, Any]:
+    """Compare the database's alembic_version with the revision this build expects.
+
+    A mismatch means this instance is running against a schema its migrations
+    have not been applied to (or is an old build against a newer schema) —
+    that instance must not report ready (#208). An unreadable version table
+    reports "unknown" without failing readiness, so a permissions quirk cannot
+    take production down; the detail stays visible for operators.
+    """
+    expected = expected_schema_revision()
+    if not expected:
+        return {"status": "unknown", "detail": "alembic history unavailable in this build"}
+
+    from .services.supabase_client import supabase_client
+
+    def _fetch() -> Any:
+        return (
+            supabase_client.schema("public")
+            .table("alembic_version")
+            .select("version_num")
+            .limit(1)
+            .execute()
+        )
+
+    try:
+        result = await asyncio.wait_for(asyncio.to_thread(_fetch), timeout=timeout)
+        rows = result.data or []
+        actual = rows[0].get("version_num") if rows else None
+    except asyncio.TimeoutError:
+        return {"status": "unknown", "expected": expected, "detail": "timeout"}
+    except Exception as exc:
+        return {"status": "unknown", "expected": expected, "detail": type(exc).__name__}
+
+    if not isinstance(actual, str) or not actual:
+        # Table unreadable/empty or response malformed — inconclusive, not a
+        # confirmed mismatch.
+        return {"status": "unknown", "expected": expected, "detail": "version row unavailable"}
+
+    if actual == expected:
+        return {"status": "ok", "revision": actual}
+    return {"status": "error", "expected": expected, "actual": actual}
+
+
 async def assess_readiness() -> dict[str, Any]:
     """Evaluate readiness. Required deps fail closed; optional deps may degrade."""
     components: dict[str, Any] = {}
@@ -72,6 +136,9 @@ async def assess_readiness() -> dict[str, Any]:
 
     db = await _ping_supabase(timeout=READINESS_TIMEOUT_SECONDS)
     components["database"] = db
+
+    schema = await _check_schema_revision(timeout=READINESS_TIMEOUT_SECONDS)
+    components["schema_revision"] = schema
 
     rate_limit = rate_limit_readiness_status()
     components["rate_limit"] = rate_limit
@@ -92,11 +159,16 @@ async def assess_readiness() -> dict[str, Any]:
     required_ok = (
         config.get("status") == "ok"
         and db.get("status") == "ok"
+        # A confirmed schema mismatch fails readiness; "unknown" does not.
+        and schema.get("status") != "error"
         and rate_limit.get("status") == "ok"
         and _startup_complete
     )
 
-    degraded = search.get("status") not in ("connected", "ok")
+    degraded = (
+        search.get("status") not in ("connected", "ok")
+        or schema.get("status") == "unknown"
+    )
 
     return {
         "status": "ready" if required_ok else "not_ready",

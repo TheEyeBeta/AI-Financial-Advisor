@@ -1,3 +1,9 @@
+> **ARCHIVED (2026-07-13).** Historical point-in-time audit from 2026-03-07.
+> Many findings below have since been remediated (see issues #192–#214 and the
+> PRs that closed them). The canonical, maintained operational document is
+> [`docs/OPERATIONS.md`](./OPERATIONS.md) — where this file conflicts with it,
+> `OPERATIONS.md` wins. Kept for historical context only.
+
 # AI Financial Advisor — Production-Readiness & Business-Readiness Review
 
 **Date:** 2026-03-07

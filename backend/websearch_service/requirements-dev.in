@@ -1,0 +1,9 @@
+# Test/dev-only dependencies (#206) — never installed in the production image.
+# Constrained by the runtime lock so both resolve to consistent versions.
+# Regenerate requirements-dev.txt with pip-compile (see requirements.in).
+-c requirements.txt
+pytest>=9.0.3,<10.0
+pytest-asyncio>=1.0.0,<2.0
+pytest-cov>=6.0,<8.0
+fakeredis>=2.28.0,<3.0
+lupa>=2.0,<3.0
