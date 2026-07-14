@@ -10,6 +10,19 @@ updates:
     groups:
       npm-minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # These are framework migrations, not safe automatic version bumps.
+      # Revisit after the controlled beta in dedicated compatibility PRs.
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: tailwindcss
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /backend/websearch_service
@@ -19,6 +32,11 @@ updates:
     groups:
       pip-minor-and-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # Major cryptography releases require a deliberately regenerated,
+      # reviewed hash lock because automatic generation has produced drift.
+      - dependency-name: cryptography
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directories:
@@ -27,6 +45,10 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+    ignore:
+      # The backend runtime and lockfiles are standardized on Python 3.12.
+      - dependency-name: python
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
