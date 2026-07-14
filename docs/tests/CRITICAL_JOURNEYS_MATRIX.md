@@ -47,7 +47,7 @@ not to prescribe order.
 | Provider rejection | `test_ai_proxy.py` (error handling cases) | Partial |
 | User retry | — | GAP |
 | Rate-limit response | `integration/test_rate_limiting.py`, `test_rate_limit*.py` (extensive) | Covered |
-| Concurrent-submit prevention | `test_chat_turn_reconciliation.py` covers stale-turn cleanup; no direct double-submit test found | GAP |
+| Concurrent-submit prevention | Already implemented in the frontend (`Advisor.tsx`: `isSendingRef` synchronous guard checked before React state updates, composer `disabled={isLoading}` while `sendMessageMutation.isPending`) plus backend idempotency (`ai.chat_turn_requests`, `idempotencyKey` in `useSendChatMessage`). No test exercises this — `Advisor.tsx` has zero test coverage of any kind (no `Advisor.test.tsx` exists). Not attempted this session: the component is large (streaming, multiple query hooks) and deserves a properly scoped test file rather than a rushed one. | Partial (implemented, untested) |
 
 ## Paper trading
 
@@ -55,7 +55,7 @@ not to prescribe order.
 |---|---|---|
 | Create order | `e2e/journeys/paper-trading.spec.ts:5` | Covered |
 | Reject invalid quantity | `test_trading_constraints_db.py::TestPositiveValueConstraints` | Covered |
-| Reject insufficient cash | — | GAP |
+| Reject insufficient cash | **Not a test gap — a product gap.** There is no cash-balance concept anywhere in the schema, backend, or frontend (`trading.paper_trades`/`trading.trade_journal` track positions directly; nothing debits or credits a cash pool on buy/sell). This journey can't be tested because the feature it describes doesn't exist. Implementing it means deciding a starting balance, whether it's per-user/configurable, and a migration + constraint/trigger to enforce it — a product decision, not a test-writing task. Flagging for a human call rather than inventing a design. | GAP (needs product decision first) |
 | Prevent overselling | `test_trading_constraints_db.py::TestOversellProtection` (incl. concurrent-sell race) | Covered |
 | Persist completed order | `e2e/journeys/paper-trading.spec.ts:5` | Covered |
 | Correct portfolio totals | — | NOT YET AUDITED |
@@ -81,7 +81,7 @@ not to prescribe order.
 | Restore account | **Was a complete gap: no `restore_user_account` function, no route, no frontend button existed.** Implemented this session: `app/services/user_account_lifecycle.py::restore_user_account`, `POST /api/admin/users/{auth_id}/restore`, `src/pages/Admin.tsx` Restore button. Tests: `test_user_account_lifecycle.py` (4 cases), `test_admin_routes.py::TestRestoreUserRoute` (3 cases). | Covered (new) |
 | Delete-account request | `test_admin_triggers.py`, delete-request/execute flow exists; route-level tests not found | Partial |
 | Admin cannot delete self/final admin | `test_user_account_lifecycle.py::test_self_delete_forbidden`, `test_final_admin_delete_forbidden` | Covered |
-| Audit record produced | `test_audit.py` (audit log mechanics); no test asserts an audit entry is written *as a side effect* of suspend/restore/delete | Partial |
+| Audit record produced | **Was a gap: `audit_log()` existed (`app/services/audit.py`) but suspend/restore/delete-execute never called it — only plain `logger.info`, which isn't a durable/queryable audit trail.** Fixed this session: `suspend_user_account`, `restore_user_account`, and `execute_delete_request` now call `audit_log()` with actor/target/reason on every success path (including the already-removed idempotent-replay branch of delete). Tests assert the call and its payload in `test_user_account_lifecycle.py`. | Covered (new) |
 
 ## How to use this document
 

@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from .audit import audit_log
+
 logger = logging.getLogger(__name__)
 
 RECENT_AUTH_MAX_AGE_SECONDS = int(
@@ -212,6 +214,16 @@ async def suspend_user_account(
         request_id,
         reason,
     )
+    await audit_log(
+        "admin.user_suspended",
+        {
+            "actor": caller.principal,
+            "target_auth_id": target_auth_id,
+            "target_email": target_email,
+            "reason": reason,
+            "request_id": request_id,
+        },
+    )
     return {
         "status": "suspended",
         "auth_id": target_auth_id,
@@ -279,6 +291,15 @@ async def restore_user_account(
         caller.principal,
         target_auth_id,
         request_id,
+    )
+    await audit_log(
+        "admin.user_restored",
+        {
+            "actor": caller.principal,
+            "target_auth_id": target_auth_id,
+            "target_email": target_email,
+            "request_id": request_id,
+        },
     )
     return {
         "status": "active",
@@ -390,6 +411,16 @@ async def execute_delete_request(
         if del_resp.status_code == 404:
             snapshot["status"] = "executed"
             snapshot["idempotency_key"] = idempotency_key
+            await audit_log(
+                "admin.user_deleted",
+                {
+                    "actor": caller.principal,
+                    "target_auth_id": target_auth_id,
+                    "snapshot_id": snapshot_id,
+                    "idempotency_key": idempotency_key,
+                    "already_removed": True,
+                },
+            )
             return {"status": "deleted", "auth_id": target_auth_id, "already_removed": True}
         if del_resp.status_code not in (200, 204):
             raise UserLifecycleError("failed to delete auth user", status_code=502)
@@ -402,5 +433,14 @@ async def execute_delete_request(
         target_auth_id,
         snapshot_id,
         idempotency_key,
+    )
+    await audit_log(
+        "admin.user_deleted",
+        {
+            "actor": caller.principal,
+            "target_auth_id": target_auth_id,
+            "snapshot_id": snapshot_id,
+            "idempotency_key": idempotency_key,
+        },
     )
     return {"status": "deleted", "auth_id": target_auth_id, "snapshot_id": snapshot_id}
