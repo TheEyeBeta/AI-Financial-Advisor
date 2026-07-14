@@ -155,18 +155,51 @@ Three jobs:
 
 ### 3.8 Branch protection (GitHub settings — human step)
 
-Configure a ruleset on `main` (and optionally `staging`) that **requires** these
-status checks before merge. Names must match the workflow / job labels in the
-Actions tab:
+No tool in this environment can apply a GitHub ruleset via API — this is a
+**manual step** a human with admin access performs at Settings → Rules →
+Rulesets → New branch ruleset, target `main`. The checklist below must be
+applied there; nothing in this repo enforces it until it is.
 
-| Required check name | Workflow |
-| ------------------- | -------- |
-| `frontend` | `ci.yml` |
-| `backend` | `ci.yml` |
-| `docker-build` | `ci.yml` (path-filtered) |
-| `Lint & Type Check` | `lint.yml` |
-| `E2E Tests` | `e2e.yml` |
-| `Security Checks` | `security.yml` |
+**Ruleset settings:**
+
+- Require a pull request before merging
+- Require 1 approval
+- Dismiss stale approvals when new commits are pushed
+- Require all review threads to be resolved
+- Require branches to be up to date before merging
+- Require status checks to pass (list below)
+- Block force pushes
+- Block branch deletion
+- Do not allow administrators to bypass
+
+**Required status checks.** Names must match the individual check-run
+(job-level) names GitHub reports in the Actions tab, not just the workflow
+title:
+
+| Required check name | Workflow file | Workflow `name:` |
+| ------------------- | -------- | -------- |
+| `frontend` | `ci.yml` | `CI/CD Pipeline` |
+| `backend` | `ci.yml` | `CI/CD Pipeline` |
+| `docker-build` | `ci.yml` (path-filtered) | `CI/CD Pipeline` |
+| `quality` (`Lint & Type Check`) | `lint.yml` | `Lint & Type Check` |
+| `test` (`E2E Tests`) | `e2e.yml` | `E2E Tests` |
+| `node-audit`, `python-audit`, `python-bandit`, `secret-scan` | `security.yml` | `Security Checks` |
+
+`docker-build` in `ci.yml` and the whole of `docker-build.yml` only run when
+`backend/**` or a `deployment/Dockerfile*` changes (path-filtered) — GitHub
+required checks block merge on a check that never runs unless the ruleset
+also has "Require branches to be up to date" satisfied by a skipped-not-failed
+check; verify this behaves as expected before relying on it, since a
+path-filtered required check can otherwise strand PRs that don't touch those
+paths.
+
+**`Vercel` / `Railway` checks:** these are **not** produced by any workflow
+in this repo. They only appear as required-check options if the Vercel and
+Railway GitHub Apps are installed on the repository and are posting commit
+statuses directly. Confirm both integrations are actually installed
+(Settings → Integrations → GitHub Apps) before adding them to the ruleset —
+requiring a check that never posts will make every PR permanently
+unmergeable.
 
 Production deploy (`deploy.yml`) is triggered only after `CI/CD Pipeline`
 succeeds on `main`; it must **not** run on a failing commit.
