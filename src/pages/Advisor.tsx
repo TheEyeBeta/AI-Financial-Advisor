@@ -279,10 +279,22 @@ const Advisor = () => {
     setHasReceivedFirstChunk(false);
   };
 
-  // Reset older-history state whenever the active conversation changes.
+  // Reset older-history state when the active conversation changes AND when
+  // the bounded window's oldest boundary shifts (e.g. new messages push it
+  // forward after older history was exhausted) — otherwise a gap could open
+  // between previously-loaded older history and the new window with no
+  // cursor left to re-fetch the dropped span.
+  const windowBoundaryId = currentChat?.messages[0]?.id;
   useEffect(() => {
     setOlderHistory({ messages: [], cursor: undefined });
     setIsLoadingOlder(false);
+  }, [currentChatId, windowBoundaryId]);
+
+  // Guards a load-older response that resolves after the user switched
+  // conversations — its messages must never merge into the new chat.
+  const currentChatIdRef = useRef(currentChatId);
+  useEffect(() => {
+    currentChatIdRef.current = currentChatId;
   }, [currentChatId]);
 
   // undefined = "use the cursor from the loaded window"; null = exhausted.
@@ -293,14 +305,17 @@ const Advisor = () => {
 
   const handleLoadOlderMessages = async () => {
     if (!currentChatId || !olderCursor) return;
+    const requestedChatId = currentChatId;
     setIsLoadingOlder(true);
     try {
-      const page = await chatApi.getMessagesPage(currentChatId, { cursor: olderCursor });
+      const page = await chatApi.getMessagesPage(requestedChatId, { cursor: olderCursor });
+      if (currentChatIdRef.current !== requestedChatId) return; // switched chats mid-flight
       setOlderHistory((previous) => ({
         messages: [...page.messages, ...previous.messages],
         cursor: page.nextCursor,
       }));
     } catch (error) {
+      if (currentChatIdRef.current !== requestedChatId) return;
       console.error("Failed to load earlier messages:", error);
       toast({
         title: "Could not load earlier messages",
@@ -308,7 +323,9 @@ const Advisor = () => {
         variant: "destructive",
       });
     } finally {
-      setIsLoadingOlder(false);
+      if (currentChatIdRef.current === requestedChatId) {
+        setIsLoadingOlder(false);
+      }
     }
   };
 

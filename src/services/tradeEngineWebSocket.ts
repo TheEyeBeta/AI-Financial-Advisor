@@ -3,6 +3,7 @@
  * Provides real-time price updates, trading signals, and engine status
  */
 
+import { apiClient } from '@/lib/api-client';
 import { getPythonApiUrl, getPythonWebSocketUrl } from '@/lib/env';
 import { supabase } from '@/lib/supabase';
 import {
@@ -122,20 +123,35 @@ class TradeEngineWebSocket {
    */
   private async fetchConnectionTicket(): Promise<string | null> {
     const { data: { session } } = await supabase.auth.getSession();
-    const accessToken = session?.access_token;
-    if (!accessToken) {
+    if (!session?.access_token) {
+      // Signed out — connect without credentials; the server rejects with 4401.
       return null;
     }
 
-    const response = await fetch(`${getPythonApiUrl()}/api/v1/ws/ticket`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${accessToken}` },
+    // apiClient injects the Supabase bearer token; baseUrl pins the ticket
+    // issuer to the same backend the WebSocket connects to. Our own
+    // reconnect loop handles retries, so the client-level retry is skipped.
+    const payload = await apiClient.post<{ ticket?: string }>('/api/v1/ws/ticket', undefined, {
+      baseUrl: getPythonApiUrl(),
+      skipRetry: true,
     });
-    if (!response.ok) {
-      throw new Error(`Ticket request failed with status ${response.status}`);
-    }
-    const payload: { ticket?: string } = await response.json();
     return payload.ticket ?? null;
+  }
+
+  /** Capped exponential backoff with ±20% jitter, shared by socket close and ticket failures. */
+  private scheduleReconnect(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.setConnectionState('disconnected');
+      return;
+    }
+    this.setConnectionState('reconnecting');
+    const exponential = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+    const capped = Math.min(exponential, this.maxReconnectDelay);
+    const jitter = capped * (0.8 + Math.random() * 0.4);
+    setTimeout(() => {
+      this.reconnectAttempts += 1;
+      this.connect();
+    }, Math.round(jitter));
   }
 
   connect(): void {
@@ -166,19 +182,8 @@ class TradeEngineWebSocket {
             this.stopPingInterval();
             this._connectionId = null;
 
-            if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnectAttempts) {
-              this.setConnectionState('reconnecting');
-              // Capped exponential backoff with ±20% jitter so a fleet of
-              // clients reconnecting after a backend blip doesn't synchronise
-              // and thunder the server.
-              const exponential = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
-              const capped = Math.min(exponential, this.maxReconnectDelay);
-              const jitter = capped * (0.8 + Math.random() * 0.4);
-              const delay = Math.round(jitter);
-              setTimeout(() => {
-                this.reconnectAttempts += 1;
-                this.connect();
-              }, delay);
+            if (event.code !== 1000) {
+              this.scheduleReconnect();
             } else {
               this.setConnectionState('disconnected');
             }
@@ -193,8 +198,10 @@ class TradeEngineWebSocket {
         }
       })
       .catch((error) => {
+        // Transient ticket-endpoint failures must not permanently kill the
+        // connection loop — retry with the same backoff as socket closes.
         console.error('[TradeEngine WS] Failed to obtain connection ticket:', error);
-        this.setConnectionState('disconnected');
+        this.scheduleReconnect();
       });
   }
 

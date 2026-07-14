@@ -73,6 +73,27 @@ describe('scrubValue', () => {
     };
     expect(scrubbed.nested.url).toBe('https://x.test/a');
   });
+
+  it('preserves Dates as ISO strings instead of collapsing them to {}', () => {
+    const when = new Date('2026-07-13T12:00:00Z');
+    expect(scrubValue({ when })).toEqual({ when: '2026-07-13T12:00:00.000Z' });
+  });
+
+  it('preserves Error name/message with pattern scrubbing applied', () => {
+    const scrubbed = scrubValue({ err: new Error(`boom for jane@x.com`) }) as { err: string };
+    expect(scrubbed.err).toContain('Error: boom');
+    expect(scrubbed.err).not.toContain('jane@x.com');
+  });
+
+  it('stringifies other non-plain objects rather than emptying them', () => {
+    const scrubbed = scrubValue({ m: new Map([['a', 1]]), s: new Set([1]) }) as {
+      m: string;
+      s: string;
+    };
+    expect(typeof scrubbed.m).toBe('string');
+    expect(typeof scrubbed.s).toBe('string');
+    expect(scrubbed.m).not.toEqual({});
+  });
 });
 
 describe('redactBreadcrumb', () => {

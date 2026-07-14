@@ -206,6 +206,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # DELIBERATELY PARTIAL. upgrade() uses IF NOT EXISTS because several of
+    # these objects may PREDATE this revision (created by the data pipeline or
+    # the manual sql/ scripts) and can hold production data — price/
+    # fundamentals/macro history, job logs, ranking history, digest
+    # headline/body/is_read values. This revision cannot tell which objects it
+    # actually created, so downgrade removes only what is safely recreatable
+    # (policies, grants, the derived materialized view) and RETAINS every
+    # data-bearing table/column — the same retention choice 0034 makes for its
+    # remediation audit table. Removing the retained objects is a deliberate
+    # human operation, never an automatic rollback side effect.
     op.execute(
         """
         REVOKE SELECT ON public.alembic_version FROM service_role;
@@ -213,19 +223,16 @@ def downgrade() -> None:
         DROP POLICY IF EXISTS "Admins can view all chat messages" ON ai.chat_messages;
         DROP POLICY IF EXISTS "Admins can view all chats" ON ai.chats;
 
+        -- Derived data only; rebuilt by upgrade() at any time.
         DROP MATERIALIZED VIEW IF EXISTS market.stock_returns_mv;
-
-        DROP TABLE IF EXISTS market.macro_snapshots;
-        DROP TABLE IF EXISTS market.stock_fundamentals_history;
-        DROP TABLE IF EXISTS market.stock_price_history;
-        DROP TABLE IF EXISTS market.stock_ranking_history;
-        DROP TABLE IF EXISTS core.job_run_logs;
 
         DROP POLICY IF EXISTS "Users can mark own intelligence digests as read"
             ON meridian.intelligence_digests;
-        ALTER TABLE meridian.intelligence_digests
-            DROP COLUMN IF EXISTS is_read,
-            DROP COLUMN IF EXISTS body,
-            DROP COLUMN IF EXISTS headline;
+
+        -- RETAINED (may predate this revision and/or hold production data):
+        -- core.job_run_logs, market.stock_ranking_history,
+        -- market.stock_price_history, market.stock_fundamentals_history,
+        -- market.macro_snapshots, and the meridian.intelligence_digests
+        -- headline/body/is_read columns.
         """
     )

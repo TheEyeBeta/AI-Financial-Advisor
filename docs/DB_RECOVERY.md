@@ -55,7 +55,8 @@ Downgrade status by revision:
 | Revisions | Downgrade |
 |-----------|-----------|
 | `0001`–`0031` (bootstrap/consolidation era) | Mostly `NotImplementedError` — these encode the *baseline*; "undoing" them has no meaningful target state. Recovery from a failed baseline install is **forward recovery** (below), never downgrade. |
-| `0032`–`0035` | Functional `downgrade()`, exercised against a disposable Postgres in review. Still data-destructive where they drop objects — production use requires the backup step above. |
+| `0032`–`0034` | Functional `downgrade()`, exercised against a disposable Postgres in review. Still data-destructive where they drop objects — production use requires the backup step above. |
+| `0035` | Deliberately **partial** `downgrade()`: removes only recreatable policies/grants and the derived materialized view. Data-bearing tables/columns it may not have created (pipeline tables, job logs, ranking history, digest columns) are retained — removing them is a human decision, never an automatic rollback side effect. |
 
 ## Forward recovery procedure (tested)
 

@@ -106,8 +106,9 @@ def decode_news_cursor(cursor: str) -> Tuple[str, str]:
 
 
 def _stable_item_id(raw: Dict[str, Any]) -> str:
+    # Non-cryptographic content fingerprint; sha256 keeps bandit (B324) honest.
     basis = f"{raw.get('url') or raw.get('headline') or raw.get('title') or ''}|{raw.get('published_at') or ''}"
-    return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(basis.encode("utf-8")).hexdigest()[:16]
 
 
 def normalize_news_items(raw_news: List[Dict[str, Any]]) -> List[NewsFeedItem]:

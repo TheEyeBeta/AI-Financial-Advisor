@@ -494,7 +494,10 @@ export function useTradeEngineNews(limit: number = 15) {
     queryFn: ({ pageParam }) => tradeEngineApi.getNews(limit, pageParam ?? undefined),
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.next_cursor,
-    refetchInterval: 60 * 1000, // Refetch every minute
+    // Background refetch of an infinite query re-fetches EVERY cached page
+    // sequentially, so polling cost would grow with pagination depth. Poll
+    // only while a single page is loaded; deeper reads refresh on remount.
+    refetchInterval: (q) => ((q.state.data?.pages.length ?? 0) > 1 ? false : 60 * 1000),
     staleTime: 30 * 1000, // Consider data fresh for 30 seconds
     retry: 2,
   });
@@ -510,7 +513,9 @@ export function useTradeEngineNews(limit: number = 15) {
       });
   }, [query.data]);
 
-  const latestPage = query.data?.pages[query.data.pages.length - 1];
+  // pages[0] holds the newest items — its flags describe current feed health;
+  // later pages are older history and would mislead after "load more".
+  const newestPage = query.data?.pages[0];
   return {
     data: items,
     isLoading: query.isLoading,
@@ -519,8 +524,8 @@ export function useTradeEngineNews(limit: number = 15) {
     hasNextPage: query.hasNextPage,
     isFetchingNextPage: query.isFetchingNextPage,
     /** True when the backend served a bounded-age cache after a provider failure. */
-    isStale: latestPage?.stale ?? false,
-    availabilityStatus: latestPage?.availability_status ?? 'ok',
+    isStale: newestPage?.stale ?? false,
+    availabilityStatus: newestPage?.availability_status ?? 'ok',
   };
 }
 

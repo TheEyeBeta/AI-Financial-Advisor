@@ -94,7 +94,20 @@ export function scrubValue(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => scrubValue(item, depth + 1));
   }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (value instanceof Error) {
+    return scrubText(`${value.name}: ${value.message}`);
+  }
   if (value !== null && typeof value === "object") {
+    // Non-plain objects (Map, Set, RegExp, class instances…) have no own
+    // enumerable entries to walk — Object.entries would silently collapse
+    // them to {}. Preserve a scrubbed string form instead.
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) {
+      return scrubText(String(value));
+    }
     const result: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
       result[key] = isSensitiveKey(key) ? REDACTED : scrubValue(entry, depth + 1);
