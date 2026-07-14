@@ -28,6 +28,22 @@ Use Alembic in [`backend/websearch_service/alembic`](../backend/websearch_servic
 | `fix_ai_chat_grants.sql` | `0018` | Replayed as-is. |
 | `verify_ai_chat_readiness.sql` | `0019` | Reference-only marker. Keep using it as a manual verification query bundle. |
 | `verify_runtime_schema_readiness.sql` | `0020` | Reference-only marker. Keep using it as a manual verification query bundle. |
+| `add_ranking_score_columns` (dashboard-era columns) | `0021`, `0022`, `0026` | `add_indicator_scores_to_trending_stocks.sql` and `add_signal_score_to_trending_stocks.sql` are covered by these revisions. Reference only. |
+| `fix_signup_trigger_and_policy.sql` | `0027` | Superseded — `core.handle_new_user()` and the `on_auth_user_created` trigger are canonical in `0027`. Reference only. |
+| `add_intelligence_digest_update_policy.sql` | `0035` | Folded in: digest `headline`/`body`/`is_read` columns and the user UPDATE policy. Reference only. |
+| `add_job_run_logs.sql` | `0035` | Folded in. Reference only. |
+| `add_ranking_history.sql` | `0035` | Folded in (`market.stock_ranking_history`). Reference only. |
+| `create_stock_returns_mv.sql` | `0035` | Folded in (`market.stock_returns_mv` + unique index + grants). Reference only. |
+| `add_admin_chat_rls_policies.sql` | `0035` | Folded in via `core.is_current_user_admin()`. Reference only. |
+| `add_intelligence_digest_update_policy.sql` dependencies (`stock_price_history`, `stock_fundamentals_history`, `macro_snapshots`) | `0035` | Canonical baselines added for the data-pipeline tables (previously dashboard-only). |
+
+## Status after issue #208
+
+As of revision `0035_consolidate_manual_fixes`, **every** file in this
+directory is reference-only. A blank database reaches the full secure schema
+with a single command (`alembic upgrade head`) — no Supabase SQL Editor steps.
+Readiness probes verify the deployed revision (`app/health_checks.py`).
+Backup/restore and forward-recovery procedures: `docs/DB_RECOVERY.md`.
 
 ## Operational Notes
 
