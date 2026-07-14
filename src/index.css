@@ -1,6 +1,5 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@config "../tailwind.config.ts";
 
 /* Professional Corporate Financial Theme
    Blues and grays for trust, green/red for gains/losses
