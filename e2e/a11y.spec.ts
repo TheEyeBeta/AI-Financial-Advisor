@@ -69,6 +69,14 @@ test.describe('Keyboard access', () => {
   test('sign-in is reachable and operable with keyboard only', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
 
+    // Wait for the app to actually mount before driving keys — otherwise the
+    // bounded Tab walk below can exhaust its budget against an empty <body>
+    // while the Vite dev bundle is still loading (browser-scoped race: seen
+    // reproducibly on chromium/mobile-chromium, not firefox).
+    await expect(page.getByRole('button', { name: /^sign in$/i }).first()).toBeVisible({
+      timeout: 10_000,
+    });
+
     // Tab until the sign-in button takes focus (bounded walk).
     let focusedSignIn = false;
     for (let i = 0; i < 25; i += 1) {
