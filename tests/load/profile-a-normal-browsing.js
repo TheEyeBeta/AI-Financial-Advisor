@@ -8,7 +8,7 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Counter, Rate, Trend } from "k6/metrics";
-import { dryRunOptions, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
+import { dryRunOptions, enforceMaxDuration, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
 import { buildHandleSummary } from "./lib/reporting.js";
 import {
   backendUrl,
@@ -20,7 +20,9 @@ import {
   isFailureResponse,
 } from "./helpers.js";
 
-const safety = enforceSafety({ requiresAi: false });
+const safety = enforceSafety({ requiresAi: false, requiresSupabase: true });
+const BROWSING_DURATION = __ENV.LOAD_TEST_DURATION || "5m";
+enforceMaxDuration({ "normal-browsing": BROWSING_DURATION }, safety.maxDurationSeconds);
 
 const status2xx = new Counter("http_status_2xx");
 const status4xx = new Counter("http_status_4xx");
@@ -35,7 +37,7 @@ export const options = isDryRun()
         normal_browsing: {
           executor: "constant-vus",
           vus: Math.min(30, safety.maxVUs),
-          duration: __ENV.LOAD_TEST_DURATION || "5m",
+          duration: BROWSING_DURATION,
           gracefulStop: "30s",
         },
       },
@@ -94,7 +96,7 @@ function browseAcademy(sbUrl, sbHeaders) {
 
 function browseStockViews(baseUrl, token) {
   return group("stock_views", () => {
-    const headers = jsonHeaders({ Authorization: `Bearer ${token}` });
+    const headers = loadTestHeaders(safety.runId, jsonHeaders({ Authorization: `Bearer ${token}` }));
     const ticker = __ENV.K6_TICKER || "AAPL";
     return [
       http.get(`${baseUrl}/api/stocks/ranking?limit=20`, { headers, tags: { scenario: "stock_ranking" } }),
@@ -119,7 +121,7 @@ export default function () {
       target_environment: safety.targetHost,
       test_profile: "Test A — Normal browsing",
       max_users: `30 (requested) / ${safety.maxVUs} (LOAD_TEST_MAX_VUS)`,
-      max_duration: __ENV.LOAD_TEST_DURATION || "5m",
+      max_duration: BROWSING_DURATION,
       ai_request_budget: "none — Test A has no AI calls",
       expected_request_volume: "~9 requests per VU per iteration (dashboard x3, academy x2, stock views x3, profile x1)",
       required_env_vars:

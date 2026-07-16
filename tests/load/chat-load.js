@@ -1,7 +1,7 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Counter, Rate, Trend } from "k6/metrics";
-import { dryRunOptions, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
+import { dryRunOptions, enforceMaxDuration, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
 import { buildHandleSummary } from "./lib/reporting.js";
 import {
   backendUrl,
@@ -17,6 +17,8 @@ import {
 // for the safety gate even though it's a simpler ad-hoc script than the
 // Test A-D profiles.
 const safety = enforceSafety({ requiresAi: true });
+const CHAT_DURATION = __ENV.LOAD_TEST_DURATION || "30s";
+enforceMaxDuration({ "chat-load": CHAT_DURATION }, safety.maxDurationSeconds);
 
 const chatLatency = new Trend("chat_latency_ms");
 const chatFailures = new Rate("chat_failures");
@@ -31,7 +33,7 @@ export const options = isDryRun()
         chat_load: {
           executor: "constant-vus",
           vus: Math.min(50, safety.maxVUs),
-          duration: __ENV.LOAD_TEST_DURATION || "30s",
+          duration: CHAT_DURATION,
           gracefulStop: "10s",
         },
       },
@@ -69,7 +71,7 @@ export default function () {
       target_environment: safety.targetHost,
       test_profile: "chat-load (ad-hoc)",
       max_users: `${Math.min(50, safety.maxVUs || 0)} (requested) / ${safety.maxVUs} (LOAD_TEST_MAX_VUS)`,
-      max_duration: __ENV.LOAD_TEST_DURATION || "30s",
+      max_duration: CHAT_DURATION,
       ai_request_budget: "1 AI request per VU iteration (paid — ALLOW_PAID_AI_LOAD required)",
       expected_request_volume: `~${Math.min(50, safety.maxVUs || 0)} requests per iteration cycle`,
       required_env_vars:

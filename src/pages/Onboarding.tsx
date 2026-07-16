@@ -309,7 +309,10 @@ const Onboarding = () => {
       )
       .eq("user_id", authUserId)
       .maybeSingle()
-      .then(({ data }) => {
+      .then(({ data, error }) => {
+        if (error) {
+          console.warn("Failed to load onboarding progress:", error);
+        }
         if (data) {
           setStep1((prev) => ({
             ...prev,
@@ -329,7 +332,9 @@ const Onboarding = () => {
             ...prev,
             emergency_fund_months:
               data.emergency_fund_months !== null && data.emergency_fund_months !== undefined
-                ? String(data.emergency_fund_months)
+                ? data.emergency_fund_months >= 6
+                  ? "6+"
+                  : String(data.emergency_fund_months)
                 : prev.emergency_fund_months,
             monthly_investable:
               data.monthly_investable !== null && data.monthly_investable !== undefined
@@ -362,13 +367,16 @@ const Onboarding = () => {
   const saveStepProgress = async (fields: Record<string, unknown>) => {
     if (!authUserId) return;
     try {
-      await coreDb.from("user_profiles").upsert(
+      const { error } = await coreDb.from("user_profiles").upsert(
         { user_id: authUserId, ...fields, updated_at: new Date().toISOString() },
         { onConflict: "user_id" }
       );
+      if (error) {
+        // Non-fatal: the user can still proceed and the final submit will
+        // persist everything. Surface nothing disruptive here.
+        console.warn("Failed to save onboarding step progress:", error);
+      }
     } catch (error) {
-      // Non-fatal: the user can still proceed and the final submit will
-      // persist everything. Surface nothing disruptive here.
       console.warn("Failed to save onboarding step progress:", error);
     }
   };

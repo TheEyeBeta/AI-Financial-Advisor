@@ -1,7 +1,7 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Rate, Trend } from "k6/metrics";
-import { dryRunOptions, enforceSafety, isDryRun, printDryRunPlan } from "./lib/safety.js";
+import { dryRunOptions, enforceMaxDuration, enforceSafety, isDryRun, printDryRunPlan } from "./lib/safety.js";
 import { buildHandleSummary } from "./lib/reporting.js";
 import {
   cleanupTradeJournalRows,
@@ -26,7 +26,21 @@ import {
 // that output. Prefer the Test A-D profile scripts (which use per-user
 // JWTs, never the service-role key) unless this specific direct-write path
 // is what you need to measure.
-const safety = enforceSafety({ requiresAi: false });
+const safety = enforceSafety({ requiresAi: false, requiresSupabase: true });
+const PAPER_TRADING_DURATION = __ENV.LOAD_TEST_DURATION || "30s";
+enforceMaxDuration({ "paper-trading-load": PAPER_TRADING_DURATION }, safety.maxDurationSeconds);
+
+// This profile additionally needs the service-role key and a dedicated test
+// user, on top of enforceSafety()'s generic checks — validated here (not
+// generically in safety.js, since only this one profile uses the
+// service-role direct-write path) so a misconfigured run is refused before
+// any request, not on the first VU's first iteration.
+if (!isDryRun() && (!__ENV.SUPABASE_SERVICE_ROLE_KEY || !__ENV.PAPER_TRADING_USER_ID)) {
+  throw new Error(
+    "Refusing to run — SUPABASE_SERVICE_ROLE_KEY and PAPER_TRADING_USER_ID are both required for the " +
+      "direct-write paper-trading profile.",
+  );
+}
 
 const paperTradingLatency = new Trend("paper_trading_latency_ms");
 const paperTradingFailures = new Rate("paper_trading_failures");
@@ -38,7 +52,7 @@ export const options = isDryRun()
         paper_trading_load: {
           executor: "constant-vus",
           vus: Math.min(100, safety.maxVUs),
-          duration: __ENV.LOAD_TEST_DURATION || "30s",
+          duration: PAPER_TRADING_DURATION,
           gracefulStop: "10s",
         },
       },
@@ -69,7 +83,7 @@ export default function () {
       target_environment: safety.targetHost,
       test_profile: "paper-trading-load (ad-hoc, service-role direct write)",
       max_users: `${Math.min(100, safety.maxVUs || 0)} (requested) / ${safety.maxVUs} (LOAD_TEST_MAX_VUS)`,
-      max_duration: __ENV.LOAD_TEST_DURATION || "30s",
+      max_duration: PAPER_TRADING_DURATION,
       ai_request_budget: "none",
       expected_request_volume: `~${Math.min(100, safety.maxVUs || 0) * 3} requests per iteration cycle (buy+sell+cleanup)`,
       required_env_vars:

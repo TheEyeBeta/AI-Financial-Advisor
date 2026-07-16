@@ -12,7 +12,7 @@ not treat any number in this directory as a real measurement. No
 
 ## What's here
 
-```
+```text
 tests/load/
   lib/
     safety.js        — the safety gate every script imports and calls first
@@ -47,7 +47,8 @@ scripts/run-load-test.sh search
 scripts/run-load-test.sh paper-trading
 
 # Provision/cleanup dedicated test users (separate from k6, uses service-role key):
-node tests/load/setup/manage-test-users.mjs setup   --run-id "$LOAD_TEST_RUN_ID" --count 150
+LOAD_TEST_USER_PASSWORD="$(openssl rand -base64 24)" \
+  node tests/load/setup/manage-test-users.mjs setup --run-id "$LOAD_TEST_RUN_ID" --count 150
 node tests/load/setup/manage-test-users.mjs cleanup --run-id "$LOAD_TEST_RUN_ID" --dry-run
 node tests/load/setup/manage-test-users.mjs cleanup --run-id "$LOAD_TEST_RUN_ID"
 ```
@@ -78,6 +79,7 @@ DRY_RUN=true summary if the binary isn't present).
 | `SUPABASE_URL`, `SUPABASE_ANON_KEY` | Tests A-D | Supabase REST reads |
 | `SUPABASE_SERVICE_ROLE_KEY`, `PAPER_TRADING_USER_ID` | `paper-trading` only | Direct-write path — **never printed, never sent to k6's own log/debug output; keep `--http-debug` off** |
 | `LOAD_TEST_USER_EMAIL_DOMAIN` | `manage-test-users.mjs` | Must end in `.invalid` or `.test` (RFC 2606) — script refuses otherwise |
+| `LOAD_TEST_USER_PASSWORD` | `manage-test-users.mjs setup` | Never a CLI arg — a secret, operator-supplied password for provisioned test accounts; script refuses to run without it |
 | `LOAD_TEST_ENVIRONMENT_LABEL`, `LOAD_TEST_GIT_SHA` | reporting | Labels embedded in generated reports |
 | `LOAD_TEST_DURATION` | optional | Overrides profile default scenario duration (e.g. `10m`, `4h`) |
 | `DRY_RUN=true` | optional | Validation mode — see below |

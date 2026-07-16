@@ -13,7 +13,14 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Counter, Rate, Trend } from "k6/metrics";
-import { dryRunOptions, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
+import {
+  dryRunOptions,
+  enforceMaxDuration,
+  enforceSafety,
+  isDryRun,
+  loadTestHeaders,
+  printDryRunPlan,
+} from "./lib/safety.js";
 import { buildHandleSummary } from "./lib/reporting.js";
 import {
   backendUrl,
@@ -27,34 +34,12 @@ import {
   supabaseUrl,
 } from "./helpers.js";
 
-const safety = enforceSafety({ requiresAi: true });
+const safety = enforceSafety({ requiresAi: true, requiresSupabase: true });
 
 const DEFAULT_DURATION = "4h";
 const requestedDuration = __ENV.LOAD_TEST_DURATION || DEFAULT_DURATION;
-
-function durationToSeconds(value) {
-  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec((value || "").trim());
-  if (!match) return null;
-  const amount = Number(match[1]);
-  const unit = match[2];
-  const multiplier = { ms: 0.001, s: 1, m: 60, h: 3600 }[unit];
-  return amount * multiplier;
-}
-
-const requestedSeconds = durationToSeconds(requestedDuration);
-let durationError = null;
-if (requestedSeconds === null) {
-  durationError = `LOAD_TEST_DURATION="${requestedDuration}" is not a valid k6 duration (e.g. "4h", "30m").`;
-} else if (requestedSeconds > safety.maxDurationSeconds) {
-  durationError =
-    `Requested soak duration (${requestedDuration} = ${requestedSeconds}s) exceeds ` +
-    `LOAD_TEST_MAX_DURATION_SECONDS (${safety.maxDurationSeconds}s). Raise the max explicitly if this is intended.`;
-}
-// Dry-run must describe this problem, not crash on it — same reasoning as
-// enforceSafety()'s dry-run tolerance.
-if (durationError && !isDryRun()) {
-  throw new Error(durationError);
-}
+const durationFailures = enforceMaxDuration({ "soak duration": requestedDuration }, safety.maxDurationSeconds);
+const durationError = durationFailures.length > 0 ? durationFailures.join(" ") : null;
 
 const soakFailures = new Rate("soak_failures");
 const chatFirstTokenMs = new Trend("chat_first_token_ms");
@@ -62,8 +47,10 @@ const chatCompletionMs = new Trend("chat_completion_ms");
 const chatFailures = new Rate("chat_failures");
 const status5xx = new Counter("http_status_5xx");
 
+// aiVUs is reserved first so the two concurrently-running scenarios never
+// together exceed the configured LOAD_TEST_MAX_VUS cap.
 const totalVUs = Math.min(Number(__ENV.K6_SOAK_VUS || 20), safety.maxVUs);
-const aiVUs = Math.max(1, Math.min(5, totalVUs));
+const aiVUs = Math.max(1, Math.min(5, totalVUs - 1, totalVUs));
 const mixedVUs = Math.max(1, totalVUs - aiVUs);
 
 function dryRunPlan() {
@@ -134,7 +121,7 @@ export function soakTraffic() {
       tags: { scenario: "soak_positions" },
     }),
     http.get(`${baseUrl}/api/stocks/ranking?limit=20`, {
-      headers: jsonHeaders({ Authorization: `Bearer ${token}` }),
+      headers: loadTestHeaders(safety.runId, jsonHeaders({ Authorization: `Bearer ${token}` })),
       tags: { scenario: "soak_ranking" },
     }),
   ]);

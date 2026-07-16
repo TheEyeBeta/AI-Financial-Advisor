@@ -9,7 +9,7 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Counter, Rate, Trend } from "k6/metrics";
-import { dryRunOptions, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
+import { dryRunOptions, enforceMaxDuration, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
 import { buildHandleSummary } from "./lib/reporting.js";
 import {
   backendUrl,
@@ -23,7 +23,12 @@ import {
   supabaseUrl,
 } from "./helpers.js";
 
-const safety = enforceSafety({ requiresAi: true });
+const safety = enforceSafety({ requiresAi: true, requiresSupabase: true });
+const BUSY_DURATION = __ENV.LOAD_TEST_DURATION || "10m";
+enforceMaxDuration(
+  { "busy-beta mixed_traffic": BUSY_DURATION, "busy-beta ai_traffic": BUSY_DURATION },
+  safety.maxDurationSeconds,
+);
 
 const mixedFailures = new Rate("mixed_failures");
 const chatFirstTokenMs = new Trend("chat_first_token_ms");
@@ -33,8 +38,15 @@ const chatRateLimited = new Counter("chat_rate_limited");
 const status5xx = new Counter("http_status_5xx");
 const status429 = new Counter("http_status_429");
 
-const aiVUs = Math.max(1, Math.min(20, Number(__ENV.K6_AI_CONCURRENCY || 15)));
+// Both scenarios run concurrently and must share the single LOAD_TEST_MAX_VUS
+// budget — aiVUs is clamped to leave room for at least 1 mixed-traffic VU
+// (when totalVUs allows it) rather than being sized independently, which
+// previously let mixedVUs + aiVUs exceed the configured cap.
 const totalVUs = Math.min(75, safety.maxVUs);
+const aiVUs = Math.max(
+  1,
+  Math.min(20, Number(__ENV.K6_AI_CONCURRENCY || 15), Math.max(1, totalVUs - 1)),
+);
 const mixedVUs = Math.max(1, totalVUs - aiVUs);
 
 function dryRunPlan() {
@@ -42,7 +54,7 @@ function dryRunPlan() {
     target_environment: safety.targetHost,
     test_profile: "Test B — Busy beta period",
     max_users: `${mixedVUs} mixed + ${aiVUs} AI = ${mixedVUs + aiVUs} total (requested) / ${safety.maxVUs} (LOAD_TEST_MAX_VUS)`,
-    max_duration: __ENV.LOAD_TEST_DURATION || "10m",
+    max_duration: BUSY_DURATION,
     ai_request_budget: `${aiVUs} concurrent AI VUs, ~1 request per VU per ~2s iteration cycle (paid — ALLOW_PAID_AI_LOAD required)`,
     expected_request_volume: `mixed: ~3 requests per VU per iteration; AI: ~1 request per AI VU per iteration`,
     required_env_vars:
@@ -62,14 +74,14 @@ export const options = isDryRun()
         mixed_traffic: {
           executor: "constant-vus",
           vus: mixedVUs,
-          duration: __ENV.LOAD_TEST_DURATION || "10m",
+          duration: BUSY_DURATION,
           exec: "mixedTraffic",
           gracefulStop: "30s",
         },
         ai_traffic: {
           executor: "constant-vus",
           vus: aiVUs,
-          duration: __ENV.LOAD_TEST_DURATION || "10m",
+          duration: BUSY_DURATION,
           exec: "aiTraffic",
           gracefulStop: "30s",
         },
@@ -104,15 +116,15 @@ export function mixedTraffic() {
   const responses = group("mixed", () => [
     http.get(`${sbUrl}/rest/v1/open_positions?select=id,symbol&limit=20`, {
       headers: sbHeaders,
-      tags: { scenario: "mixed_positions" },
+      tags: { endpoint: "mixed_positions" },
     }),
     http.get(`${baseUrl}/api/stocks/ranking?limit=20`, {
-      headers: jsonHeaders({ Authorization: `Bearer ${token}` }),
-      tags: { scenario: "mixed_ranking" },
+      headers: loadTestHeaders(safety.runId, jsonHeaders({ Authorization: `Bearer ${token}` })),
+      tags: { endpoint: "mixed_ranking" },
     }),
     http.get(`${baseUrl}/api/news?limit=10`, {
-      headers: jsonHeaders({ Authorization: `Bearer ${token}` }),
-      tags: { scenario: "mixed_news" },
+      headers: loadTestHeaders(safety.runId, jsonHeaders({ Authorization: `Bearer ${token}` })),
+      tags: { endpoint: "mixed_news" },
     }),
   ]);
 

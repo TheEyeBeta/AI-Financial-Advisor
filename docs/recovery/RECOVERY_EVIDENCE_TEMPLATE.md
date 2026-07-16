@@ -15,7 +15,7 @@ never edit this template in place with real results.
 | Git SHA of the app version tested | |
 | Alembic revision at backup time | |
 | Alembic revision at head (drill time) | |
-| Overall result | RPO met: ___ / RTO met: ___ / Data integrity clean: ___ |
+| Overall result | RPO met: (yes/no) / RTO met: (yes/no) / Data integrity clean: (yes/no) |
 
 ## 1. Backup verification
 
@@ -49,32 +49,32 @@ Paste the actual output of every query in
 `data_integrity_verification_queries.sql`, not just pass/fail:
 
 ### Users
-```
+```text
 (paste query output)
 ```
 
 ### Profiles
-```
+```text
 (paste query output)
 ```
 
 ### Chats
-```
+```text
 (paste query output)
 ```
 
 ### Paper trades
-```
+```text
 (paste query output)
 ```
 
 ### Academy progress
-```
+```text
 (paste query output)
 ```
 
 ### Audit records
-```
+```text
 (paste query output, plus note on whether the audit log file itself was
 separately verified — see the note in
 data_integrity_verification_queries.sql section 6)

@@ -1,7 +1,7 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Rate, Trend } from "k6/metrics";
-import { dryRunOptions, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
+import { dryRunOptions, enforceMaxDuration, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
 import { buildHandleSummary } from "./lib/reporting.js";
 import {
   backendUrl,
@@ -13,6 +13,8 @@ import {
 } from "./helpers.js";
 
 const safety = enforceSafety({ requiresAi: false });
+const SEARCH_DURATION = __ENV.LOAD_TEST_DURATION || "30s";
+enforceMaxDuration({ "search-load": SEARCH_DURATION }, safety.maxDurationSeconds);
 
 const searchLatency = new Trend("search_latency_ms");
 const searchFailures = new Rate("search_failures");
@@ -24,7 +26,7 @@ export const options = isDryRun()
         search_load: {
           executor: "constant-vus",
           vus: Math.min(200, safety.maxVUs),
-          duration: __ENV.LOAD_TEST_DURATION || "30s",
+          duration: SEARCH_DURATION,
           gracefulStop: "10s",
         },
       },
@@ -59,7 +61,7 @@ export default function () {
       target_environment: safety.targetHost,
       test_profile: "search-load (ad-hoc)",
       max_users: `${Math.min(200, safety.maxVUs || 0)} (requested) / ${safety.maxVUs} (LOAD_TEST_MAX_VUS)`,
-      max_duration: __ENV.LOAD_TEST_DURATION || "30s",
+      max_duration: SEARCH_DURATION,
       ai_request_budget: "none — search only, no AI provider calls",
       expected_request_volume: `~${Math.min(200, safety.maxVUs || 0)} requests per iteration cycle`,
       required_env_vars:

@@ -12,9 +12,19 @@ function truthy(value) {
   return ["1", "true", "yes", "on"].includes((value || "").trim().toLowerCase());
 }
 
+// https:// only — every request here carries a bearer token or the
+// service-role key, and an http:// target would send those in plaintext.
 function parseHostname(url) {
-  const match = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/([^/:?#]+)/.exec((url || "").trim());
+  const match = /^https:\/\/([^/:?#]+)/.exec((url || "").trim());
   return match ? match[1].toLowerCase() : "";
+}
+
+export function durationToSeconds(value) {
+  const match = /^(\d+(?:\.\d+)?)(ms|s|m|h)$/.exec((value || "").trim());
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const multiplier = { ms: 0.001, s: 1, m: 60, h: 3600 }[match[2]];
+  return amount * multiplier;
 }
 
 function parseList(raw) {
@@ -28,9 +38,16 @@ function parseList(raw) {
  * @param {object} options
  * @param {boolean} [options.requiresAi] - this scenario calls a paid AI provider
  * @param {boolean} [options.requiresFailureInjection] - this scenario induces a failure
+ * @param {boolean} [options.requiresSupabase] - this scenario also talks to Supabase directly
+ *   (REST reads with the anon key, or writes with the service-role key) — its host must be
+ *   validated too, not just BACKEND_URL, or a misconfigured SUPABASE_URL bypasses the safety net.
  * @returns {{ runId: string, targetHost: string, maxVUs: number, maxDurationSeconds: number }}
  */
-export function enforceSafety({ requiresAi = false, requiresFailureInjection = false } = {}) {
+export function enforceSafety({
+  requiresAi = false,
+  requiresFailureInjection = false,
+  requiresSupabase = false,
+} = {}) {
   const failures = [];
 
   if (!truthy(__ENV.LOAD_TEST_CONFIRMED)) {
@@ -41,21 +58,11 @@ export function enforceSafety({ requiresAi = false, requiresFailureInjection = f
     );
   }
 
-  const backendUrl = (__ENV.BACKEND_URL || "").trim();
-  const targetHost = parseHostname(backendUrl);
-  if (!targetHost) {
-    failures.push("BACKEND_URL must be set to a valid https:// URL.");
-  }
-
   const allowedHosts = parseList(__ENV.LOAD_TEST_ALLOWED_HOSTS);
   if (allowedHosts.length === 0) {
     failures.push(
       "LOAD_TEST_ALLOWED_HOSTS is required (comma-separated hostnames). Fails closed: an empty " +
         "allowlist refuses every target, it does not mean 'allow everything'.",
-    );
-  } else if (targetHost && !allowedHosts.includes(targetHost)) {
-    failures.push(
-      `Target host "${targetHost}" is not in LOAD_TEST_ALLOWED_HOSTS (${allowedHosts.join(", ")}).`,
     );
   }
 
@@ -66,11 +73,34 @@ export function enforceSafety({ requiresAi = false, requiresFailureInjection = f
         "frontend and backend). This repo has no committed source of truth for the production hostname " +
         "— you must state it explicitly so this check has something to compare against. Fails closed.",
     );
-  } else if (targetHost && productionHosts.includes(targetHost)) {
-    failures.push(
-      `Target host "${targetHost}" is listed in LOAD_TEST_PRODUCTION_HOSTNAMES. Refusing to run — ` +
-        "load tests must never target production.",
-    );
+  }
+
+  function checkTarget(envVarName, rawUrl, label) {
+    const targetHost = parseHostname(rawUrl);
+    if (!targetHost) {
+      failures.push(`${envVarName} must be set to a valid https:// URL.`);
+      return "";
+    }
+    if (allowedHosts.length > 0 && !allowedHosts.includes(targetHost)) {
+      failures.push(
+        `${label} host "${targetHost}" is not in LOAD_TEST_ALLOWED_HOSTS (${allowedHosts.join(", ")}).`,
+      );
+    }
+    if (productionHosts.length > 0 && productionHosts.includes(targetHost)) {
+      failures.push(
+        `${label} host "${targetHost}" is listed in LOAD_TEST_PRODUCTION_HOSTNAMES. Refusing to run — ` +
+          "load tests must never target production.",
+      );
+    }
+    return targetHost;
+  }
+
+  const backendUrl = (__ENV.BACKEND_URL || "").trim();
+  const targetHost = checkTarget("BACKEND_URL", backendUrl, "Backend");
+
+  if (requiresSupabase) {
+    const supabaseUrl = (__ENV.SUPABASE_URL || "").trim();
+    checkTarget("SUPABASE_URL", supabaseUrl, "Supabase");
   }
 
   if (!truthy(__ENV.LOAD_TEST_ISOLATED_INFRA_CONFIRMED)) {
@@ -152,6 +182,48 @@ export function enforceSafety({ requiresAi = false, requiresFailureInjection = f
       "configuration this script expects without generating any load.",
   ].join("\n");
   throw new Error(message);
+}
+
+/**
+ * Validates one or more requested scenario durations against
+ * LOAD_TEST_MAX_DURATION_SECONDS. LOAD_TEST_MAX_DURATION_SECONDS is
+ * documented as a hard cap — this is what actually enforces that, since
+ * enforceSafety() only checks that the env var itself is a positive number,
+ * not that any given profile's requested duration stays under it.
+ *
+ * @param {Record<string, string>} requestedDurations - label -> k6 duration string (e.g. "10m", "4h")
+ * @param {number} maxDurationSeconds - from enforceSafety()'s result
+ * @returns {string[]} failure messages (empty if all durations are within the cap)
+ */
+export function checkMaxDuration(requestedDurations, maxDurationSeconds) {
+  const failures = [];
+  for (const [label, value] of Object.entries(requestedDurations)) {
+    const seconds = durationToSeconds(value);
+    if (seconds === null) {
+      failures.push(`${label} duration "${value}" is not a valid k6 duration (e.g. "4h", "30m").`);
+      continue;
+    }
+    if (seconds > maxDurationSeconds) {
+      failures.push(
+        `${label} duration (${value} = ${seconds}s) exceeds LOAD_TEST_MAX_DURATION_SECONDS ` +
+          `(${maxDurationSeconds}s). Raise the max explicitly if this is intended.`,
+      );
+    }
+  }
+  return failures;
+}
+
+/**
+ * Runs checkMaxDuration() and throws (or, in dry-run mode, returns the
+ * failures instead of throwing) — the same dry-run-tolerant pattern as
+ * enforceSafety().
+ */
+export function enforceMaxDuration(requestedDurations, maxDurationSeconds) {
+  const failures = checkMaxDuration(requestedDurations, maxDurationSeconds);
+  if (failures.length === 0 || isDryRun()) return failures;
+  throw new Error(
+    ["Refusing to run — duration checks failed:", ...failures.map((f, i) => `  ${i + 1}. ${f}`)].join("\n"),
+  );
 }
 
 /** Headers every request in a load test should carry, for traceability. */

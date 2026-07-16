@@ -70,7 +70,7 @@ project first.
      `schema_revision.status: "ok"`.
 
 6. **Run data-integrity verification** — see
-   `DATA_INTEGRITY_VERIFICATION_QUERIES.sql` for the exact queries covering
+   `data_integrity_verification_queries.sql` for the exact queries covering
    users, profiles, chats, paper trades, academy progress, and audit
    records (the six categories the readiness spec names explicitly).
 

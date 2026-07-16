@@ -9,7 +9,15 @@
 import http from "k6/http";
 import { check, group, sleep } from "k6";
 import { Counter, Rate, Trend } from "k6/metrics";
-import { dryRunOptions, enforceSafety, isDryRun, loadTestHeaders, printDryRunPlan } from "./lib/safety.js";
+import {
+  dryRunOptions,
+  durationToSeconds,
+  enforceMaxDuration,
+  enforceSafety,
+  isDryRun,
+  loadTestHeaders,
+  printDryRunPlan,
+} from "./lib/safety.js";
 import { buildHandleSummary } from "./lib/reporting.js";
 import {
   backendUrl,
@@ -23,7 +31,18 @@ import {
   supabaseUrl,
 } from "./helpers.js";
 
-const safety = enforceSafety({ requiresAi: true });
+const safety = enforceSafety({ requiresAi: true, requiresSupabase: true });
+
+const HOLD_DURATION = __ENV.LOAD_TEST_DURATION || "3m";
+const holdSeconds = durationToSeconds(HOLD_DURATION);
+enforceMaxDuration(
+  {
+    "burst arrival_burst (60s ramp + hold + 30s ramp-down)":
+      holdSeconds === null ? HOLD_DURATION : `${60 + holdSeconds + 30}s`,
+    "burst ai_burst maxDuration": "15s",
+  },
+  safety.maxDurationSeconds,
+);
 
 const burstFailures = new Rate("burst_failures");
 const chatFirstTokenMs = new Trend("chat_first_token_ms");
@@ -32,14 +51,17 @@ const chatFailures = new Rate("chat_failures");
 const status5xx = new Counter("http_status_5xx");
 const status429 = new Counter("http_status_429");
 
-const burstVUs = Math.min(100, safety.maxVUs);
+// ai_burst's VUs are reserved first so the two concurrently-running
+// scenarios never together exceed LOAD_TEST_MAX_VUS.
+const aiBurstVUs = Math.min(30, safety.maxVUs);
+const burstVUs = Math.min(100, Math.max(1, safety.maxVUs - aiBurstVUs));
 
 function dryRunPlan() {
   printDryRunPlan({
     target_environment: safety.targetHost,
     test_profile: "Test C — Burst",
-    max_users: `${burstVUs} arriving over 60s (requested) / ${safety.maxVUs} (LOAD_TEST_MAX_VUS)`,
-    max_duration: `60s ramp + ${__ENV.LOAD_TEST_DURATION || "3m"} hold + 30s ramp-down`,
+    max_users: `${burstVUs} arriving over 60s + ${aiBurstVUs} AI burst VUs = ${burstVUs + aiBurstVUs} total (requested) / ${safety.maxVUs} (LOAD_TEST_MAX_VUS)`,
+    max_duration: `60s ramp + ${HOLD_DURATION} hold + 30s ramp-down`,
     ai_request_budget: "30 AI requests within 15 seconds (paid — ALLOW_PAID_AI_LOAD required)",
     expected_request_volume: `arrival burst: ~2 requests per VU per iteration; AI burst: exactly 30 requests total`,
     required_env_vars:
@@ -62,7 +84,7 @@ export const options = isDryRun()
           startVUs: 0,
           stages: [
             { duration: "60s", target: burstVUs }, // 100 users arrive within 60s
-            { duration: __ENV.LOAD_TEST_DURATION || "3m", target: burstVUs }, // hold
+            { duration: HOLD_DURATION, target: burstVUs }, // hold
             { duration: "30s", target: 0 },
           ],
           gracefulRampDown: "15s",
@@ -70,7 +92,7 @@ export const options = isDryRun()
         ai_burst: {
           executor: "shared-iterations",
           exec: "aiBurst",
-          vus: Math.min(30, safety.maxVUs),
+          vus: aiBurstVUs,
           iterations: 30, // 30 AI requests
           maxDuration: "15s", // initiated within 15 seconds
         },
@@ -105,7 +127,7 @@ export function arrivalBurst() {
       tags: { scenario: "burst_profile" },
     }),
     http.get(`${baseUrl}/api/stocks/ranking?limit=10`, {
-      headers: jsonHeaders({ Authorization: `Bearer ${token}` }),
+      headers: loadTestHeaders(safety.runId, jsonHeaders({ Authorization: `Bearer ${token}` })),
       tags: { scenario: "burst_ranking" },
     }),
   ]);

@@ -2,13 +2,17 @@
 
 **This directory does not execute anything.** Per the readiness spec, Test E
 must never run automatically. Every scenario below requires a human to
-perform the injection step manually against infrastructure they control, and
-`ALLOW_FAILURE_INJECTION=true` is a precondition check
-(`tests/load/lib/safety.js`) for any k6 traffic generated *during* an
-injection window — it does not, and cannot, perform the injection itself.
-None of these scenarios have real Railway/Redis/Supabase admin access from
-this repo or from an agent session; the steps below are written for whoever
-does have that access.
+perform the injection step manually against infrastructure they control.
+`ALLOW_FAILURE_INJECTION=true` is a manual checklist prerequisite for these
+procedures — it is not enforced by any preflight check on the ordinary
+background traffic you run alongside an injection (e.g. Test A). It exists
+so a script that *does* deliberately induce a failure
+(`enforceSafety({ requiresFailureInjection: true })` in
+`tests/load/lib/safety.js`) refuses to run without it; it does not, and
+cannot, perform the injection itself, and no such script exists in this
+directory today. None of these scenarios have real Railway/Redis/Supabase
+admin access from this repo or from an agent session; the steps below are
+written for whoever does have that access.
 
 **Never run any of these against production or a target sharing production
 Supabase/Redis/AI-quota** — same rule as Tests A-D
@@ -16,8 +20,11 @@ Supabase/Redis/AI-quota** — same rule as Tests A-D
 
 ## Shared preconditions (all scenarios)
 
-1. `LOAD_TEST_CONFIRMED=true`, `LOAD_TEST_ISOLATED_INFRA_CONFIRMED=true`,
-   `ALLOW_FAILURE_INJECTION=true` — same as every other profile.
+1. `LOAD_TEST_CONFIRMED=true`, `LOAD_TEST_ISOLATED_INFRA_CONFIRMED=true` are
+   enforced the same way as every other profile. `ALLOW_FAILURE_INJECTION=true`
+   is a manual checklist item for this procedure specifically — confirm it's
+   set (and true) before starting, but note it is not checked by the
+   background-traffic script (e.g. Test A) you run alongside it.
 2. Background load running so there's something to observe degrading and
    recovering — normally Test A (`scripts/run-load-test.sh a`) in a second
    terminal, started *before* the injection.

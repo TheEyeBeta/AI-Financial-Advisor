@@ -25,12 +25,14 @@ import { createClient } from "@supabase/supabase-js";
 
 const USAGE = `
 Usage:
-  node manage-test-users.mjs setup   --run-id <id> --count <n> [--password <pw>]
+  node manage-test-users.mjs setup   --run-id <id> --count <n>
   node manage-test-users.mjs cleanup --run-id <id> [--dry-run]
 
 Required env:
   SUPABASE_URL
   SUPABASE_SERVICE_ROLE_KEY
+  LOAD_TEST_USER_PASSWORD       (setup only — never a CLI arg, so it never lands in shell
+                                 history, process listings, or reports)
   LOAD_TEST_USER_EMAIL_DOMAIN   (must NOT resolve to a real mailbox domain; default: k6.invalid)
 `;
 
@@ -71,11 +73,16 @@ async function setupUsers({ runId, count, password, client, domain }) {
     console.error("setup requires --run-id");
     process.exit(1);
   }
-  const n = Number(count || 10);
+  const n = Number(count);
+  if (!Number.isInteger(n) || n <= 0) {
+    console.error(`--count must be a positive integer (got "${count}")`);
+    process.exit(1);
+  }
   console.log(`Provisioning ${n} test users for run ${runId} (idempotent — safe to re-run).`);
 
   const created = [];
   const tokens = [];
+  let hadErrors = false;
 
   for (let i = 1; i <= n; i += 1) {
     const email = testUserEmail(domain, runId, i);
@@ -85,7 +92,7 @@ async function setupUsers({ runId, count, password, client, domain }) {
     // than an error — safe to re-run this command for the same run ID.
     const { data, error } = await client.auth.admin.createUser({
       email,
-      password: password || `LoadTest-${runId}-${i}!`,
+      password,
       email_confirm: true,
       user_metadata: { load_test_run_id: runId, load_test: true },
     });
@@ -96,6 +103,7 @@ async function setupUsers({ runId, count, password, client, domain }) {
         continue;
       }
       console.error(`  [error] ${email}: ${error.message}`);
+      hadErrors = true;
       continue;
     }
 
@@ -122,6 +130,11 @@ async function setupUsers({ runId, count, password, client, domain }) {
       "each test account in via the normal password-grant flow from a trusted, non-k6 process, then pass " +
       "the resulting short-lived JWTs to k6 — never the service-role key itself.",
   );
+
+  if (hadErrors) {
+    console.error(`\nOne or more users failed to provision for run ${runId} — see [error] lines above.`);
+    process.exitCode = 1;
+  }
 }
 
 async function cleanupUsers({ runId, dryRun, client, domain }) {
@@ -138,12 +151,11 @@ async function cleanupUsers({ runId, dryRun, client, domain }) {
   const prefix = `loadtest-${runId}-`;
   const suffix = `@${domain}`;
 
+  // Collect all matches across every page first, then delete afterwards —
+  // deleting mid-pagination shifts later matches into earlier pages and
+  // causes `page += 1` to silently skip accounts.
+  const matches = [];
   let page = 1;
-  let matched = 0;
-  let deleted = 0;
-
-  // Supabase's admin listUsers is paginated; walk pages looking for exact
-  // prefix+suffix matches only.
   while (true) {
     const { data, error } = await client.auth.admin.listUsers({ page, perPage: 200 });
     if (error) {
@@ -156,29 +168,34 @@ async function cleanupUsers({ runId, dryRun, client, domain }) {
       const email = (user.email || "").toLowerCase();
       if (!email.startsWith(prefix) || !email.endsWith(suffix)) continue;
       if (user.user_metadata?.load_test_run_id !== runId) continue; // belt-and-braces double match
-
-      matched += 1;
-      if (dryRun) {
-        console.log(`  [would delete] ${email} (${user.id})`);
-        continue;
-      }
-      const { error: deleteError } = await client.auth.admin.deleteUser(user.id);
-      if (deleteError) {
-        console.error(`  [error] failed to delete ${email}: ${deleteError.message}`);
-        continue;
-      }
-      deleted += 1;
-      console.log(`  [deleted] ${email}`);
+      matches.push({ email, id: user.id });
     }
 
     if (data.users.length < 200) break;
     page += 1;
   }
 
+  let deleted = 0;
+  let hadErrors = false;
+  for (const { email, id } of matches) {
+    if (dryRun) {
+      console.log(`  [would delete] ${email} (${id})`);
+      continue;
+    }
+    const { error: deleteError } = await client.auth.admin.deleteUser(id);
+    if (deleteError) {
+      console.error(`  [error] failed to delete ${email}: ${deleteError.message}`);
+      hadErrors = true;
+      continue;
+    }
+    deleted += 1;
+    console.log(`  [deleted] ${email}`);
+  }
+
   console.log(
-    `\nMatched ${matched} users for run ${runId}${dryRun ? "" : `, deleted ${deleted}`}.`,
+    `\nMatched ${matches.length} users for run ${runId}${dryRun ? "" : `, deleted ${deleted}`}.`,
   );
-  if (matched === 0) {
+  if (matches.length === 0) {
     console.log("Nothing matched this run ID — either already cleaned up, or setup never ran with it.");
   }
   console.log(
@@ -186,6 +203,11 @@ async function cleanupUsers({ runId, dryRun, client, domain }) {
       "rows via existing FK ON DELETE CASCADE per the schema). It never issues a broad DELETE against " +
       "any application table, and it never touches a user whose email doesn't match this run's prefix.",
   );
+
+  if (hadErrors) {
+    console.error(`\nOne or more users failed to delete for run ${runId} — see [error] lines above.`);
+    process.exitCode = 1;
+  }
 }
 
 async function main() {
@@ -213,7 +235,8 @@ async function main() {
   });
 
   if (args.command === "setup") {
-    await setupUsers({ runId: args.runId, count: args.count, password: args.password, client, domain });
+    const password = requireEnv("LOAD_TEST_USER_PASSWORD");
+    await setupUsers({ runId: args.runId, count: args.count, password, client, domain });
   } else {
     await cleanupUsers({ runId: args.runId, dryRun: Boolean(args.dryRun), client, domain });
   }
