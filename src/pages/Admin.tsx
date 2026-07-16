@@ -1014,12 +1014,12 @@ export default function Admin() {
                                       >
                                         {user.userType === "Admin" ? "Demote" : "Promote"}
                                       </Button>
-                                      {user.account_status === "suspended" && (
+                                      {user.account_status === "suspended" && user.email && (
                                         <Button
                                           variant="outline"
                                           size="sm"
                                           className="h-7 rounded-md px-2.5 text-xs"
-                                          onClick={() => restoreUser(user.auth_id, user.email || "")}
+                                          onClick={() => restoreUser(user.auth_id, user.email)}
                                         >
                                           Restore
                                         </Button>

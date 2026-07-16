@@ -131,8 +131,9 @@ claimed in docs that CI does not enforce.
 
 ## Reliability program status (SLOs, dashboards, load tests, DR)
 
-Honest status as of 2026-07-14 — no claims here are backed by a live run
-unless a results doc is linked.
+Honest status as of 2026-07-16 (reviewed separately from this document's
+`Last verified` header above, which tracks issues #204–#214 specifically) —
+no claims here are backed by a live run unless a results doc is linked.
 
 - **Critical-journey test matrix:** `docs/tests/CRITICAL_JOURNEYS_MATRIX.md` —
   first-pass audit of test coverage against the required journey list;

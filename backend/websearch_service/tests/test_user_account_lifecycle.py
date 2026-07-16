@@ -92,6 +92,7 @@ class _FakeRestoreClient:
         self._user_row = user_row
         self._unban_status = unban_status
         self._patch_status = patch_status
+        self.put_calls: list[tuple[str, dict]] = []
         self.patch_calls: list[dict] = []
 
     async def __aenter__(self):
@@ -104,6 +105,7 @@ class _FakeRestoreClient:
         return _FakeResp(200, [self._user_row] if self._user_row else [])
 
     async def put(self, url, **kw):
+        self.put_calls.append((url, kw.get("json", {})))
         return _FakeResp(self._unban_status, {})
 
     async def patch(self, url, **kw):
@@ -154,6 +156,9 @@ def test_restore_reactivates_suspended_account():
             )
         )
     assert result["status"] == "active"
+    assert fake.put_calls == [
+        ("https://test.supabase.co/auth/v1/admin/users/user-1", {"ban_duration": "none"}),
+    ]
     assert fake.patch_calls[0]["account_status"] == "active"
     assert fake.patch_calls[0]["suspended_at"] is None
     audit_mock.assert_awaited_once()
