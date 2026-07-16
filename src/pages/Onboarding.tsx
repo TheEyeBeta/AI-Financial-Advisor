@@ -665,14 +665,14 @@ const Onboarding = () => {
             <div className="space-y-5">
               {/* Age Range */}
               <div className="space-y-2">
-                <Label>Age range</Label>
+                <Label htmlFor="age-range">Age range</Label>
                 <Select
                   value={step1.age_range}
                   onValueChange={(v) =>
                     setStep1({ ...step1, age_range: v as AgeRange })
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="age-range">
                     <SelectValue placeholder="Select your age range" />
                   </SelectTrigger>
                   <SelectContent>
@@ -687,14 +687,14 @@ const Onboarding = () => {
 
               {/* Income Range */}
               <div className="space-y-2">
-                <Label>Annual income range</Label>
+                <Label htmlFor="income-range">Annual income range</Label>
                 <Select
                   value={step1.income_range}
                   onValueChange={(v) =>
                     setStep1({ ...step1, income_range: v as IncomeRange })
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="income-range">
                     <SelectValue placeholder="Select your income range" />
                   </SelectTrigger>
                   <SelectContent>
@@ -782,7 +782,7 @@ const Onboarding = () => {
             <div className="space-y-5">
               {/* Emergency Fund */}
               <div className="space-y-2">
-                <Label>
+                <Label htmlFor="emergency-fund-months">
                   How many months of expenses do you have saved as an emergency fund?
                 </Label>
                 <Select
@@ -791,7 +791,7 @@ const Onboarding = () => {
                     setStep2({ ...step2, emergency_fund_months: v })
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id="emergency-fund-months">
                     <SelectValue placeholder="Select months saved" />
                   </SelectTrigger>
                   <SelectContent>
