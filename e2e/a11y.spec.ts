@@ -35,7 +35,12 @@ test.describe('Accessibility: signed-out pages', () => {
 
 test.describe('Accessibility: core signed-in pages', () => {
   const pages: Array<{ path: string; name: string; contentSignal: RegExp }> = [
-    { path: '/advisor', name: 'advisor', contentSignal: /ask|advisor|iris/i },
+    // Scoped to copy that only appears on the advisor page itself — a bare
+    // "iris"/"advisor"/"ask" match is loose enough to false-positive on
+    // Onboarding.tsx's unrelated "...so IRIS can personalise..." copy if a
+    // mocked sign-in races onto /onboarding instead of /advisor, which
+    // would make this test scan the wrong page instead of skipping.
+    { path: '/advisor', name: 'advisor', contentSignal: /ask about markets|iris provides educational analysis/i },
     { path: '/academy', name: 'academy', contentSignal: /academy|lesson|tier/i },
     { path: '/paper-trading', name: 'paper trading', contentSignal: /symbol|trade|position/i },
     { path: '/chat-history', name: 'chat history', contentSignal: /conversation|history/i },

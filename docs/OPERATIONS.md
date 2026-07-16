@@ -128,3 +128,34 @@ claimed in docs that CI does not enforce.
 - In-process news cache (per worker) — acceptable at beta scale.
 - No billing/quota beyond rate limits; per-user AI quota is a launch
   threshold tracked in #216.
+
+## Reliability program status (SLOs, dashboards, load tests, DR)
+
+Honest status as of 2026-07-16 (reviewed separately from this document's
+`Last verified` header above, which tracks issues #204–#214 specifically) —
+no claims here are backed by a live run unless a results doc is linked.
+
+- **Critical-journey test matrix:** `docs/tests/CRITICAL_JOURNEYS_MATRIX.md` —
+  first-pass audit of test coverage against the required journey list;
+  several gaps remain open (see that file).
+- **SLOs (availability, latency, error-rate targets):** not yet formally
+  defined against a chosen observability stack. Sentry is wired
+  (frontend + backend, `SENTRY_DSN`); there is no metrics/dashboard stack
+  (Grafana, Datadog, etc.) configured yet. Defining SLOs against dashboards
+  that don't exist would be an unverifiable claim — this needs a human
+  decision on tooling before the dashboards/alerts checklist can be built.
+- **Load testing:** scaffolding exists in `tests/load/` (k6 scripts for chat,
+  paper trading, search). No run against a dedicated staging environment has
+  been executed or recorded; no `LOAD_TEST_RESULTS.md` exists. Running Test
+  profiles A–E requires a dedicated staging Railway/Supabase/Redis stack —
+  out of scope for an agent session without those credentials.
+- **Recovery drill:** `docs/DB_RECOVERY.md` documents a *rehearsed-on-disposable-Postgres*
+  forward-recovery procedure (fresh install, idempotent re-run, downgrade/upgrade
+  round-trip, RLS validation). It has **not** been exercised against a real
+  production backup restored into an isolated Supabase project — that is a
+  human-run exercise requiring production backup access and a throwaway
+  Supabase project, per `AGENTS.md` §3 (production platform changes are a
+  forbidden zone for agents without human-run steps).
+
+None of the above should be marked done in release checklists until a dated,
+linked results document exists for each.

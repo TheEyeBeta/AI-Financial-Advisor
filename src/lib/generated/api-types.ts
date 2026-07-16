@@ -886,6 +886,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/users/{auth_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore User
+         * @description Reverse a suspension and reactivate the account.
+         */
+        post: operations["restore_user_api_admin_users__auth_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/users/{auth_id}/delete-request": {
         parameters: {
             query?: never;
@@ -1592,6 +1612,11 @@ export interface components {
             last_ranked_at?: string | null;
             /** Data Age Hours */
             data_age_hours?: number | null;
+        };
+        /** RestoreUserRequest */
+        RestoreUserRequest: {
+            /** Confirmation Email */
+            confirmation_email: string;
         };
         /** SignalsData */
         SignalsData: {
@@ -3271,6 +3296,43 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["SuspendUserRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_user_api_admin_users__auth_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                auth_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreUserRequest"];
             };
         };
         responses: {

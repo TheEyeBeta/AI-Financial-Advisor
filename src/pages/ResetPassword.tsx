@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { supabase } from "@/lib/supabase";
 import { toast } from "@/hooks/use-toast";
 import { getErrorMessage } from "@/lib/error";
+import { hasAuthCallbackParams } from "@/lib/auth-callback";
 
 const ResetPassword = () => {
   const navigate = useNavigate();
@@ -17,9 +18,11 @@ const ResetPassword = () => {
   const [isResetting, setIsResetting] = useState(false);
 
   useEffect(() => {
-    // Check if we have the necessary tokens in the URL
-    const hash = window.location.hash;
-    if (!hash.includes("access_token") && !searchParams.has("access_token")) {
+    // Recovery links may arrive as either implicit-flow hash tokens
+    // (#access_token=...) or PKCE-flow query params (?code=...) depending on
+    // Supabase client config — recognize both via the same helper the OAuth
+    // callback uses, rather than only checking for access_token.
+    if (!hasAuthCallbackParams(searchParams)) {
       toast({
         title: "Invalid Link",
         description: "This password reset link is invalid or has expired.",
@@ -50,10 +53,10 @@ const ResetPassword = () => {
       return;
     }
 
-    if (password.length < 6) {
+    if (password.length < 10) {
       toast({
         title: "Error",
-        description: "Password must be at least 6 characters",
+        description: "Password must be at least 10 characters",
         variant: "destructive",
       });
       return;

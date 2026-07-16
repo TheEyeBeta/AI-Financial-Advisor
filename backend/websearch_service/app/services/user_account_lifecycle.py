@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from .audit import audit_log
+
 logger = logging.getLogger(__name__)
 
 RECENT_AUTH_MAX_AGE_SECONDS = int(
@@ -212,8 +214,95 @@ async def suspend_user_account(
         request_id,
         reason,
     )
+    await audit_log(
+        "admin.user_suspended",
+        {
+            "actor": caller.principal,
+            "target_auth_id": target_auth_id,
+            "target_email": target_email,
+            "reason": reason,
+            "request_id": request_id,
+        },
+    )
     return {
         "status": "suspended",
+        "auth_id": target_auth_id,
+        "email": target_email,
+        "request_id": request_id,
+    }
+
+
+async def restore_user_account(
+    *,
+    supabase_url: str,
+    service_role_key: str,
+    caller: AdminCaller,
+    target_auth_id: str,
+    confirmation_email: str,
+) -> dict[str, Any]:
+    """Reverse a suspension: lift the auth ban and reactivate the profile."""
+    enforce_recent_authentication(caller)
+    headers = {
+        "apikey": service_role_key,
+        "Authorization": f"Bearer {service_role_key}",
+    }
+
+    async with httpx.AsyncClient(timeout=30.0) as http:
+        target_row = await _fetch_user_row(
+            http, supabase_url=supabase_url, headers=headers, auth_id=target_auth_id
+        )
+        if target_row is None:
+            raise UserLifecycleError("target user not found", status_code=404)
+
+        target_email = (target_row.get("email") or "").strip()
+        if confirmation_email.strip().lower() != target_email.lower():
+            raise UserLifecycleError("confirmation email does not match target user", status_code=400)
+
+        status = target_row.get("account_status") or "active"
+        if status != "suspended":
+            raise UserLifecycleError(
+                "only a suspended account can be restored", status_code=409
+            )
+
+        unban_resp = await http.put(
+            f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
+            headers=headers,
+            json={"ban_duration": "none"},
+        )
+        if unban_resp.status_code not in (200, 201):
+            raise UserLifecycleError("failed to lift auth suspension", status_code=502)
+
+        patch_resp = await http.patch(
+            f"{supabase_url}/rest/v1/users",
+            params={"auth_id": f"eq.{target_auth_id}"},
+            headers={**headers, "Accept-Profile": "core", "Prefer": "return=minimal"},
+            json={
+                "account_status": "active",
+                "suspended_at": None,
+                "suspension_reason": None,
+            },
+        )
+        if patch_resp.status_code not in (200, 204):
+            raise UserLifecycleError("failed to update application user status", status_code=502)
+
+    request_id = str(uuid.uuid4())
+    logger.info(
+        "User restored actor=%s target=%s request_id=%s",
+        caller.principal,
+        target_auth_id,
+        request_id,
+    )
+    await audit_log(
+        "admin.user_restored",
+        {
+            "actor": caller.principal,
+            "target_auth_id": target_auth_id,
+            "target_email": target_email,
+            "request_id": request_id,
+        },
+    )
+    return {
+        "status": "active",
         "auth_id": target_auth_id,
         "email": target_email,
         "request_id": request_id,
@@ -322,6 +411,16 @@ async def execute_delete_request(
         if del_resp.status_code == 404:
             snapshot["status"] = "executed"
             snapshot["idempotency_key"] = idempotency_key
+            await audit_log(
+                "admin.user_deleted",
+                {
+                    "actor": caller.principal,
+                    "target_auth_id": target_auth_id,
+                    "snapshot_id": snapshot_id,
+                    "idempotency_key": idempotency_key,
+                    "already_removed": True,
+                },
+            )
             return {"status": "deleted", "auth_id": target_auth_id, "already_removed": True}
         if del_resp.status_code not in (200, 204):
             raise UserLifecycleError("failed to delete auth user", status_code=502)
@@ -334,5 +433,14 @@ async def execute_delete_request(
         target_auth_id,
         snapshot_id,
         idempotency_key,
+    )
+    await audit_log(
+        "admin.user_deleted",
+        {
+            "actor": caller.principal,
+            "target_auth_id": target_auth_id,
+            "snapshot_id": snapshot_id,
+            "idempotency_key": idempotency_key,
+        },
     )
     return {"status": "deleted", "auth_id": target_auth_id, "snapshot_id": snapshot_id}

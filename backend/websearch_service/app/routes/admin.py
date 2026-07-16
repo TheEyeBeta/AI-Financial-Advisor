@@ -56,6 +56,7 @@ from ..services.user_account_lifecycle import (
     UserLifecycleError,
     create_delete_request,
     execute_delete_request,
+    restore_user_account,
     suspend_user_account,
 )
 
@@ -407,6 +408,30 @@ async def suspend_user(
             caller=caller,
             target_auth_id=auth_id,
             reason=body.reason,
+            confirmation_email=body.confirmation_email,
+        )
+    except UserLifecycleError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+class RestoreUserRequest(BaseModel):
+    confirmation_email: str = Field(min_length=3)
+
+
+@router.post("/api/admin/users/{auth_id}/restore")
+async def restore_user(
+    auth_id: str,
+    body: RestoreUserRequest,
+    caller: AdminCaller = Depends(_require_admin_caller),
+) -> dict[str, Any]:
+    """Reverse a suspension and reactivate the account."""
+    supabase_url, service_role_key = _get_supabase_rest_config()
+    try:
+        return await restore_user_account(
+            supabase_url=supabase_url,
+            service_role_key=service_role_key,
+            caller=caller,
+            target_auth_id=auth_id,
             confirmation_email=body.confirmation_email,
         )
     except UserLifecycleError as exc:

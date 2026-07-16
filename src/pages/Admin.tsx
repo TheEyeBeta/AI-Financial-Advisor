@@ -47,6 +47,7 @@ interface User {
   experience_level: string | null;
   risk_level: string | null;
   created_at: string;
+  account_status: "active" | "suspended" | "pending_deletion" | "deleted" | null;
 }
 
 interface ChatStats { totalChats: number; totalMessages: number; activeToday: number }
@@ -350,7 +351,7 @@ export default function Admin() {
     try {
       const { data, error } = await supabase
         .schema("core").from("users")
-        .select("id, auth_id, email, first_name, last_name, userType, is_verified, experience_level, risk_level, created_at")
+        .select("id, auth_id, email, first_name, last_name, userType, is_verified, experience_level, risk_level, created_at, account_status")
         .order("created_at", { ascending: false });
       if (error) throw error;
       setUsers(data || []);
@@ -510,6 +511,37 @@ export default function Admin() {
       toast({
         title: "Error",
         description: getErrorMessage(error) || "Failed to suspend user",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const restoreUser = async (authId: string, email: string) => {
+    const confirmation = window.prompt(
+      `Type the user's email to confirm restoring this account:\n${email}`,
+    );
+    if (!confirmation || confirmation.trim().toLowerCase() !== email.trim().toLowerCase()) {
+      toast({
+        title: "Restore cancelled",
+        description: "Confirmation email did not match.",
+        variant: "destructive",
+      });
+      return;
+    }
+    try {
+      const headers = await getAuthHeaders();
+      const resp = await fetch(`${BACKEND_URL}/api/admin/users/${authId}/restore`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmation_email: confirmation.trim() }),
+      });
+      if (!resp.ok) throw new Error((await resp.text()) || `HTTP ${resp.status}`);
+      toast({ title: "User restored", description: "Account reactivated and unbanned." });
+      fetchUsers();
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: getErrorMessage(error) || "Failed to restore user",
         variant: "destructive",
       });
     }
@@ -982,6 +1014,16 @@ export default function Admin() {
                                       >
                                         {user.userType === "Admin" ? "Demote" : "Promote"}
                                       </Button>
+                                      {user.account_status === "suspended" && user.email && (
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          className="h-7 rounded-md px-2.5 text-xs"
+                                          onClick={() => restoreUser(user.auth_id, user.email)}
+                                        >
+                                          Restore
+                                        </Button>
+                                      )}
                                       <AlertDialog>
                                         <AlertDialogTrigger asChild>
                                           <Button
@@ -1003,6 +1045,7 @@ export default function Admin() {
                                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                                             <AlertDialogAction
                                               onClick={() => suspendUser(user.auth_id, user.email || "")}
+                                              disabled={user.account_status === "suspended"}
                                             >
                                               Suspend
                                             </AlertDialogAction>

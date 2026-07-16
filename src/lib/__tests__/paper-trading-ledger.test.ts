@@ -89,8 +89,12 @@ describe("buildPaperTradingLedger", () => {
       asOfDate: "2026-03-20",
     });
 
-    // Both BUY entries auto-fund because the ledger starts with $0 cash
-    expect(ledger.errors).toEqual([
+    // Both BUY entries auto-fund because the ledger starts with $0 cash.
+    // This must land in `warnings`, not `errors` — rebuildPaperTradingState
+    // treats any non-empty `errors` as fatal and discards the whole rebuild,
+    // and every real user's first BUY always hits this path.
+    expect(ledger.errors).toEqual([]);
+    expect(ledger.warnings).toEqual([
       "Auto-funded $1000.00 for AAPL BUY on 2024-01-10 (insufficient cash balance).",
       "Auto-funded $1200.00 for AAPL BUY on 2024-02-01 (insufficient cash balance).",
     ]);

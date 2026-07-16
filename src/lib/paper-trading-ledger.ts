@@ -46,7 +46,10 @@ export interface PaperTradingLedger {
   totalReturnPct: number;
   winRate: number;
   hasSnapshotPrices: boolean;
+  /** Fatal problems with individual entries — the entry was skipped. */
   errors: string[];
+  /** Non-fatal notices about the rebuild (e.g. auto-funded cash) — the ledger still completed. */
+  warnings: string[];
 }
 
 function normalizeSymbol(symbol: string) {
@@ -120,6 +123,7 @@ export function buildPaperTradingLedger(
   const historyByDate = new Map<string, HistoryPoint>();
   const lastTradePriceBySymbol = new Map<string, number>();
   const errors: string[] = [];
+  const warnings: string[] = [];
 
   let cashBalance = 0;
   let investedCapital = 0;
@@ -170,7 +174,12 @@ export function buildPaperTradingLedger(
         const additionalFunding = positionCost - cashBalance;
         investedCapital += additionalFunding;
         cashBalance = positionCost;
-        errors.push(
+        // Not fatal: paper trading has no funding cap, so a shortfall is
+        // backfilled rather than rejected. This must not land in `errors` —
+        // callers (rebuildPaperTradingState) treat any error as fatal and
+        // discard the whole rebuild, and every user's first BUY always hits
+        // this path since cashBalance starts at 0.
+        warnings.push(
           `Auto-funded $${additionalFunding.toFixed(2)} for ${symbol} BUY on ${entry.date} (insufficient cash balance).`,
         );
       }
@@ -345,5 +354,6 @@ export function buildPaperTradingLedger(
     winRate: closedTrades.length > 0 ? (wins / closedTrades.length) * 100 : 0,
     hasSnapshotPrices: anySnapshotPriceUsed,
     errors,
+    warnings,
   };
 }

@@ -110,17 +110,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         let isOnboardingComplete = profile.onboarding_complete ?? false;
 
-        // Secondary check: if flag is false, see whether a user_profiles row already
-        // exists (handles accounts that completed onboarding before the flag was added).
+        // Secondary check: if flag is false, see whether a *complete* user_profiles
+        // row already exists (handles accounts that completed onboarding before the
+        // flag was added). Onboarding.tsx now saves partial rows incrementally as
+        // the user progresses, so row *existence* alone no longer implies
+        // completion — every field the final step requires must be present.
         if (!isOnboardingComplete) {
           try {
-            const { count, error: countError } = await coreDb
+            const { data: profileRow, error: countError } = await coreDb
               .from("user_profiles")
-              .select("*", { count: "exact", head: true })
-              .eq("user_id", authUser.id);
+              .select(
+                "age_range, income_range, monthly_expenses, total_debt, " +
+                "emergency_fund_months, monthly_investable, risk_profile, investment_horizon"
+              )
+              .eq("user_id", authUser.id)
+              .maybeSingle();
 
-            if (!countError && count && count > 0) {
-              // Profile exists — silently backfill the flag and treat as complete.
+            const isCompleteProfile =
+              !!profileRow &&
+              profileRow.age_range !== null &&
+              profileRow.income_range !== null &&
+              profileRow.monthly_expenses !== null &&
+              profileRow.total_debt !== null &&
+              profileRow.emergency_fund_months !== null &&
+              profileRow.monthly_investable !== null &&
+              profileRow.risk_profile !== null &&
+              profileRow.investment_horizon !== null;
+
+            if (!countError && isCompleteProfile) {
+              // Profile is fully filled in — silently backfill the flag and treat as complete.
               const { error: updateError } = await coreDb
                 .from("users")
                 .update({ onboarding_complete: true })
@@ -134,7 +152,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 isOnboardingComplete = true;
               }
             }
-            // If countError or count === 0: leave isOnboardingComplete = false (fail safe).
+            // If countError, no row, or an incomplete row: leave isOnboardingComplete
+            // = false (fail safe) — a partial row from mid-onboarding progress must
+            // never be treated as proof of completion.
           } catch (err) {
             console.error("Error during user_profiles existence check:", err);
             // Fail safe: treat as incomplete so the user can re-run onboarding.
