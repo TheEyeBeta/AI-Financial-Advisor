@@ -83,8 +83,10 @@ fi
 
 if [[ -z "${BACKEND_URL:-}" ]]; then
   FAILURES+=("BACKEND_URL is required.")
+elif [[ ! "$BACKEND_URL" =~ ^https://[^/:?#]+ ]]; then
+  FAILURES+=("BACKEND_URL must be an https:// URL (got \"$BACKEND_URL\") — refusing malformed, schemeless, or plaintext-http targets since bearer credentials are sent to this host.")
 else
-  TARGET_HOST="$(echo "$BACKEND_URL" | sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://##; s#[/:?#].*##' | tr '[:upper:]' '[:lower:]')"
+  TARGET_HOST="$(echo "$BACKEND_URL" | sed -E 's#^https://##; s#[/:?#].*##' | tr '[:upper:]' '[:lower:]')"
 fi
 
 if [[ -z "${LOAD_TEST_ALLOWED_HOSTS:-}" ]]; then
