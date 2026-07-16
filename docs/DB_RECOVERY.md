@@ -2,6 +2,16 @@
 
 **Owner:** TheEyeBeta · **Last verified:** 2026-07-13 · **Scope:** issue #208 (audit M-06)
 
+**Phase 5 recovery drill status: `NOT VERIFIED`.** Everything in this file
+was rehearsed against a disposable, never-had-real-data Postgres (below) —
+that proves the migration history is sound, not that a real production
+backup restores cleanly. `docs/recovery/` contains the prepared-but-not-yet-
+executed procedure for that stronger claim: backup verification, an
+isolated-project restore, migration validation, data-integrity queries, an
+RPO/RTO worksheet, an evidence template, and rollback/cleanup — see
+`docs/recovery/README.md`. Do not cite this file as evidence that recovery
+from a real backup has been proven until a dated evidence file exists there.
+
 ## Canonical migration path
 
 - **Single source of truth:** `backend/websearch_service/alembic/` — one linear
