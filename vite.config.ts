@@ -3,6 +3,34 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
+// Stamps the deployed git SHA into index.html so production smoke tests can
+// verify the served frontend matches the expected release without executing
+// JS (see docs/readiness/RELEASE_POLICY.md). Vercel exposes the commit as
+// VITE_VERCEL_GIT_COMMIT_SHA when "Automatically expose System Environment
+// Variables" is on; VITE_RELEASE_SHA overrides it for other build hosts.
+function releaseShaMetaTag() {
+  return {
+    name: "release-sha-meta",
+    transformIndexHtml(html: string) {
+      const sha = (
+        process.env.VITE_RELEASE_SHA ||
+        process.env.VITE_VERCEL_GIT_COMMIT_SHA ||
+        ""
+      ).trim();
+      return {
+        html,
+        tags: [
+          {
+            tag: "meta",
+            attrs: { name: "release-sha", content: sha || "unknown" },
+            injectTo: "head" as const,
+          },
+        ],
+      };
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode: _mode }) => ({
   server: {
@@ -51,7 +79,7 @@ export default defineConfig(({ mode: _mode }) => ({
       },
     },
   },
-  plugins: [react()],
+  plugins: [react(), releaseShaMetaTag()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),

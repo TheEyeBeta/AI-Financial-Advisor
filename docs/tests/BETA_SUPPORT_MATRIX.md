@@ -20,8 +20,15 @@ project additionally runs route crawling, dashboards, and `performance.spec.ts`.
 - `e2e/a11y.spec.ts` runs axe (WCAG 2.0/2.1 A+AA rulesets) on: landing,
   privacy/terms, the sign-in dialog, advisor, academy, paper trading, chat
   history, and dashboard. **Serious/critical violations fail CI.**
-- Keyboard: sign-in must be reachable/operable with Tab+Enter, dialog focus
-  containment and Escape-to-close are asserted.
+- Keyboard: the sign-in control must be Tab-reachable with a visible focus
+  indicator, activate with **both Enter and Space**, move focus into the
+  dialog on open, contain focus across a full Tab cycle, close on Escape,
+  and **restore focus to the opening control** (all eight behaviours asserted
+  in `e2e/a11y.spec.ts`; app-wide dialog focus restoration fixed 2026-07-16
+  in `src/components/ui/dialog.tsx`, unit regression in
+  `src/components/ui/__tests__/dialog.test.tsx`).
+- Manual screen-reader scripts (NVDA/VoiceOver/TalkBack/JAWS):
+  `SCREEN_READER_SCRIPTS.md` — **NOT VERIFIED until runs are logged there**.
 - Zoom/responsive: no horizontal page scrolling at 200%-zoom-equivalent
   (640px) and 360px mobile viewports.
 

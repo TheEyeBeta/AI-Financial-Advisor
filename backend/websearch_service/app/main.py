@@ -44,7 +44,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
 
 from .config import get_app_settings, resolve_allowed_origins, validate_app_settings
-from .health_checks import assess_readiness, liveness_payload, mark_startup_complete
+from .health_checks import assess_readiness, liveness_payload, mark_startup_complete, release_info
 from .middleware.correlation import CorrelationIdMiddleware
 from .observability import init_observability
 from .routes.admin import router as admin_router
@@ -246,6 +246,7 @@ def create_app() -> FastAPI:
         return {
             "status": "ok",
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "release": release_info(),
             "services": {
                 "supabase": supabase_status,
                 "openai": openai_status,

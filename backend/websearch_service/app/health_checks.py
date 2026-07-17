@@ -63,6 +63,32 @@ async def _ping_supabase(timeout: float) -> dict[str, Any]:
         return {"status": "error", "detail": type(exc).__name__}
 
 
+def release_info() -> dict[str, Any]:
+    """Non-sensitive release identity for this running build.
+
+    Lets smoke tests and operators confirm which exact release is serving
+    traffic: git SHA, declared version, build timestamp, the Alembic revision
+    this build expects, and the environment name. Values come from env vars
+    set at deploy time (Railway exposes RAILWAY_GIT_COMMIT_SHA natively;
+    GIT_SHA/BUILD_TIMESTAMP may be injected by the build). Absent values are
+    reported as null rather than guessed.
+    """
+    git_sha = (
+        (os.getenv("GIT_SHA") or "").strip()
+        or (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "").strip()
+        or None
+    )
+    build_timestamp = (os.getenv("BUILD_TIMESTAMP") or "").strip() or None
+    return {
+        "git_sha": git_sha,
+        "app_version": (os.getenv("APP_VERSION") or "").strip() or None,
+        "build_timestamp": build_timestamp,
+        "expected_schema_revision": expected_schema_revision(),
+        "environment": (os.getenv("ENVIRONMENT") or "development").strip().lower()
+        or "development",
+    }
+
+
 _expected_revision_cache: str | None = None
 
 
@@ -175,6 +201,7 @@ async def assess_readiness() -> dict[str, Any]:
         "ready": required_ok,
         "degraded": degraded,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "release": release_info(),
         "components": components,
     }
 

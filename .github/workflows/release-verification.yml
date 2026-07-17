@@ -1,0 +1,65 @@
+name: Release Verification
+
+# Confirms that a deployed frontend + backend serve the expected release SHA
+# (Phase 1 — exact-SHA enforcement, docs/readiness/RELEASE_POLICY.md).
+#
+# Run this after every staging or production deployment:
+#   - expected_sha defaults to the commit the workflow runs on;
+#   - URLs default to the staging secrets so the common case is one click.
+#
+# Prerequisite (EXTERNAL): the deploy targets must expose their SHA —
+#   Vercel: enable "Automatically expose System Environment Variables"
+#           (provides VITE_VERCEL_GIT_COMMIT_SHA to the build), and
+#   Railway: RAILWAY_GIT_COMMIT_SHA is provided natively (or set GIT_SHA).
+# Until that is verified, this workflow fails loudly — which is the correct
+# behaviour: an unverifiable release must not be declared verified.
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: "Full git SHA the deployment must serve (blank = this commit)"
+        required: false
+      frontend_url:
+        description: "Frontend base URL (blank = STAGING_FRONTEND_URL secret)"
+        required: false
+      backend_url:
+        description: "Backend base URL (blank = STAGING_BACKEND_URL secret)"
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-verification-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify-release:
+    name: Verify deployed release SHA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: '20'
+
+      - name: Verify frontend and backend release SHA
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha || github.sha }}
+          FRONTEND_URL: ${{ inputs.frontend_url || secrets.STAGING_FRONTEND_URL }}
+          BACKEND_URL: ${{ inputs.backend_url || secrets.STAGING_BACKEND_URL }}
+        run: |
+          if [ -z "$FRONTEND_URL" ] && [ -z "$BACKEND_URL" ]; then
+            echo "No target URLs available (inputs empty and staging secrets unset)." >&2
+            exit 1
+          fi
+          ARGS=(--expected-sha "$EXPECTED_SHA" --allow-short)
+          [ -n "$FRONTEND_URL" ] && ARGS+=(--frontend "$FRONTEND_URL")
+          [ -n "$BACKEND_URL" ] && ARGS+=(--backend "$BACKEND_URL")
+          node scripts/verify-release.mjs "${ARGS[@]}"

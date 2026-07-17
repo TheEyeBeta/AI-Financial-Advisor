@@ -2,6 +2,14 @@
 
 **Owner:** TheEyeBeta · **Started:** 2026-07-14 · **Status:** first-pass, evidence-based, incomplete.
 
+> **Machine-readable companion:** [`critical-journeys.json`](./critical-journeys.json)
+> is the canonical structured inventory (one entry per journey: priority,
+> coverage per layer, evidence paths, explicit status). Its schema and its
+> "no AUTOMATED_TEST_PASSED without an existing evidence file" rule are
+> enforced in CI by `src/tests/critical-journeys-matrix.test.ts`. This
+> markdown file remains the narrative audit trail — keep both in sync when
+> closing a gap.
+
 This is a living audit against the Phase 2 critical-journey checklist. Each row
 cites the actual test file/function found in the repo, or is marked `GAP` when
 none was found. Items marked `NOT YET AUDITED` were not checked in this pass —

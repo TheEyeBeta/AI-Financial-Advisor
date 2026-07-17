@@ -20,7 +20,8 @@ treat that as a bug — open a PR to reconcile, do not silently lower a gate.
 | `docker-build.yml`                  | PR touching backend/Dockerfile   | Docker image builds (backend + frontend) and `docker compose config` validation                |
 | `integration-tests.yml`             | push to `main`/`staging`         | Backend integration tests against the test Supabase project                                    |
 | `deploy-staging.yml`                | push/PR to `staging`             | Railway staging deploy + full Playwright suite against the live staging URL                    |
-| `deploy.yml`                        | `CI/CD Pipeline` success on `main` / tags `v*` | Build & push GHCR images, Vercel prod deploy, Railway prod deploy                              |
+| *(native)* Vercel + Railway GitHub integrations | merge to `main`             | Production deploys (Actions-based `deploy.yml` removed in `5c08277`; see §3.7)                 |
+| `release-verification.yml`          | manual (post-deploy)             | Deployed frontend/backend SHA matches the expected release (`scripts/verify-release.mjs`)      |
 | `promote-to-prod.yml`               | manual                           | Opens a `staging → main` promotion PR                                                          |
 | `dast.yml`                          | weekly cron + manual             | OWASP ZAP baseline scan against staging                                                        |
 | `load-tests.yml`                    | manual                           | k6 chat / search / paper-trading load tests                                                    |
@@ -77,7 +78,8 @@ to actually match CI.
     the threshold to the new floor.
 - **Build** must succeed with the production env (`VITE_*` vars from secrets).
   Do not introduce code that references secrets at build time but is not
-  declared as a `VITE_*` build arg in both `ci.yml` and `deploy.yml`.
+  declared as a `VITE_*` build arg in `ci.yml` and configured in the Vercel
+  project environment.
 
 ### 3.2 OpenAPI drift (`ci.yml#frontend`)
 
@@ -138,19 +140,19 @@ Three jobs:
 - `deploy-staging.yml#e2e` runs the same suite against the deployed staging URL
   after a successful Railway deploy and **fails** when tests fail.
 
-### 3.7 Deploy (`deploy.yml`, `deploy-staging.yml`)
+### 3.7 Deploy (native integrations + `deploy-staging.yml`)
 
 - **Never** push directly to `main`. Use the `promote-to-prod` workflow to
   open a `staging → main` PR; merge after CI green and review.
-- `deploy.yml` runs only after **`CI/CD Pipeline` succeeds** on `main`
-  (`workflow_run` trigger). Tag pushes (`v*`) still deploy directly.
-- `deploy.yml` requires the following secrets — keep them in sync with
-  `deployment/DEPLOYMENT.md`:
-  - `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`
-  - `RAILWAY_TOKEN`
-  - `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
-    `VITE_PYTHON_API_URL`, `VITE_WEBSEARCH_API_URL`
-- `deploy-staging.yml` additionally needs `STAGING_FRONTEND_URL`,
+- **Production deploys are performed by the Vercel and Railway native GitHub
+  integrations watching `main`** — the Actions-based `deploy.yml` was removed
+  in commit `5c08277` (2026-07-13). Because the platforms deploy on merge,
+  branch protection on `main` (§3.8) is the enforcement point that keeps a
+  red-check commit out of production. See
+  `docs/readiness/RELEASE_POLICY.md` for the full promotion flow and the
+  exact-SHA verification step (`release-verification.yml`,
+  `scripts/verify-release.mjs`).
+- `deploy-staging.yml` needs `STAGING_FRONTEND_URL`,
   `STAGING_BACKEND_URL`, and `RAILWAY_STAGING_SERVICE`.
 
 ### 3.8 Branch protection (GitHub settings — human step)
@@ -201,8 +203,9 @@ statuses directly. Confirm both integrations are actually installed
 requiring a check that never posts will make every PR permanently
 unmergeable.
 
-Production deploy (`deploy.yml`) is triggered only after `CI/CD Pipeline`
-succeeds on `main`; it must **not** run on a failing commit.
+Production deploys are performed by the Vercel/Railway native integrations on
+merge to `main` (§3.7); the ruleset above is what keeps a failing commit from
+ever reaching `main`, so apply it before relying on this pipeline.
 
 ---
 

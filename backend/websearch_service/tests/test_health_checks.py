@@ -107,3 +107,53 @@ async def test_schema_revision_check_reports_ok_on_match():
     with patch("app.services.supabase_client.supabase_client", _Client()):
         result = await health_checks._check_schema_revision(timeout=2)
     assert result == {"status": "ok", "revision": expected}
+
+
+# ── Release identity (exact-SHA release verification) ────────────────────────
+
+def test_release_info_reports_env_identity(monkeypatch):
+    from app import health_checks
+
+    monkeypatch.setenv("GIT_SHA", "abc1234def")
+    monkeypatch.setenv("APP_VERSION", "1.2.3")
+    monkeypatch.setenv("BUILD_TIMESTAMP", "2026-07-16T00:00:00Z")
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+
+    info = health_checks.release_info()
+    assert info["git_sha"] == "abc1234def"
+    assert info["app_version"] == "1.2.3"
+    assert info["build_timestamp"] == "2026-07-16T00:00:00Z"
+    assert info["environment"] == "staging"
+    # The expected schema revision must match the shipped alembic head.
+    assert info["expected_schema_revision"] == health_checks.expected_schema_revision()
+
+
+def test_release_info_falls_back_to_railway_sha_and_nulls(monkeypatch):
+    from app import health_checks
+
+    monkeypatch.delenv("GIT_SHA", raising=False)
+    monkeypatch.setenv("RAILWAY_GIT_COMMIT_SHA", "railway999")
+    monkeypatch.delenv("BUILD_TIMESTAMP", raising=False)
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+
+    info = health_checks.release_info()
+    assert info["git_sha"] == "railway999"
+    assert info["build_timestamp"] is None
+    assert info["environment"] == "development"
+
+    # No SHA source at all → null, never a guessed value.
+    monkeypatch.delenv("RAILWAY_GIT_COMMIT_SHA", raising=False)
+    assert health_checks.release_info()["git_sha"] is None
+
+
+def test_health_endpoint_exposes_release_identity(client: TestClient, monkeypatch):
+    monkeypatch.setenv("GIT_SHA", "deadbeef00")
+    response = client.get("/health")
+    assert response.status_code == 200
+    release = response.json()["release"]
+    assert release["git_sha"] == "deadbeef00"
+    # Never leak secrets through release metadata.
+    assert all(
+        "key" not in k.lower() and "secret" not in k.lower() and "token" not in k.lower()
+        for k in release
+    )
