@@ -1,0 +1,65 @@
+name: Staging Seed
+
+# Manual-only. Never triggered by push/PR — synthetic data must only be
+# written to staging on an operator's explicit say-so.
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'staging_seed command to run'
+        required: true
+        default: 'preflight'
+        type: choice
+        options:
+          - preflight
+          - seed
+          - cleanup
+          - reset
+          - verify
+
+concurrency:
+  group: staging-seed
+  cancel-in-progress: false
+
+jobs:
+  run:
+    name: Run staging_seed ${{ inputs.command }}
+    runs-on: ubuntu-latest
+    # Binds this job to the "staging" GitHub Environment: only secrets
+    # configured on that environment are exposed, and any required
+    # reviewers/branch restrictions on it are enforced before the job starts.
+    # This is the second half of the guard (alongside ENVIRONMENT and
+    # ALLOW_SYNTHETIC_SEED below) — misconfiguring the environment itself
+    # cannot be bypassed from this workflow file.
+    environment:
+      name: staging
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+
+      - name: Install backend dependencies
+        working-directory: backend/websearch_service
+        run: pip install -r requirements.txt
+
+      - name: Run staging_seed
+        working-directory: backend/websearch_service
+        env:
+          # Hardcoded, not user input — this workflow may only ever target
+          # staging, regardless of what secrets happen to be configured.
+          ENVIRONMENT: staging
+          ALLOW_SYNTHETIC_SEED: 'true'
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          ALEMBIC_DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          STAGING_SEED_PRODUCTION_DENYLIST: ${{ secrets.STAGING_SEED_PRODUCTION_DENYLIST }}
+        run: python -m staging_seed "${{ inputs.command }}"
