@@ -82,7 +82,7 @@ test.describe('Keyboard access', () => {
       timeout: 10_000,
     });
 
-    // Tab until the sign-in button takes focus (bounded walk).
+    // (1) Tab until the sign-in button takes focus (bounded walk).
     let focusedSignIn = false;
     for (let i = 0; i < 25; i += 1) {
       await page.keyboard.press('Tab');
@@ -96,20 +96,106 @@ test.describe('Keyboard access', () => {
     }
     expect(focusedSignIn, 'Sign in button must be reachable via Tab').toBe(true);
 
-    await page.keyboard.press('Enter');
-    await expect(page.getByRole('dialog', { name: /sign in/i })).toBeVisible();
-
-    // The dialog must contain focus: tabbing stays inside it.
-    await page.keyboard.press('Tab');
-    const activeElementInDialog = await page.evaluate(() => {
-      const dialog = document.querySelector('[role="dialog"]');
-      return dialog?.contains(document.activeElement) ?? false;
+    // (2) Keyboard focus must be visibly indicated (WCAG 2.4.7). A decorative
+    // box-shadow would satisfy a naive "has any shadow" check, so compare the
+    // focused styles against the same element's unfocused styles — the focus
+    // indicator must be a *change*, not a coincidence.
+    const focusIndication = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!(el instanceof HTMLElement)) return { visible: false, detail: 'no element' };
+      const focusVisible = el.matches(':focus-visible');
+      const focused = window.getComputedStyle(el);
+      const focusedOutline = `${focused.outlineStyle}/${focused.outlineWidth}/${focused.outlineColor}`;
+      const focusedShadow = focused.boxShadow;
+      el.blur();
+      const blurred = window.getComputedStyle(el);
+      const blurredOutline = `${blurred.outlineStyle}/${blurred.outlineWidth}/${blurred.outlineColor}`;
+      const blurredShadow = blurred.boxShadow;
+      el.focus();
+      const changed = focusedOutline !== blurredOutline || focusedShadow !== blurredShadow;
+      return {
+        visible: focusVisible && changed,
+        detail:
+          `focus-visible=${focusVisible} outline ${blurredOutline} -> ${focusedOutline}; ` +
+          `boxShadow "${blurredShadow.slice(0, 60)}" -> "${focusedShadow.slice(0, 60)}"`,
+      };
     });
-    expect(activeElementInDialog, 'Focus must stay inside the sign-in dialog').toBe(true);
+    expect(
+      focusIndication.visible,
+      `Focused Sign In control must show a focus-specific visible indicator (${focusIndication.detail})`,
+    ).toBe(true);
 
-    // Escape closes the dialog (focus is not permanently trapped).
+    // (3a) Enter activates the control and (4) the dialog opens.
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog', { name: /sign in/i });
+    await expect(dialog).toBeVisible();
+
+    // (5) Focus moves into the dialog on open.
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const openDialog = document.querySelector('[role="dialog"]');
+            return openDialog?.contains(document.activeElement) ?? false;
+          }),
+        { message: 'Focus must move into the sign-in dialog when it opens' },
+      )
+      .toBe(true);
+
+    // (6) The dialog contains focus for a *complete* Tab cycle: record the
+    // element focus starts on, Tab with a safety bound, assert every stop
+    // stays inside the dialog, and require focus to return to the start —
+    // proving the cycle actually wrapped rather than just bounding N presses.
+    await page.evaluate(() => {
+      const el = document.activeElement;
+      if (el instanceof HTMLElement) el.dataset.focusCycleStart = 'true';
+    });
+    let cycleCompleted = false;
+    for (let i = 0; i < 25; i += 1) {
+      await page.keyboard.press('Tab');
+      const state = await page.evaluate(() => {
+        const openDialog = document.querySelector('[role="dialog"]');
+        const el = document.activeElement;
+        return {
+          inside: openDialog?.contains(el) ?? false,
+          backAtStart: el instanceof HTMLElement && el.dataset.focusCycleStart === 'true',
+        };
+      });
+      expect(state.inside, `Focus escaped the sign-in dialog on Tab press ${i + 1}`).toBe(true);
+      if (state.backAtStart) {
+        cycleCompleted = true;
+        break;
+      }
+    }
+    expect(cycleCompleted, 'Tab must cycle back to its starting element inside the dialog').toBe(
+      true,
+    );
+    await page.evaluate(() => {
+      const start = document.querySelector<HTMLElement>('[data-focus-cycle-start]');
+      if (start) delete start.dataset.focusCycleStart;
+    });
+
+    // (7) Escape closes the dialog (focus is not permanently trapped).
     await page.keyboard.press('Escape');
-    await expect(page.getByRole('dialog', { name: /sign in/i })).toBeHidden();
+    await expect(dialog).toBeHidden();
+
+    // (8) Focus returns to the originating Sign In control (Radix FocusScope
+    // restores it asynchronously on unmount — poll rather than assert once).
+    await expect
+      .poll(
+        () =>
+          page.evaluate(
+            () => document.activeElement?.textContent?.trim().toLowerCase() ?? '',
+          ),
+        { message: 'Focus must return to the Sign In control after Escape' },
+      )
+      .toBe('sign in');
+
+    // (3b) Space also activates the control (native button semantics).
+    await page.keyboard.press('Space');
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toBeHidden();
   });
 });
 
