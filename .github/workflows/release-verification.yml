@@ -3,16 +3,20 @@ name: Release Verification
 # Confirms that a deployed frontend + backend serve the expected release SHA
 # (Phase 1 — exact-SHA enforcement, docs/readiness/RELEASE_POLICY.md).
 #
-# This is a fail-closed, production-grade gate:
-#   - BOTH a frontend URL and a backend URL are required; the job errors out
-#     before verification if either is missing. It must never report a pass
-#     having checked only one component.
-#   - expected_sha must be the FULL 40-character git SHA — no short/prefix
-#     matching is supported anywhere in this path.
+# This is a fail-closed, production-grade gate. All of the following is
+# enforced inside scripts/verify-release.mjs / scripts/lib/release-verify-core.mjs
+# (single source of truth — this workflow does not duplicate the checks in
+# bash, so there is nothing here to drift out of sync with the script):
+#   - BOTH a frontend URL and a backend URL are required. It must never
+#     report a pass having checked only one component.
+#   - expected_sha must be the FULL 40-character lowercase git SHA —
+#     no short/prefix matching is supported anywhere in this path.
 #   - Verification targets must resolve to an explicitly configured host
 #     allowlist (RELEASE_ALLOWED_HOSTS repository variable). There is no
 #     substring/heuristic host check and no default allowlist — an
-#     unconfigured allowlist fails the job rather than accepting any host.
+#     unconfigured allowlist fails the run rather than accepting any host.
+#   - Every outcome, including a bad invocation, writes the JSON evidence
+#     artifact uploaded below — there is no silent gap in the audit trail.
 #
 # Run this after every staging or production deployment:
 #   - expected_sha defaults to the commit the workflow runs on;
@@ -88,24 +92,17 @@ jobs:
           # workflow_run cannot carry workflow_dispatch inputs — those only
           # exist for manual runs — so the automatic path always uses the
           # commit that triggered the deploy and the staging secrets.
+          #
+          # All required-field, SHA-format, and allowlist-presence validation
+          # lives solely in scripts/verify-release.mjs (there is no duplicate
+          # bash-side check here to drift out of sync with it) — an empty or
+          # malformed value below is deliberately passed straight through so
+          # the script's own fail-closed evidence-producing path handles it.
           EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (inputs.expected_sha || github.sha) }}
           FRONTEND_URL: ${{ github.event_name == 'workflow_run' && secrets.STAGING_FRONTEND_URL || (inputs.frontend_url || secrets.STAGING_FRONTEND_URL) }}
           BACKEND_URL: ${{ github.event_name == 'workflow_run' && secrets.STAGING_BACKEND_URL || (inputs.backend_url || secrets.STAGING_BACKEND_URL) }}
           ALLOWED_HOSTS: ${{ vars.RELEASE_ALLOWED_HOSTS }}
         run: |
-          if [ -z "$FRONTEND_URL" ] || [ -z "$BACKEND_URL" ]; then
-            echo "Release verification requires BOTH a frontend URL and a backend URL (inputs empty and staging secrets unset)." >&2
-            echo "A canonical verification run must never pass having checked only one component." >&2
-            exit 1
-          fi
-          if [ -z "$ALLOWED_HOSTS" ]; then
-            echo "RELEASE_ALLOWED_HOSTS repository variable is not configured — refusing to verify against an unconstrained host allowlist." >&2
-            exit 1
-          fi
-          if [[ ! "$EXPECTED_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
-            echo "expected_sha must be the full 40-character git SHA, got: $EXPECTED_SHA" >&2
-            exit 1
-          fi
           node scripts/verify-release.mjs \
             --expected-sha "$EXPECTED_SHA" \
             --frontend "$FRONTEND_URL" \
@@ -119,5 +116,9 @@ jobs:
         with:
           name: release-verification-evidence
           path: release-verification-evidence.json
-          if-no-files-found: warn
+          # The verifier writes this file on every outcome, including a bad
+          # invocation (see scripts/verify-release.mjs) — its absence means
+          # the job crashed before even that, which is itself worth failing
+          # loudly on rather than silently warning.
+          if-no-files-found: error
           retention-days: 90

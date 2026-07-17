@@ -91,27 +91,39 @@ be made to skip:
 
 - **Both components required.** A run given only a frontend URL or only a
   backend URL fails immediately with an explicit error — it never reports a
-  pass having checked one artifact. `release-verification.yml` fails the job
-  before invoking the script at all if either `FRONTEND_URL` or
-  `BACKEND_URL` resolves empty.
-- **Full SHA only.** `--expected-sha` must be exactly 40 hex characters.
-  There is no short/prefix-match mode (the previous `--allow-short` flag has
-  been removed from the script, the workflow, and this document — Vercel and
-  Railway are both configured to expose the full SHA, so there is no
-  legitimate reason to accept a truncated one).
+  pass having checked one artifact. This check lives solely in
+  `scripts/verify-release.mjs`/`release-verify-core.mjs`; `release-verification.yml`
+  does not duplicate it in bash, so there is nothing in the workflow to drift
+  out of sync — it just passes `FRONTEND_URL`/`BACKEND_URL` through verbatim,
+  even when empty, and lets the script's fail-closed evidence-producing path
+  handle it.
+- **Full SHA only, lowercase.** `--expected-sha` must match `^[0-9a-f]{40}$`
+  exactly. There is no short/prefix-match mode and no case-insensitive
+  fallback (the previous `--allow-short` flag has been removed from the
+  script, the workflow, and this document — Vercel and Railway are both
+  configured to expose the full SHA, so there is no legitimate reason to
+  accept a truncated or uppercase one).
 - **Strict URL parsing.** Every target URL is parsed with the platform `URL`
   class and rejected if it is not `https:`, has no hostname, embeds
-  credentials (`user:pass@host`), or contains a fragment (`#...`).
+  credentials (`user:pass@host`), or contains a fragment (`#...`). A
+  rejected URL's credentials/query/fragment are never echoed into error
+  messages, logs, or the evidence file — only the sanitized
+  scheme+host+path is ever displayed.
 - **Explicit host allowlist.** Each URL's hostname must appear in the
   `--allowed-hosts` list (workflow: `vars.RELEASE_ALLOWED_HOSTS`, a
   comma-separated list of approved staging/production Vercel and Railway
   hostnames). There is no default allowlist and no substring/heuristic check
   (e.g. matching on the literal word "production") — an unconfigured
   allowlist fails the run rather than silently accepting any host.
-- **No off-host redirects.** If the fetch is redirected to a different
-  hostname than the one that was validated against the allowlist, the check
-  fails — a redirect cannot be used to serve a different deployment's answer
-  for an approved URL.
+- **No off-host or off-HTTPS redirects.** If the fetch is redirected to a
+  different hostname than the one that was validated against the allowlist,
+  or downgraded from HTTPS to HTTP on the same host, the check fails — a
+  redirect cannot be used to serve a different deployment's answer, or a
+  plaintext one, for an approved URL.
+- **Bounded fetches.** Each frontend/backend fetch carries a 10-second
+  timeout (`DEFAULT_FETCH_TIMEOUT_MS` in `release-verify-core.mjs`); an
+  unresponsive target fails the check with clear evidence instead of hanging
+  the release gate.
 - **All four backend release fields required.** `release.git_sha`,
   `release.app_version`, `release.expected_schema_revision`, and
   `release.environment` must all be present in `/health`; any missing field
@@ -123,11 +135,14 @@ be made to skip:
   `{ "<full-sha>": "<app_version>" }` mapping checked into the repo and
   reviewed like any other release artifact — there is no way to relax this
   check without such a committed, reviewable mapping.
-- **Machine-readable evidence.** Every run writes
+- **Machine-readable evidence, always.** Every run writes
   `release-verification-evidence.json` (`expected_sha`, per-component `sha`,
-  `app_version`, `expected_schema_revision`, `environment`, URLs with query
-  strings stripped, `timestamp`, and `verdict`) regardless of pass/fail, and
-  `release-verification.yml` uploads it as a build artifact (`always()`, so a
+  `app_version`, `expected_schema_revision`, `environment`, URLs with
+  credentials/query strings/fragments stripped, `timestamp`, and `verdict`)
+  regardless of pass/fail — including a bad invocation (missing flags, an
+  unparsable `--version-map`), which writes the same evidence shape with an
+  `errors` list instead of skipping the file. `release-verification.yml`
+  uploads it as a build artifact (`always()`, so a
   failing run's evidence is preserved too) for the release record.
 
 ## 4. Failed-check handling

@@ -15,7 +15,7 @@
  *
  * Usage:
  *   node scripts/verify-release.mjs \
- *     --expected-sha <full-40-char-git-sha> \
+ *     --expected-sha <full-40-char-lowercase-git-sha> \
  *     --frontend https://app.example.com \
  *     --backend https://api.example.com \
  *     --allowed-hosts app.example.com,api.example.com \
@@ -27,11 +27,15 @@
  * default allowlist, by design: an unconfigured allowlist must fail closed,
  * not silently accept any host.
  *
+ * Every outcome — including a bad invocation — writes the evidence file, so
+ * the artifact upload in release-verification.yml always has something to
+ * pick up and the audit trail is never silently missing a run.
+ *
  * Exit codes: 0 = verified, 1 = mismatch/unverifiable, 2 = bad invocation.
  * See docs/readiness/RELEASE_POLICY.md for where this runs in the pipeline.
  */
 import { readFileSync, writeFileSync } from "node:fs";
-import { verifyRelease, parseAllowlist, isFullSha } from "./lib/release-verify-core.mjs";
+import { verifyRelease, parseAllowlist, isFullSha, emptyEvidence } from "./lib/release-verify-core.mjs";
 
 const args = process.argv.slice(2);
 
@@ -47,20 +51,32 @@ const allowedHostsArg = readFlag("--allowed-hosts") || process.env.RELEASE_ALLOW
 const versionMapPath = readFlag("--version-map");
 const evidenceOutPath = readFlag("--evidence-out") || "release-verification-evidence.json";
 
+function failWithEvidence(errors, exitCode) {
+  const evidence = emptyEvidence({ expectedSha, errors });
+  writeFileSync(evidenceOutPath, JSON.stringify(evidence, null, 2) + "\n", "utf8");
+  for (const err of errors) {
+    console.error(`[FAIL] ${err}`);
+  }
+  console.log(`\nEvidence written to ${evidenceOutPath}`);
+  process.exit(exitCode);
+}
+
 if (!expectedSha || !frontendUrl || !backendUrl || !allowedHostsArg) {
-  console.error(
-    "usage: verify-release.mjs --expected-sha <full-sha> --frontend <url> --backend <url> " +
-      "--allowed-hosts <host1,host2> [--version-map <path>] [--evidence-out <path>]\n" +
-      "(both --frontend and --backend are required; --allowed-hosts may come from RELEASE_ALLOWED_HOSTS)",
+  failWithEvidence(
+    [
+      "usage: verify-release.mjs --expected-sha <full-sha> --frontend <url> --backend <url> " +
+        "--allowed-hosts <host1,host2> [--version-map <path>] [--evidence-out <path>] " +
+        "(both --frontend and --backend are required; --allowed-hosts may come from RELEASE_ALLOWED_HOSTS)",
+    ],
+    2,
   );
-  process.exit(2);
 }
 
 if (!isFullSha(expectedSha)) {
-  console.error(
-    `usage error: --expected-sha must be a full 40-character git SHA, got "${expectedSha}"`,
+  failWithEvidence(
+    [`usage error: --expected-sha must be a full 40-character lowercase git SHA, got "${expectedSha}"`],
+    2,
   );
-  process.exit(2);
 }
 
 let versionMap;
@@ -68,12 +84,14 @@ if (versionMapPath) {
   try {
     versionMap = JSON.parse(readFileSync(versionMapPath, "utf8"));
   } catch (err) {
-    console.error(
-      `usage error: could not read/parse --version-map ${versionMapPath}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+    failWithEvidence(
+      [
+        `usage error: could not read/parse --version-map ${versionMapPath}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      ],
+      2,
     );
-    process.exit(2);
   }
 }
 

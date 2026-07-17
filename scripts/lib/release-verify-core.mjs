@@ -8,7 +8,15 @@
  * See docs/readiness/RELEASE_POLICY.md for where this runs in the pipeline.
  */
 
-const FULL_SHA_RE = /^[0-9a-f]{40}$/i;
+// Git SHAs are canonically lowercase hex; matching that exactly (rather than
+// case-insensitively) keeps the "full 40-character SHA equality" contract
+// unambiguous end to end.
+const FULL_SHA_RE = /^[0-9a-f]{40}$/;
+
+// Default deadline for each verification fetch (frontend page, backend
+// /health). An unresponsive target must produce deterministic failure
+// evidence, not hang the release gate indefinitely.
+export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 
 export function isFullSha(value) {
   return typeof value === "string" && FULL_SHA_RE.test(value);
@@ -19,10 +27,16 @@ export function shaMatches(actual, expected) {
   return actual.trim().toLowerCase() === expected.trim().toLowerCase();
 }
 
-/** Strips query string and fragment from a URL for safe inclusion in evidence/logs. */
+/**
+ * Strips credentials, query string, and fragment from a URL for safe
+ * inclusion in evidence/logs — none of those may ever be persisted or
+ * echoed back, even for a URL that was ultimately rejected.
+ */
 export function stripQueryForEvidence(urlString) {
   try {
     const u = new URL(urlString);
+    u.username = "";
+    u.password = "";
     u.search = "";
     u.hash = "";
     return u.toString();
@@ -61,16 +75,23 @@ export function validateTargetUrl(urlString, allowedHosts, label) {
   try {
     url = new URL(urlString);
   } catch {
-    throw new UrlValidationError(`${label}: "${urlString}" is not a valid URL`);
+    // Do not echo the raw input back: an unparseable string could still
+    // contain credentials or other sensitive text typed into the field.
+    throw new UrlValidationError(`${label}: input is not a valid URL`);
   }
 
+  // From here on, any URL echoed into an error message goes through
+  // stripQueryForEvidence so credentials/query/fragment never reach logs or
+  // the evidence artifact, even for a URL that ends up rejected.
   if (url.protocol !== "https:") {
     throw new UrlValidationError(
-      `${label}: must be HTTPS, got "${url.protocol}" (${urlString})`,
+      `${label}: must be HTTPS, got "${url.protocol}" (${stripQueryForEvidence(url.toString())})`,
     );
   }
   if (!url.hostname) {
-    throw new UrlValidationError(`${label}: URL is missing a hostname (${urlString})`);
+    throw new UrlValidationError(
+      `${label}: URL is missing a hostname (${stripQueryForEvidence(url.toString())})`,
+    );
   }
   if (url.username || url.password) {
     throw new UrlValidationError(
@@ -78,7 +99,9 @@ export function validateTargetUrl(urlString, allowedHosts, label) {
     );
   }
   if (url.hash) {
-    throw new UrlValidationError(`${label}: must not include a fragment (${urlString})`);
+    throw new UrlValidationError(
+      `${label}: must not include a fragment (${stripQueryForEvidence(url.toString())})`,
+    );
   }
 
   const hostname = url.hostname.toLowerCase();
@@ -96,14 +119,24 @@ export function validateTargetUrl(urlString, allowedHosts, label) {
   return url;
 }
 
-/** Fails if the final (post-redirect) response host differs from the originally approved host. */
+/**
+ * Fails if the final (post-redirect) response left the originally approved
+ * host, or downgraded off HTTPS — a same-host http:// redirect would
+ * otherwise slip past a hostname-only check.
+ */
 export function assertSameHost(label, approvedHostname, finalUrlString) {
-  let finalHostname;
+  let finalUrl;
   try {
-    finalHostname = new URL(finalUrlString).hostname.toLowerCase();
+    finalUrl = new URL(finalUrlString);
   } catch {
-    throw new UrlValidationError(`${label}: redirect target is not a valid URL (${finalUrlString})`);
+    throw new UrlValidationError(`${label}: redirect target is not a valid URL`);
   }
+  if (finalUrl.protocol !== "https:") {
+    throw new UrlValidationError(
+      `${label}: redirected off HTTPS: requested https://${approvedHostname}, served by ${stripQueryForEvidence(finalUrl.toString())}`,
+    );
+  }
+  const finalHostname = finalUrl.hostname.toLowerCase();
   if (finalHostname !== approvedHostname.toLowerCase()) {
     throw new UrlValidationError(
       `${label}: redirected off the approved host: requested ${approvedHostname}, served by ${finalHostname}`,
@@ -129,11 +162,20 @@ export function resolveExpectedAppVersion(expectedSha, versionMap) {
  * Verifies the frontend target: fetches it, confirms no off-host redirect,
  * and reads the <meta name="release-sha"> tag stamped at build time.
  */
-export async function checkFrontend({ url, allowedHosts, expectedSha, fetchImpl }) {
+export async function checkFrontend({
+  url,
+  allowedHosts,
+  expectedSha,
+  fetchImpl,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+}) {
   const validated = validateTargetUrl(url, allowedHosts, "frontend");
   const approvedHostname = validated.hostname;
 
-  const res = await fetchImpl(validated.toString(), { redirect: "follow" });
+  const res = await fetchImpl(validated.toString(), {
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
   assertSameHost("frontend", approvedHostname, res.url || validated.toString());
 
   if (!res.ok) {
@@ -170,12 +212,22 @@ export async function checkFrontend({ url, allowedHosts, expectedSha, fetchImpl 
  * app_version, expected_schema_revision, and environment are all present
  * and consistent with the expected release.
  */
-export async function checkBackend({ url, allowedHosts, expectedSha, versionMap, fetchImpl }) {
+export async function checkBackend({
+  url,
+  allowedHosts,
+  expectedSha,
+  versionMap,
+  fetchImpl,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+}) {
   const validated = validateTargetUrl(url, allowedHosts, "backend");
   const approvedHostname = validated.hostname;
   const healthUrl = new URL("/health", validated);
 
-  const res = await fetchImpl(healthUrl.toString(), { redirect: "follow" });
+  const res = await fetchImpl(healthUrl.toString(), {
+    redirect: "follow",
+    signal: AbortSignal.timeout(timeoutMs),
+  });
   assertSameHost("backend", approvedHostname, res.url || healthUrl.toString());
 
   if (!res.ok) {
@@ -238,6 +290,24 @@ export async function checkBackend({ url, allowedHosts, expectedSha, versionMap,
 }
 
 /**
+ * Builds an evidence object for a run that never reached the fetch stage
+ * (missing/invalid CLI arguments, unreadable version map, etc.) — every
+ * fail-closed outcome must still produce the standard evidence shape so the
+ * artifact upload always has a file to pick up.
+ */
+export function emptyEvidence({ expectedSha, errors, now = () => new Date() }) {
+  return {
+    schema_version: 1,
+    timestamp: now().toISOString(),
+    expected_sha: expectedSha ?? null,
+    frontend: null,
+    backend: null,
+    verdict: "fail",
+    errors,
+  };
+}
+
+/**
  * Runs full release verification. Both frontend and backend are mandatory —
  * a canonical verification run must never pass having checked only one
  * component. Returns an evidence object suitable for JSON serialization and
@@ -250,8 +320,25 @@ export async function verifyRelease({
   allowedHosts,
   versionMap,
   fetchImpl = fetch,
+  timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
   now = () => new Date(),
 }) {
+  const preflightErrors = [];
+  if (!isFullSha(expectedSha)) {
+    preflightErrors.push(
+      `expected-sha must be a full 40-character lowercase git SHA, got "${expectedSha}"`,
+    );
+  }
+  if (!frontendUrl || !backendUrl) {
+    preflightErrors.push(
+      "both a frontend URL and a backend URL are required — release verification must never pass having checked only one component",
+    );
+  }
+
+  if (preflightErrors.length > 0) {
+    return emptyEvidence({ expectedSha, errors: preflightErrors, now });
+  }
+
   const evidence = {
     schema_version: 1,
     timestamp: now().toISOString(),
@@ -262,21 +349,6 @@ export async function verifyRelease({
     errors: [],
   };
 
-  if (!isFullSha(expectedSha)) {
-    evidence.errors.push(
-      `expected-sha must be a full 40-character git SHA, got "${expectedSha}"`,
-    );
-  }
-  if (!frontendUrl || !backendUrl) {
-    evidence.errors.push(
-      "both a frontend URL and a backend URL are required — release verification must never pass having checked only one component",
-    );
-  }
-
-  if (evidence.errors.length > 0) {
-    return evidence;
-  }
-
   let frontendResult;
   try {
     frontendResult = await checkFrontend({
@@ -284,6 +356,7 @@ export async function verifyRelease({
       allowedHosts,
       expectedSha,
       fetchImpl,
+      timeoutMs,
     });
   } catch (err) {
     frontendResult = { ok: false, detail: err instanceof Error ? err.message : String(err), sha: null };
@@ -303,6 +376,7 @@ export async function verifyRelease({
       expectedSha,
       versionMap,
       fetchImpl,
+      timeoutMs,
     });
   } catch (err) {
     backendResult = {

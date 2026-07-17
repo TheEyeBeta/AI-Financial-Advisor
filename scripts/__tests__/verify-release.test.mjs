@@ -14,8 +14,17 @@ function htmlWithSha(sha) {
   return `<html><head><meta name="release-sha" content="${sha}"></head><body></body></html>`;
 }
 
-function fakeFetch({ frontendHtml, backendBody, frontendUrlOverride, backendUrlOverride, frontendStatus = 200, backendStatus = 200 } = {}) {
-  return async (url, _opts) => {
+function fakeFetch({
+  frontendHtml,
+  backendBody,
+  frontendUrlOverride,
+  backendUrlOverride,
+  frontendStatus = 200,
+  backendStatus = 200,
+  recordedOpts,
+} = {}) {
+  return async (url, opts) => {
+    recordedOpts?.push(opts);
     const u = new URL(url);
     if (u.pathname === "/health") {
       return {
@@ -275,4 +284,83 @@ test("empty allowlist fails closed", async () => {
   });
   assert.equal(evidence.verdict, "fail");
   assert.match(evidence.frontend.detail, /no approved host allowlist configured/);
+});
+
+test("uppercase SHA is rejected — full SHA match must be lowercase-exact", async () => {
+  const evidence = await verifyRelease({
+    expectedSha: EXPECTED_SHA.toUpperCase(),
+    frontendUrl: FRONTEND_URL,
+    backendUrl: BACKEND_URL,
+    allowedHosts: ALLOWED_HOSTS,
+    fetchImpl: fakeFetch({ frontendHtml: htmlWithSha(EXPECTED_SHA), backendBody: goodBackendBody() }),
+  });
+  assert.equal(evidence.verdict, "fail");
+  assert.ok(evidence.errors.some((e) => e.includes("lowercase")));
+});
+
+test("credentials in a rejected URL never reach the evidence file", async () => {
+  const evidence = await verifyRelease({
+    expectedSha: EXPECTED_SHA,
+    frontendUrl: "https://sneaky:hunter2@app.example.com/",
+    backendUrl: BACKEND_URL,
+    allowedHosts: ALLOWED_HOSTS,
+    fetchImpl: fakeFetch({ frontendHtml: htmlWithSha(EXPECTED_SHA), backendBody: goodBackendBody() }),
+  });
+  assert.equal(evidence.verdict, "fail");
+  assert.doesNotMatch(evidence.frontend.url, /sneaky/);
+  assert.doesNotMatch(evidence.frontend.url, /hunter2/);
+  assert.doesNotMatch(JSON.stringify(evidence), /hunter2/);
+});
+
+test("HTTPS-to-HTTP downgrade on the same host is rejected", async () => {
+  const evidence = await verifyRelease({
+    expectedSha: EXPECTED_SHA,
+    frontendUrl: FRONTEND_URL,
+    backendUrl: BACKEND_URL,
+    allowedHosts: ALLOWED_HOSTS,
+    fetchImpl: fakeFetch({
+      frontendHtml: htmlWithSha(EXPECTED_SHA),
+      frontendUrlOverride: "http://app.example.com/",
+      backendBody: goodBackendBody(),
+    }),
+  });
+  assert.equal(evidence.verdict, "fail");
+  assert.match(evidence.frontend.detail, /redirected off HTTPS/);
+});
+
+test("fetch calls are bounded by an abort signal (no unbounded hang)", async () => {
+  const recordedOpts = [];
+  await verifyRelease({
+    expectedSha: EXPECTED_SHA,
+    frontendUrl: FRONTEND_URL,
+    backendUrl: BACKEND_URL,
+    allowedHosts: ALLOWED_HOSTS,
+    fetchImpl: fakeFetch({
+      frontendHtml: htmlWithSha(EXPECTED_SHA),
+      backendBody: goodBackendBody(),
+      recordedOpts,
+    }),
+  });
+  assert.equal(recordedOpts.length, 2);
+  for (const opts of recordedOpts) {
+    assert.ok(opts.signal instanceof AbortSignal, "fetch must be called with an AbortSignal");
+  }
+});
+
+test("a timed-out fetch produces structured failure evidence, not a hang", async () => {
+  const timeoutFetch = async () => {
+    const err = new Error("The operation was aborted due to timeout");
+    err.name = "TimeoutError";
+    throw err;
+  };
+  const evidence = await verifyRelease({
+    expectedSha: EXPECTED_SHA,
+    frontendUrl: FRONTEND_URL,
+    backendUrl: BACKEND_URL,
+    allowedHosts: ALLOWED_HOSTS,
+    fetchImpl: timeoutFetch,
+  });
+  assert.equal(evidence.verdict, "fail");
+  assert.match(evidence.frontend.detail, /timeout/i);
+  assert.match(evidence.backend.detail, /timeout/i);
 });
