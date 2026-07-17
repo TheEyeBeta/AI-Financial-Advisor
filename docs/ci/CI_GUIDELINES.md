@@ -21,7 +21,7 @@ treat that as a bug — open a PR to reconcile, do not silently lower a gate.
 | `integration-tests.yml`             | push to `main`/`staging`         | Backend integration tests against the test Supabase project                                    |
 | `deploy-staging.yml`                | push/PR to `staging`             | Railway staging deploy + full Playwright suite against the live staging URL                    |
 | *(native)* Vercel + Railway GitHub integrations | merge to `main`             | Production deploys (Actions-based `deploy.yml` removed in `5c08277`; see §3.7)                 |
-| `release-verification.yml`          | manual (post-deploy)             | Deployed frontend/backend SHA matches the expected release (`scripts/verify-release.mjs`)      |
+| `release-verification.yml`          | manual + automatic (`workflow_run` after `deploy-staging.yml` succeeds on `staging`) | Deployed frontend AND backend both match the expected release, exact 40-char SHA, host-allowlisted, evidence artifact uploaded (`scripts/verify-release.mjs`, `scripts/lib/release-verify-core.mjs`) |
 | `promote-to-prod.yml`               | manual                           | Opens a `staging → main` promotion PR                                                          |
 | `dast.yml`                          | weekly cron + manual             | OWASP ZAP baseline scan against staging                                                        |
 | `load-tests.yml`                    | manual                           | k6 chat / search / paper-trading load tests                                                    |
@@ -54,6 +54,11 @@ pytest tests/ -v          # pytest.ini supplies coverage + threshold
 export ALEMBIC_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/advisor_ci
 alembic -c alembic.ini upgrade head
 alembic -c alembic.ini check
+
+# Release verification script (only required if scripts/verify-release.mjs
+# or scripts/lib/release-verify-core.mjs changed) — mirrors
+# release-verification.yml's "Unit test the verifier" step
+npm run test:release-verify
 ```
 
 Convenience: `npm run validate` runs lint + type-check + test (without

@@ -258,6 +258,12 @@ Use separate values for staging:
 - `STAGING_FRONTEND_URL` points to the Vercel preview or staging frontend URL used by E2E.
 - `STAGING_BACKEND_URL` points to the Railway staging backend URL used for health checks.
 - Supabase staging credentials should live in the staging project and should not be reused from production.
+- `RELEASE_ALLOWED_HOSTS` (GitHub repo → Settings → Secrets and variables →
+  Actions → **Variables**, not Secrets — it is not sensitive) must list the
+  exact approved staging and production Vercel/Railway hostnames,
+  comma-separated (e.g. `app-staging.example.com,api-staging.example.com`).
+  `release-verification.yml` fails closed until this is set — see
+  `docs/readiness/RELEASE_POLICY.md` §5/§7.
 
 ## Health Checks
 

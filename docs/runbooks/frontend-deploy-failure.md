@@ -13,8 +13,11 @@
 ## Diagnostics
 ```bash
 curl -sI https://<frontend>/                       # status + cache headers
-curl -s https://<frontend>/ | grep -o '<meta name="release-sha"[^>]*>'
-node scripts/verify-release.mjs --expected-sha <full-sha> --frontend https://<frontend>
+curl -s https://<frontend>/ | grep -o '<meta name="release-sha"[^>]*>'   # quick frontend-only spot check
+# Full release-verification gate requires BOTH components — see ../readiness/RELEASE_POLICY.md §3.1:
+node scripts/verify-release.mjs --expected-sha <full-sha> \
+  --frontend https://<frontend> --backend https://<backend> \
+  --allowed-hosts <frontend-host>,<backend-host>
 ```
 - Vercel build logs (dashboard → failing deployment → Build Logs); typical causes: missing `VITE_*` env var (`assertFrontendRuntimeConfigForProduction` fails fast with a visible config-error screen), dependency install failure, CSP/meta regression.
 

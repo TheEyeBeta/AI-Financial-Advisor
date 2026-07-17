@@ -22,7 +22,10 @@ the release is not eligible. Policy: `RELEASE_POLICY.md`.
 - [ ] Staging deployment green: deploy-staging.yml run link: `______`
 - [ ] Staging E2E green: e2e job link on the same run: `______`
 - [ ] Staging release verification: release-verification.yml run link
-      showing frontend+backend serve THIS SHA: `______`
+      showing frontend+backend BOTH serve THIS SHA (full 40-char match,
+      verdict "pass" in the uploaded `release-verification-evidence.json`
+      artifact — a partial run checking only one component does not count):
+      `______`
 - [ ] Security-sensitive changes reviewed: does this release touch auth, RLS,
       rate limiting, WebSockets, CSP, or the AI proxy? If yes, second review
       recorded by: `______` (if no second human is available, a written
@@ -34,7 +37,11 @@ the release is not eligible. Policy: `RELEASE_POLICY.md`.
 
 ### Post-merge (production)
 - [ ] Production deployments completed (Vercel + Railway show this SHA).
-- [ ] release-verification.yml run against PRODUCTION urls: link `______`
+- [ ] release-verification.yml run against PRODUCTION urls (workflow_dispatch
+      with `frontend_url`/`backend_url` inputs; requires production
+      hostnames already present in the `RELEASE_ALLOWED_HOSTS` repository
+      variable — see RELEASE_POLICY.md §5/§7): link showing verdict "pass"
+      and the evidence artifact: `______`
 - [ ] Post-deployment smoke: sign-in, one chat turn, paper-trading read,
       academy load — performed by `______` at `______` UTC.
 - [ ] /health/ready: ready=true, degraded explained or false. Link/paste.
