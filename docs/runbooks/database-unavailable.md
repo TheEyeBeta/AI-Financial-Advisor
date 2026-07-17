@@ -13,7 +13,7 @@
 
 ## Diagnostics
 ```bash
-curl -s https://<backend>/health/ready | jq '.components.database'
+curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components.database'
 ```
 Supabase dashboard → Database → health/connections (pool exhaustion vs hard outage); Logs → Postgres logs.
 

@@ -59,7 +59,7 @@ jobs:
             echo "No target URLs available (inputs empty and staging secrets unset)." >&2
             exit 1
           fi
-          ARGS=(--expected-sha "$EXPECTED_SHA" --allow-short)
+          ARGS=(--expected-sha "$EXPECTED_SHA")
           [ -n "$FRONTEND_URL" ] && ARGS+=(--frontend "$FRONTEND_URL")
           [ -n "$BACKEND_URL" ] && ARGS+=(--backend "$BACKEND_URL")
           node scripts/verify-release.mjs "${ARGS[@]}"

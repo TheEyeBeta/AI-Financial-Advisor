@@ -19,7 +19,7 @@
 Sentry frontend; Vercel deployment logs; PostHog (if enabled) for funnel impact.
 
 ## Recovery
-Rollback the frontend deployment if release-correlated; otherwise fix-forward through the normal flow. For third-party outage (Sentry/PostHog SDK failing), the app must still run — telemetry is non-blocking by design; verify that held.
+Rollback the frontend deployment if release-correlated; otherwise fix-forward through the normal flow. For third-party outage (Sentry/PostHog SDK failing), telemetry is non-blocking by design — explicitly verify that this held: with the telemetry endpoints unreachable, the app must still load and the core journeys (sign-in, advisor, trading) must still work; if any journey breaks when telemetry is down, that is itself a SEV-2 defect to fix.
 
 ## Rollback
 Vercel promote-previous (instant); `../readiness/ROLLBACK.md` §Frontend.

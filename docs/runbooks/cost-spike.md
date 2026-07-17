@@ -29,7 +29,9 @@ As above; billing alert config is EXTERNAL (verify thresholds actually exist —
 If a deploy changed model/prompt economics (e.g., switched to a pricier model), roll it back — model changes require eval + cost evidence per `AI_CONTROLS.md` §4.
 
 ## Validation
-Daily spend back to projected band for 48 h; no `quota_exceeded` events.
+Daily spend back within the projected band for 48 h, and no *sustained or
+unexplained* `quota_exceeded`/fallback events (isolated provider-side quota
+events with fallback working are not an incident by themselves).
 
 ## Communication
 Internal unless users hit degraded AI states; then a brief status note.

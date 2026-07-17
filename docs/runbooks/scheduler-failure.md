@@ -24,7 +24,13 @@ Railway logs + service env vars; Sentry backend.
 3. After restart, trigger a manual run of the stalest job via the admin API rather than waiting a full cycle.
 
 ## Rollback
-If a deploy broke a job, roll back backend; scheduled state is idempotent-by-design on next run (refresh jobs overwrite).
+If a deploy broke a job, roll back the backend. Rerun safety is per-job, not
+universal: the **refresh-style jobs** (meridian/intelligence context refresh,
+memory-agent refresh) overwrite current state and are safe to rerun; jobs
+that **append or write conditionally** (ranking runs that append history,
+admin jobs) should be checked for a partial run before re-triggering so a
+rerun doesn't double-append. When unsure, inspect the job's last output
+timestamps before firing it again.
 
 ## Validation
 Each cadence fires once post-recovery (check logs at 15m for memory job); rankings timestamp advances after 01:00 UTC run or manual trigger.

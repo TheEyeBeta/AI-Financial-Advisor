@@ -12,7 +12,13 @@
 3. Provider key (OpenAI etc.) → revoke, set/verify provider budget cap, check usage dashboard for the abuse window (feeds `cost-spike.md`).
 
 ## Diagnostics
-- Exposure window: when did the key first appear where it shouldn't? (git history: `git log -S '<fragment>'`; CI logs; chat/paste source.)
+- **Never paste the full secret into a shell command** — it would persist in
+  shell history, process listings, and possibly audit logs, widening the
+  leak. Search git history with the secret scanner (gitleaks, which matches
+  by pattern) or a short non-identifying prefix/hashed fragment only.
+- Exposure window: when did the key first appear where it shouldn't?
+  (gitleaks full-history scan per `SECRET_SCANNING.md`; CI logs; chat/paste
+  source.)
 - gitleaks full-history scan: `docs/security/SECRET_SCANNING.md` procedure.
 - Provider usage dashboards for anomalous consumption in the window.
 

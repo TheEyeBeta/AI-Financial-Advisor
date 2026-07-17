@@ -14,7 +14,8 @@ already depends on (see Migration limitations below), or the defect is narrow.
 
 ## Procedure — frontend (minutes)
 Vercel → Deployments → last good production deployment → **Promote to Production**.
-Verify: `node scripts/verify-release.mjs --expected-sha <good-sha> --frontend <url> --allow-short`.
+Verify: `node scripts/verify-release.mjs --expected-sha <full-good-sha> --frontend <url>`
+(exact match; `--allow-short` is for ad-hoc diagnostics only, never the gate).
 
 ## Procedure — backend
 1. Check migration entanglement FIRST:

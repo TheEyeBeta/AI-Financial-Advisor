@@ -13,10 +13,15 @@ cover what automation cannot: actual screen-reader announcement quality.
 
 | ID | AT + browser | Platform | Priority |
 | --- | --- | --- | --- |
-| SR-1 | NVDA (latest) + Chrome | Windows 11 | Blocking before Cohort 1 |
-| SR-2 | VoiceOver + Safari | macOS (current) | Blocking before Cohort 1 |
-| SR-3 | TalkBack + Chrome | Android 14+ | Blocking before Cohort 2 |
-| SR-4 | JAWS (2024+) + Chrome | Windows 11 | Optional (run if licence available) |
+| SR-1 | NVDA + Chrome | Windows 11 | Blocking before Cohort 1 |
+| SR-2 | VoiceOver + Safari | macOS | Blocking before Cohort 1 |
+| SR-3 | TalkBack + Chrome | Android | Blocking before Cohort 2 |
+| SR-4 | JAWS + Chrome | Windows 11 | Optional (run if licence available) |
+
+The table above names the tool pairing only — "latest" is a moving target,
+so **each run must record the exact AT version, browser version, and OS
+version** in the results table; a result without versions is not
+reproducible evidence.
 
 Common setup: staging URL, fresh test account per run (`sr-test+<date>@…`),
 release SHA recorded from the page's `release-sha` meta tag.
@@ -91,9 +96,9 @@ release SHA recorded from the page's `release-sha` meta tag.
 
 ## Recording results
 
-| Date | Config | Script | Build SHA | Tester | Result (pass / fail + issues filed) |
-| --- | --- | --- | --- | --- | --- |
-| — | — | — | — | — | *no runs recorded yet — status NOT VERIFIED* |
+| Date | Config | AT / browser / OS versions | Script | Build SHA | Tester | Result (pass / fail + issues filed) |
+| --- | --- | --- | --- | --- | --- | --- |
+| — | — | — | — | — | — | *no runs recorded yet — status NOT VERIFIED* |
 
 File issues with label `a11y` + severity per
 `docs/readiness/INCIDENT_SEVERITY.md` analogues (blocking = SEV-2-equivalent

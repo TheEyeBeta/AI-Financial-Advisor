@@ -10,7 +10,7 @@
 This guard exists to *prevent* damage — do not bypass it. Identify which side is behind:
 
 ```bash
-curl -s https://<backend>/health/ready | jq '.components.schema_revision'
+curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components.schema_revision'
 # {"status":"error","expected":"00xx_…","actual":"00yy_…"}
 ```
 

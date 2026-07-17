@@ -13,7 +13,7 @@
 
 ## Diagnostics
 ```bash
-curl -s https://<backend>/health/ready | jq '.components.configuration'   # JWT secret present?
+curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components.configuration'   # JWT secret present?
 ```
 - Backend logs: `app/services/auth.py` rejection reasons (expired vs signature vs malformed).
 - Supabase dashboard → Authentication → Logs (provider errors, rate limits).

@@ -93,10 +93,10 @@
         "integration": [],
         "e2e": []
       },
-      "manual_required": false,
+      "manual_required": true,
       "status": "AUTOMATED_TEST_PASSED",
       "evidence": ["src/pages/__tests__/ResetPassword.test.tsx"],
-      "notes": "Was broken (PKCE ?code= links rejected; 6-char length check); fixed 2026-07-14 with 5 regression tests. Email delivery leg still needs one manual staging pass."
+      "notes": "Was broken (PKCE ?code= links rejected; 6-char length check); fixed 2026-07-14 with 5 regression tests. Email delivery leg still needs one manual staging pass — hence manual_required despite the automated pass."
     },
     {
       "id": "auth-expired-reset-link",
@@ -975,7 +975,8 @@
       },
       "manual_required": false,
       "status": "AUTOMATED_TEST_PASSED",
-      "evidence": ["backend/websearch_service/tests/test_trade_engine.py"]
+      "evidence": ["backend/websearch_service/tests/test_trade_engine.py"],
+      "notes": "Known hardening gap: no code-level maximum-snapshot-age gate on trade execution — trades execute against snapshots of any age. Operational threshold (one trading day, then owner decision) documented in docs/runbooks/market-data-unavailable.md; a code-level gate is a candidate product change, not assumed."
     },
     {
       "id": "trading-rollback",

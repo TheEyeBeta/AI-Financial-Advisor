@@ -24,7 +24,14 @@ Supabase SQL editor, audit log, Sentry (the writing bug often threw somewhere).
 
 ## Recovery
 Ordered preference (per `docs/DB_RECOVERY.md`):
-1. **Derive-and-repair:** for trading state, the journal is the source of truth — rebuild positions/history from `trading.trade_journal` (the ledger rebuild path, `paper-trading-sync.ts` semantics).
+1. **Derive-and-repair:** for trading state, the journal is the source of
+   truth — but **validate the journal first**: if the incident could have
+   affected journal writes, a rebuild faithfully reproduces the corruption.
+   Check integrity and coverage (row counts vs audit trail, timestamps
+   monotonic per account, no gaps in the incident window, spot-check against
+   the containment snapshot), run the ledger rebuild
+   (`paper-trading-sync.ts` semantics) against an **isolated copy** and
+   reconcile its output before applying anything to production.
 2. **Targeted restore:** pull affected rows from backup into an isolated restore (`docs/recovery/ISOLATED_RESTORE_PROCEDURE.md`), reconcile, apply surgically.
 3. **Full PITR restore:** last resort, owner authorization required — loses post-corruption writes; see `backup-restore.md`.
 

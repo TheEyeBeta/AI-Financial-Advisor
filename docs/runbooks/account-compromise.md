@@ -20,7 +20,14 @@
 Supabase Auth logs, audit log, Sentry (unusual client errors can indicate credential-stuffing tooling).
 
 ## Recovery
-1. Verify the real owner out-of-band (registered email).
+1. Verify the real owner before restoring — the registered email alone is
+   **not** sufficient proof (if the mailbox is what was compromised, an
+   email check hands the account back to the attacker). Require a second
+   independent signal — e.g. Google-account sign-in for OAuth users, a
+   detail only the owner would know from pre-incident history (signup date,
+   early activity they can describe), or a live conversation — or route the
+   case to explicit owner manual review and record the decision in the
+   incident issue.
 2. Password reset + (if Google) advise provider-side security check.
 3. Restore via the tested restore endpoint (email must match — `test_restore_rejects_email_mismatch`).
 4. If credential-stuffing suspected across accounts: check rate-limit/abuse logs for the source pattern (`abuse-rate-limit.md`) and consider a forced reset for affected accounts only.

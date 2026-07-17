@@ -32,10 +32,16 @@ Rollback target:        <SHA + the admission actions that reverse this
                          cohort accounts)>
 ```
 
-Hard-rule check (all must be "yes" to expand — STAGED_LAUNCH.md §5):
+Hard-rule check (STAGED_LAUNCH.md §5). Every rule must carry an explicit
+`PASS` or `FAIL` with evidence and an assessment timestamp — a blank is
+indistinguishable from "not assessed" and invalidates the record. `EXPAND`
+is rejected unless **all six are explicitly PASS**:
 
 ```text
-[ ] No unresolved SEV-1/SEV-2        [ ] No data-integrity defect
-[ ] No mandatory CI failure          [ ] No critical a11y defect
-[ ] AI cost controlled               [ ] No active incident right now
+No unresolved SEV-1/SEV-2:   PASS/FAIL  evidence: ______  assessed: ____ UTC
+No data-integrity defect:    PASS/FAIL  evidence: ______  assessed: ____ UTC
+No mandatory CI failure:     PASS/FAIL  evidence: ______  assessed: ____ UTC
+No critical a11y defect:     PASS/FAIL  evidence: ______  assessed: ____ UTC
+AI cost controlled:          PASS/FAIL  evidence: ______  assessed: ____ UTC
+No active incident now:      PASS/FAIL  evidence: ______  assessed: ____ UTC
 ```

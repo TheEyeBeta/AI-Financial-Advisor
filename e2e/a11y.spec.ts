@@ -96,22 +96,33 @@ test.describe('Keyboard access', () => {
     }
     expect(focusedSignIn, 'Sign in button must be reachable via Tab').toBe(true);
 
-    // (2) Keyboard focus must be visibly indicated (WCAG 2.4.7). The shadcn
-    // button uses focus-visible ring styles, which render as a box-shadow.
+    // (2) Keyboard focus must be visibly indicated (WCAG 2.4.7). A decorative
+    // box-shadow would satisfy a naive "has any shadow" check, so compare the
+    // focused styles against the same element's unfocused styles — the focus
+    // indicator must be a *change*, not a coincidence.
     const focusIndication = await page.evaluate(() => {
       const el = document.activeElement;
       if (!(el instanceof HTMLElement)) return { visible: false, detail: 'no element' };
-      const style = window.getComputedStyle(el);
-      const hasOutline = style.outlineStyle !== 'none' && parseFloat(style.outlineWidth) > 0;
-      const hasRing = style.boxShadow !== 'none' && style.boxShadow !== '';
+      const focusVisible = el.matches(':focus-visible');
+      const focused = window.getComputedStyle(el);
+      const focusedOutline = `${focused.outlineStyle}/${focused.outlineWidth}/${focused.outlineColor}`;
+      const focusedShadow = focused.boxShadow;
+      el.blur();
+      const blurred = window.getComputedStyle(el);
+      const blurredOutline = `${blurred.outlineStyle}/${blurred.outlineWidth}/${blurred.outlineColor}`;
+      const blurredShadow = blurred.boxShadow;
+      el.focus();
+      const changed = focusedOutline !== blurredOutline || focusedShadow !== blurredShadow;
       return {
-        visible: el.matches(':focus-visible') && (hasOutline || hasRing),
-        detail: `focus-visible=${el.matches(':focus-visible')} outline=${style.outlineStyle}/${style.outlineWidth} boxShadow=${style.boxShadow.slice(0, 80)}`,
+        visible: focusVisible && changed,
+        detail:
+          `focus-visible=${focusVisible} outline ${blurredOutline} -> ${focusedOutline}; ` +
+          `boxShadow "${blurredShadow.slice(0, 60)}" -> "${focusedShadow.slice(0, 60)}"`,
       };
     });
     expect(
       focusIndication.visible,
-      `Focused Sign In control must show a visible focus indicator (${focusIndication.detail})`,
+      `Focused Sign In control must show a focus-specific visible indicator (${focusIndication.detail})`,
     ).toBe(true);
 
     // (3a) Enter activates the control and (4) the dialog opens.
@@ -131,15 +142,38 @@ test.describe('Keyboard access', () => {
       )
       .toBe(true);
 
-    // (6) The dialog contains focus: a full Tab cycle never leaves it.
-    for (let i = 0; i < 8; i += 1) {
+    // (6) The dialog contains focus for a *complete* Tab cycle: record the
+    // element focus starts on, Tab with a safety bound, assert every stop
+    // stays inside the dialog, and require focus to return to the start —
+    // proving the cycle actually wrapped rather than just bounding N presses.
+    await page.evaluate(() => {
+      const el = document.activeElement;
+      if (el instanceof HTMLElement) el.dataset.focusCycleStart = 'true';
+    });
+    let cycleCompleted = false;
+    for (let i = 0; i < 25; i += 1) {
       await page.keyboard.press('Tab');
-      const stillInside = await page.evaluate(() => {
+      const state = await page.evaluate(() => {
         const openDialog = document.querySelector('[role="dialog"]');
-        return openDialog?.contains(document.activeElement) ?? false;
+        const el = document.activeElement;
+        return {
+          inside: openDialog?.contains(el) ?? false,
+          backAtStart: el instanceof HTMLElement && el.dataset.focusCycleStart === 'true',
+        };
       });
-      expect(stillInside, `Focus escaped the sign-in dialog on Tab press ${i + 1}`).toBe(true);
+      expect(state.inside, `Focus escaped the sign-in dialog on Tab press ${i + 1}`).toBe(true);
+      if (state.backAtStart) {
+        cycleCompleted = true;
+        break;
+      }
     }
+    expect(cycleCompleted, 'Tab must cycle back to its starting element inside the dialog').toBe(
+      true,
+    );
+    await page.evaluate(() => {
+      const start = document.querySelector<HTMLElement>('[data-focus-cycle-start]');
+      if (start) delete start.dataset.focusCycleStart;
+    });
 
     // (7) Escape closes the dialog (focus is not permanently trapped).
     await page.keyboard.press('Escape');

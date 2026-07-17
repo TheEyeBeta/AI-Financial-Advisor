@@ -8,11 +8,16 @@
 
 ## Immediate containment
 1. Confirm the fallback engaged: backend logs show memory-store fallback (`test_get_store_falls_back_to_memory_without_redis` behaviour).
-2. If running >1 web replica, scale to 1 replica until Redis returns (restores correctness of limits/tickets at the cost of capacity).
+2. Understand degraded-mode semantics while Redis is down: limits and WS
+   tickets are **process-local and reset on every backend restart** — that
+   is inherent to the memory fallback, not something to "fix" mid-incident.
+3. If running >1 web replica, scale to 1 until Redis returns — this removes
+   cross-replica inconsistency (each replica keeping its own counters); it
+   does **not** restore persistence across restarts.
 
 ## Diagnostics
 ```bash
-curl -s https://<backend>/health/ready | jq '.components.rate_limit'
+curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components.rate_limit'
 redis-cli -u "$REDIS_URL" ping        # from a trusted shell, never paste the URL into logs
 ```
 Provider dashboard (Railway plugin / Upstash): memory ceiling, connection cap, eviction events.
@@ -29,7 +34,10 @@ Redis provider dashboard; Railway backend logs.
 Not applicable.
 
 ## Validation
-`rate_limit` component `ok`; a WS ticket round-trip succeeds; limits survive a backend restart (issue a few requests, restart, confirm counters persisted).
+**After Redis has recovered** (these checks are meaningless in fallback mode):
+`rate_limit` component `ok`; a WS ticket round-trip succeeds; limits survive a
+backend restart (issue a few requests, restart, confirm counters persisted);
+with >1 replica, counters are consistent across replicas.
 
 ## Communication
 None user-facing unless combined with another incident.

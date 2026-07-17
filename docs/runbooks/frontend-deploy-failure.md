@@ -14,7 +14,7 @@
 ```bash
 curl -sI https://<frontend>/                       # status + cache headers
 curl -s https://<frontend>/ | grep -o '<meta name="release-sha"[^>]*>'
-node scripts/verify-release.mjs --expected-sha <sha> --frontend https://<frontend> --allow-short
+node scripts/verify-release.mjs --expected-sha <full-sha> --frontend https://<frontend>
 ```
 - Vercel build logs (dashboard → failing deployment → Build Logs); typical causes: missing `VITE_*` env var (`assertFrontendRuntimeConfigForProduction` fails fast with a visible config-error screen), dependency install failure, CSP/meta regression.
 

@@ -7,10 +7,12 @@
 - **User impact:** backend features unavailable while not ready.
 
 ## Immediate containment
-Read the components map — readiness tells you which dependency failed:
+Read the components map — readiness tells you which dependency failed.
+**Note the envelope:** when readiness fails, FastAPI wraps the report as
+`{"detail": <report>}` in the 503 body, so normalize with `.detail // .`:
 
 ```bash
-curl -s https://<backend>/health/ready | jq '.components'
+curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components'
 ```
 
 | Failing component | Go to |
@@ -23,7 +25,9 @@ curl -s https://<backend>/health/ready | jq '.components'
 | `search_api` (optional) | informational only — cannot fail readiness, only `degraded` |
 
 ## Diagnostics
-`release` block in the same payload gives SHA + expected Alembic revision — confirm you're diagnosing the build you think you are.
+The `release` block in the same normalized payload
+(`jq '(.detail // .) | .release'`) gives SHA + expected Alembic revision —
+confirm you're diagnosing the build you think you are.
 
 ## Dashboards / logs
 Railway logs (startup + healthcheck hits); Supabase status page; Sentry backend.

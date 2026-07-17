@@ -28,7 +28,7 @@ Release SHA(s) serving during window: <list>
 - Availability (outside-in): __%                              [SLO probe]
 - Backend 5xx rate: __%                                       [Sentry/logs]
 - Frontend error-affected sessions: __%                       [Sentry]
-- p95 chat latency: __ s
+- p95 chat latency: __ s                                      [source: Sentry backend transaction p95 for /api/chat (or backend request-duration logs), UTC window: ____]
 
 ## Operations & cost
 - Support requests: __ (themes: …)

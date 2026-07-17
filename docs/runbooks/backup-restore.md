@@ -9,7 +9,13 @@ project before it is trusted (see `docs/recovery/BACKUP_VERIFICATION_CHECKLIST.m
 
 ## Immediate containment
 1. **Owner authorization required before any production restore** — a restore is itself a destructive operation.
-2. Freeze writes where possible (announce downtime; backend can be scaled to zero to guarantee no writes race the restore).
+2. Freeze **every** write path, not just the web backend: scale web replicas
+   to zero, stop the scheduler/worker process (`SCHEDULER_ENABLED` replica —
+   it writes on its own cadence), and halt any admin scripts or direct
+   clients. Announce downtime.
+3. Verify no active write connections remain before restore/cut-over
+   (Supabase dashboard → Database → connections; confirm only your own
+   session is connected).
 
 ## Diagnostics
 - Supabase dashboard → Database → Backups: available snapshots/PITR window for the project's plan. Confirm the actual retention **now**, not from memory.

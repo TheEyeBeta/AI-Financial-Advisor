@@ -235,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
         print("--target is required unless --dry-run", file=sys.stderr)
         return 2
 
+    if not args.target.startswith(("http://", "https://")):
+        print("--target must be an http:// or https:// URL", file=sys.stderr)
+        return 2
+
     if args.categories:
         wanted = {c.strip() for c in args.categories.split(",")}
         unknown = wanted - set(REQUIRED_CATEGORY_COUNTS)

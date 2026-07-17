@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
 /**
@@ -59,13 +59,30 @@ describe("critical-journeys.json", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
+  it("has a valid updated date", () => {
+    expect(matrix.updated, "matrix.updated must be YYYY-MM-DD").toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it("every journey has the required fields with allowed values", () => {
     for (const j of matrix.journeys) {
       expect(j.id, "journey id").toMatch(/^[a-z0-9-]+$/);
       expect(ALLOWED_PRIORITIES, `${j.id}: priority`).toContain(j.priority);
       expect(ALLOWED_STATUSES, `${j.id}: status`).toContain(j.status);
-      expect(typeof j.name, `${j.id}: name`).toBe("string");
-      expect(typeof j.expected, `${j.id}: expected`).toBe("string");
+      // Runtime-check every declared field — the TypeScript cast above
+      // performs no validation on the JSON.
+      for (const field of [
+        "name",
+        "area",
+        "preconditions",
+        "steps",
+        "expected",
+        "data_written",
+      ] as const) {
+        expect(typeof j[field], `${j.id}: ${field} must be a non-empty string`).toBe("string");
+        expect(j[field].length, `${j.id}: ${field} must be non-empty`).toBeGreaterThan(0);
+      }
+      expect(typeof j.manual_required, `${j.id}: manual_required`).toBe("boolean");
+      expect(Array.isArray(j.external_deps), `${j.id}: external_deps array`).toBe(true);
       expect(Array.isArray(j.evidence), `${j.id}: evidence array`).toBe(true);
       for (const layer of ["unit", "integration", "e2e"] as const) {
         expect(Array.isArray(j.coverage?.[layer]), `${j.id}: coverage.${layer}`).toBe(true);
@@ -73,7 +90,10 @@ describe("critical-journeys.json", () => {
     }
   });
 
-  it("AUTOMATED_TEST_PASSED requires at least one existing evidence file", () => {
+  it("AUTOMATED_TEST_PASSED requires at least one existing, test-shaped evidence file", () => {
+    // A doc or source file existing is not test evidence. At least one cited
+    // path must be a regular file that matches the repo's test conventions.
+    const testFilePattern = /(\.test\.[jt]sx?|\.spec\.[jt]s|\/test_[^/]+\.py)$/;
     for (const j of matrix.journeys) {
       if (j.status !== "AUTOMATED_TEST_PASSED") continue;
       expect(
@@ -86,6 +106,14 @@ describe("critical-journeys.json", () => {
           `${j.id}: cited evidence file does not exist: ${path}`,
         ).toBe(true);
       }
+      const hasTestArtifact = j.evidence.some((path) => {
+        const full = resolve(repoRoot, path);
+        return testFilePattern.test(path) && existsSync(full) && statSync(full).isFile();
+      });
+      expect(
+        hasTestArtifact,
+        `${j.id}: AUTOMATED_TEST_PASSED must cite at least one actual test file (*.test.*, *.spec.*, test_*.py)`,
+      ).toBe(true);
     }
   });
 
