@@ -2,24 +2,36 @@
 /**
  * Release-verification smoke check (Phase 1 — exact-SHA enforcement).
  *
- * Confirms that a deployed frontend and backend both correspond to the
- * expected release SHA before the release is declared live:
+ * Confirms that a deployed frontend AND a deployed backend both correspond
+ * to the expected release SHA before the release is declared live. Both
+ * components are mandatory: this check must never pass having verified
+ * only one of them.
  *
  *   - Frontend: fetches the served index.html and reads the
  *     <meta name="release-sha"> tag stamped at build time (vite.config.ts).
  *   - Backend: fetches /health and reads release.git_sha, release.app_version,
- *     and release.expected_schema_revision (app/health_checks.py).
+ *     release.expected_schema_revision, and release.environment
+ *     (app/health_checks.py).
  *
  * Usage:
  *   node scripts/verify-release.mjs \
- *     --expected-sha <full-git-sha> \
- *     [--frontend https://app.example.com] \
- *     [--backend https://api.example.com] \
- *     [--allow-short]   # accept prefix matches (Vercel/Railway may shorten)
+ *     --expected-sha <full-40-char-git-sha> \
+ *     --frontend https://app.example.com \
+ *     --backend https://api.example.com \
+ *     --allowed-hosts app.example.com,api.example.com \
+ *     [--version-map path/to/release-version-map.json] \
+ *     [--evidence-out path/to/evidence.json]
+ *
+ * --allowed-hosts may also be supplied via the RELEASE_ALLOWED_HOSTS env var
+ * (comma-separated hostnames). At least one is required — there is no
+ * default allowlist, by design: an unconfigured allowlist must fail closed,
+ * not silently accept any host.
  *
  * Exit codes: 0 = verified, 1 = mismatch/unverifiable, 2 = bad invocation.
  * See docs/readiness/RELEASE_POLICY.md for where this runs in the pipeline.
  */
+import { readFileSync, writeFileSync } from "node:fs";
+import { verifyRelease, parseAllowlist, isFullSha } from "./lib/release-verify-core.mjs";
 
 const args = process.argv.slice(2);
 
@@ -31,105 +43,64 @@ function readFlag(name) {
 const expectedSha = readFlag("--expected-sha");
 const frontendUrl = readFlag("--frontend");
 const backendUrl = readFlag("--backend");
-const allowShort = args.includes("--allow-short");
+const allowedHostsArg = readFlag("--allowed-hosts") || process.env.RELEASE_ALLOWED_HOSTS;
+const versionMapPath = readFlag("--version-map");
+const evidenceOutPath = readFlag("--evidence-out") || "release-verification-evidence.json";
 
-if (!expectedSha || (!frontendUrl && !backendUrl)) {
+if (!expectedSha || !frontendUrl || !backendUrl || !allowedHostsArg) {
   console.error(
-    "usage: verify-release.mjs --expected-sha <sha> [--frontend <url>] [--backend <url>] [--allow-short]",
+    "usage: verify-release.mjs --expected-sha <full-sha> --frontend <url> --backend <url> " +
+      "--allowed-hosts <host1,host2> [--version-map <path>] [--evidence-out <path>]\n" +
+      "(both --frontend and --backend are required; --allowed-hosts may come from RELEASE_ALLOWED_HOSTS)",
   );
   process.exit(2);
 }
 
-function shaMatches(actual, expected) {
-  if (!actual) return false;
-  if (actual === expected) return true;
-  if (!allowShort) return false;
-  // Prefix match either direction, minimum 7 chars to avoid trivial matches.
-  const shorter = actual.length < expected.length ? actual : expected;
-  const longer = actual.length < expected.length ? expected : actual;
-  return shorter.length >= 7 && longer.startsWith(shorter);
-}
-
-let failed = false;
-
-function report(label, ok, detail) {
-  const status = ok ? "OK  " : "FAIL";
-  console.log(`[${status}] ${label}: ${detail}`);
-  if (!ok) failed = true;
-}
-
-function assertSameHost(label, requestedUrl, res) {
-  // A verification fetch that was redirected off the requested host is no
-  // longer checking the intended deployment — fail instead of following the
-  // redirect target's answer.
-  const requestedHost = new URL(requestedUrl).host;
-  const finalHost = new URL(res.url).host;
-  if (requestedHost !== finalHost) {
-    report(label, false, `redirected off-host: requested ${requestedHost}, served by ${finalHost}`);
-    return false;
-  }
-  return true;
-}
-
-async function checkFrontend() {
-  const res = await fetch(frontendUrl, { redirect: "follow" });
-  if (!assertSameHost("frontend", frontendUrl, res)) return;
-  if (!res.ok) {
-    report("frontend", false, `HTTP ${res.status} from ${frontendUrl}`);
-    return;
-  }
-  const html = await res.text();
-  const match = html.match(/<meta[^>]+name="release-sha"[^>]+content="([^"]*)"/);
-  const served = match?.[1]?.trim();
-  if (!served || served === "unknown") {
-    report(
-      "frontend",
-      false,
-      "no release-sha meta tag in served HTML (build did not receive VITE_RELEASE_SHA / VITE_VERCEL_GIT_COMMIT_SHA)",
-    );
-    return;
-  }
-  report(
-    "frontend",
-    shaMatches(served, expectedSha),
-    `served=${served} expected=${expectedSha}`,
+if (!isFullSha(expectedSha)) {
+  console.error(
+    `usage error: --expected-sha must be a full 40-character git SHA, got "${expectedSha}"`,
   );
+  process.exit(2);
 }
 
-async function checkBackend() {
-  const healthUrl = new URL("/health", backendUrl);
-  const res = await fetch(healthUrl, { redirect: "follow" });
-  if (!assertSameHost("backend", healthUrl, res)) return;
-  if (!res.ok) {
-    report("backend", false, `HTTP ${res.status} from ${backendUrl}/health`);
-    return;
-  }
-  const body = await res.json();
-  const release = body.release ?? {};
-  const served = (release.git_sha ?? "").trim();
-  if (!served) {
-    report(
-      "backend",
-      false,
-      "release.git_sha missing from /health (GIT_SHA / RAILWAY_GIT_COMMIT_SHA not set on the deployment)",
+let versionMap;
+if (versionMapPath) {
+  try {
+    versionMap = JSON.parse(readFileSync(versionMapPath, "utf8"));
+  } catch (err) {
+    console.error(
+      `usage error: could not read/parse --version-map ${versionMapPath}: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
     );
-    return;
+    process.exit(2);
   }
-  report(
-    "backend",
-    shaMatches(served, expectedSha),
-    `served=${served} expected=${expectedSha} app_version=${release.app_version ?? "?"} schema=${release.expected_schema_revision ?? "?"} env=${release.environment ?? "?"}`,
-  );
 }
 
-try {
-  if (frontendUrl) await checkFrontend();
-  if (backendUrl) await checkBackend();
-} catch (err) {
-  report("fetch", false, err instanceof Error ? err.message : String(err));
-}
+const allowedHosts = parseAllowlist(allowedHostsArg);
 
-if (failed) {
+const evidence = await verifyRelease({
+  expectedSha,
+  frontendUrl,
+  backendUrl,
+  allowedHosts,
+  versionMap,
+});
+
+writeFileSync(evidenceOutPath, JSON.stringify(evidence, null, 2) + "\n", "utf8");
+
+for (const err of evidence.errors) {
+  console.error(`[FAIL] ${err}`);
+}
+if (evidence.frontend) {
+  console.log(`[${evidence.frontend.ok ? "OK  " : "FAIL"}] frontend: ${evidence.frontend.detail}`);
+}
+if (evidence.backend) {
+  console.log(`[${evidence.backend.ok ? "OK  " : "FAIL"}] backend: ${evidence.backend.detail}`);
+}
+console.log(`\nEvidence written to ${evidenceOutPath}`);
+
+if (evidence.verdict !== "pass") {
   console.error("\nRelease verification FAILED — deployed artifacts do not match the expected SHA.");
   process.exit(1);
 }

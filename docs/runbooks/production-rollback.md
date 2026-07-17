@@ -14,8 +14,6 @@ already depends on (see Migration limitations below), or the defect is narrow.
 
 ## Procedure — frontend (minutes)
 Vercel → Deployments → last good production deployment → **Promote to Production**.
-Verify: `node scripts/verify-release.mjs --expected-sha <full-good-sha> --frontend <url>`
-(exact match; `--allow-short` is for ad-hoc diagnostics only, never the gate).
 
 ## Procedure — backend
 1. Check migration entanglement FIRST:
@@ -25,7 +23,22 @@ git log --oneline <good-sha>..<bad-sha> -- backend/websearch_service/alembic/ver
 ```
    Empty log = safe; non-empty = the rollback target expects an older schema → readiness will (correctly) fail the old build against the new schema. Prefer fix-forward, or accept the documented downgrade path below.
 2. Railway → service → Deployments → redeploy the previous good deployment.
-3. Verify `/health/ready` green and release SHA via `verify-release.mjs --backend`.
+
+## Verify the rollback (both components, exact SHA — mandatory)
+Once both platforms have redeployed the previous good SHA:
+```bash
+node scripts/verify-release.mjs \
+  --expected-sha <full-good-sha> \
+  --frontend <production-frontend-url> \
+  --backend <production-backend-url> \
+  --allowed-hosts <production-frontend-host>,<production-backend-host>
+```
+`verify-release.mjs` requires BOTH `--frontend` and `--backend` — a run given
+only one is a usage error, not a partial pass. It also requires the full
+40-character SHA (there is no short-SHA mode) and rejects any host outside
+`--allowed-hosts`. Check `release-verification-evidence.json` for the
+per-field detail (`git_sha`, `app_version`, `expected_schema_revision`,
+`environment`) if the run fails.
 
 ## Migration rollback limitations (read before touching)
 - Alembic `downgrade` steps exist but are **not** guaranteed lossless for data-bearing changes; several revisions are effectively forward-only.
