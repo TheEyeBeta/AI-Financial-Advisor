@@ -2,8 +2,13 @@
 
 **Owner:** TheEyeBeta · **Created:** 2026-07-16 (Phase 8)
 **Execution status: NOT VERIFIED — no run of any script below has been
-recorded yet.** Log results in the table at the bottom; a script is only
-"passed" when a dated entry with tester + build SHA exists.
+recorded yet.** Log results in the table at the bottom. A script counts as
+**verified** only when its row has ALL of: `Result = pass`, a date and named
+tester, exact AT/browser/OS versions, and a real build SHA (non-empty, not
+`unknown`, and matching the release under evaluation). A row with a `fail`
+result, missing versions, or a placeholder SHA is a *record*, not a pass —
+the staged-launch gates (`docs/readiness/STAGED_LAUNCH.md` §3) require
+passing entries by this definition, not merely logged rows.
 
 Automated coverage context: axe scans + keyboard/zoom assertions run in CI
 (`e2e/a11y.spec.ts`, gates listed in `BETA_SUPPORT_MATRIX.md`). These scripts

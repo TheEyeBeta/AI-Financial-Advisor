@@ -59,6 +59,16 @@ jobs:
             echo "No target URLs available (inputs empty and staging secrets unset)." >&2
             exit 1
           fi
+          # Deployment targets are always HTTPS; refuse anything else so a
+          # dispatcher cannot point the runner at arbitrary plaintext or
+          # non-URL targets. (The verifier additionally fails on redirects
+          # that leave the requested host.)
+          for url in "$FRONTEND_URL" "$BACKEND_URL"; do
+            if [ -n "$url" ] && [[ "$url" != https://* ]]; then
+              echo "Refusing non-HTTPS verification target: $url" >&2
+              exit 1
+            fi
+          done
           ARGS=(--expected-sha "$EXPECTED_SHA")
           [ -n "$FRONTEND_URL" ] && ARGS+=(--frontend "$FRONTEND_URL")
           [ -n "$BACKEND_URL" ] && ARGS+=(--backend "$BACKEND_URL")

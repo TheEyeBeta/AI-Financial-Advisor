@@ -35,6 +35,7 @@ import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections import defaultdict
 from pathlib import Path
@@ -235,8 +236,21 @@ def main(argv: list[str] | None = None) -> int:
         print("--target is required unless --dry-run", file=sys.stderr)
         return 2
 
-    if not args.target.startswith(("http://", "https://")):
-        print("--target must be an http:// or https:// URL", file=sys.stderr)
+    parsed_target = urllib.parse.urlsplit(args.target)
+    if parsed_target.scheme not in ("http", "https") or not parsed_target.hostname:
+        print("--target must be an http:// or https:// URL with a hostname", file=sys.stderr)
+        return 2
+    if parsed_target.username or parsed_target.password:
+        print("--target must not embed credentials", file=sys.stderr)
+        return 2
+    if "production" in parsed_target.hostname:
+        # This runner generates real provider load and sends the eval user's
+        # bearer token — staging/local only, by policy and now by guard.
+        print(
+            f"--target host '{parsed_target.hostname}' looks like production — refusing "
+            "(evals must run against staging/local only)",
+            file=sys.stderr,
+        )
         return 2
 
     if args.categories:

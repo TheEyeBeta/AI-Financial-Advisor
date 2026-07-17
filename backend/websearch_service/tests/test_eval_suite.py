@@ -100,3 +100,18 @@ def test_dry_run_cli_validates_dataset():
     from evals.run_evals import main
 
     assert main(["--dry-run"]) == 0
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "localhost:7000",  # missing scheme
+        "https://",  # no hostname
+        "https://user:pass@staging.example.com",  # embedded credentials
+        "https://ai-financial-advisor-backend-production.up.railway.app",  # production
+    ],
+)
+def test_cli_rejects_unsafe_targets(target):
+    from evals.run_evals import main
+
+    assert main(["--target", target]) == 2

@@ -58,8 +58,22 @@ function report(label, ok, detail) {
   if (!ok) failed = true;
 }
 
+function assertSameHost(label, requestedUrl, res) {
+  // A verification fetch that was redirected off the requested host is no
+  // longer checking the intended deployment — fail instead of following the
+  // redirect target's answer.
+  const requestedHost = new URL(requestedUrl).host;
+  const finalHost = new URL(res.url).host;
+  if (requestedHost !== finalHost) {
+    report(label, false, `redirected off-host: requested ${requestedHost}, served by ${finalHost}`);
+    return false;
+  }
+  return true;
+}
+
 async function checkFrontend() {
   const res = await fetch(frontendUrl, { redirect: "follow" });
+  if (!assertSameHost("frontend", frontendUrl, res)) return;
   if (!res.ok) {
     report("frontend", false, `HTTP ${res.status} from ${frontendUrl}`);
     return;
@@ -83,7 +97,9 @@ async function checkFrontend() {
 }
 
 async function checkBackend() {
-  const res = await fetch(new URL("/health", backendUrl), { redirect: "follow" });
+  const healthUrl = new URL("/health", backendUrl);
+  const res = await fetch(healthUrl, { redirect: "follow" });
+  if (!assertSameHost("backend", healthUrl, res)) return;
   if (!res.ok) {
     report("backend", false, `HTTP ${res.status} from ${backendUrl}/health`);
     return;
