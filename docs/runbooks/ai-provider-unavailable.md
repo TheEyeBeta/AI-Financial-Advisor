@@ -7,14 +7,17 @@
 - **User impact:** slower/degraded answers on fallback; explicit failure states when both down. Paper trading, academy, auth unaffected.
 
 ## Immediate containment
-1. Classify from audit events (`logs/audit.jsonl` or log stream): `rate_limit_429` vs `service_unavailable_503` vs `network_error` vs `quota_exceeded_402`.
+1. Classify from audit events (`core.audit_events` in production — see `docs/security/AUDIT_TRAIL.md`; `logs/audit.jsonl` only in local dev): `rate_limit_429` vs `service_unavailable_503` vs `network_error` vs `quota_exceeded_402`.
 2. `quota_exceeded_402` = **billing/budget**, not an outage → jump to `cost-spike.md` (raising the budget is a deliberate owner decision, not a reflex).
 3. Both providers down: nothing to fix locally — users already see explicit failure states; monitor and communicate.
 
 ## Diagnostics
 ```bash
 curl -s https://<backend>/health | jq '.services.openai'
-grep openai_fallback logs/audit.jsonl | tail -20     # local tail if log path mounted
+# Production: query the durable audit trail (service role required).
+# SELECT action, reason_code, created_at FROM core.audit_events
+#   WHERE action = 'openai_fallback_perplexity' ORDER BY created_at DESC LIMIT 20;
+grep openai_fallback logs/audit.jsonl | tail -20     # local dev only — not populated in production
 ```
 Provider status pages: status.openai.com, status.perplexity.ai.
 

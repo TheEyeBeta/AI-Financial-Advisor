@@ -109,14 +109,15 @@ suspend/restore/delete):
   (added this cycle), including the idempotency key and whether the
   deletion hit an already-removed (404) branch.
 
-## Durability caveat — applies to every "audit evidence" answer above
+## Durability — applies to every "audit evidence" answer above
 
-`app/services/audit.py` writes to a local JSONL file
-(`AI_AUDIT_LOG_PATH`, default `logs/audit.jsonl`) on the running instance.
-On Railway's ephemeral containers, **this file does not survive a redeploy
-or restart** unless something ships it somewhere durable first — nothing
-currently does (see `docs/MONITORING_IMPLEMENTATION_PLAN.md` §2, item 5).
-Until that gap is closed, every "audit evidence" line above is only as
-reliable as "was the container that logged it still the running container
-when someone went looking" — treat any audit-trail claim in an actual
-incident with that caveat explicitly stated, not silently assumed away.
+**Closed as of migration `0036_core_audit_events`.** `app/services/audit.py`
+now writes to `core.audit_events` (Postgres, append-only, hash-chained) in
+production/staging, which survives redeploys and restarts — see
+`docs/security/AUDIT_TRAIL.md`. The local-JSONL path
+(`AI_AUDIT_LOG_PATH`, default `logs/audit.jsonl`) remains only for
+development/test, where durability doesn't matter. Destructive
+account-lifecycle operations (suspend/restore/delete) now write a mandatory
+pre-flight audit record *before* the destructive Supabase Auth call and
+abort (503) if it cannot be durably persisted — see "Fail-closed behavior"
+in `docs/security/AUDIT_TRAIL.md`.
