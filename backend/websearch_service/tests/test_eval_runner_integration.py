@@ -91,17 +91,23 @@ class ScriptedHandler(BaseHTTPRequestHandler):
 def mock_target():
     created: list[ThreadingHTTPServer] = []
 
-    def _start(responses: list[dict]):
+    def _start(responses: list[dict], port: int = 0):
         handler_cls = type(
             "Handler",
             (ScriptedHandler,),
             {"responses": list(responses), "calls": [], "request_headers": []},
         )
-        server = ThreadingHTTPServer(("127.0.0.1", 0), handler_cls)
+        server = ThreadingHTTPServer(("127.0.0.1", port), handler_cls)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         created.append(server)
-        return f"http://127.0.0.1:{server.server_port}", handler_cls
+
+        def _stop() -> None:
+            server.shutdown()
+            server.server_close()
+            created.remove(server)
+
+        return f"http://127.0.0.1:{server.server_port}", handler_cls, _stop
 
     yield _start
 
@@ -137,7 +143,7 @@ def test_json_responses_complete_run_passes(mock_target, small_dataset, tmp_path
         {"status": 200, "content_type": "application/json",
          "body": json.dumps({"response": GOOD_ADV_TEXT}).encode()},
     ]
-    base_url, _handler = mock_target(responses)
+    base_url, _handler, _stop = mock_target(responses)
     out_dir = tmp_path / "reports"
 
     code = _run([
@@ -175,7 +181,7 @@ def test_sse_responses_complete_run_passes(mock_target, small_dataset, tmp_path)
         {"status": 200, "content_type": "text/event-stream", "body": inj_body},
         {"status": 200, "content_type": "text/event-stream", "body": adv_body},
     ]
-    base_url, _handler = mock_target(responses)
+    base_url, _handler, _stop = mock_target(responses)
     out_dir = tmp_path / "reports"
 
     code = _run([
@@ -223,7 +229,7 @@ def test_unreachable_target_marks_errors_and_fails_closed(small_dataset, tmp_pat
 
 def test_401_aborts_run_without_retry(mock_target, small_dataset, tmp_path):
     responses = [{"status": 401, "content_type": "application/json", "body": b'{"error":"unauthorized"}'}]
-    base_url, handler_cls = mock_target(responses)
+    base_url, handler_cls, _stop = mock_target(responses)
     out_dir = tmp_path / "reports"
 
     code = _run([
@@ -251,7 +257,7 @@ def test_429_with_retry_after_then_success(mock_target, small_dataset, tmp_path)
         {"status": 200, "content_type": "application/json",
          "body": json.dumps({"response": GOOD_EDU_TEXT}).encode()},
     ]
-    base_url, handler_cls = mock_target(responses)
+    base_url, handler_cls, _stop = mock_target(responses)
     out_dir = tmp_path / "reports"
 
     code = _run([
@@ -273,7 +279,7 @@ def test_429_with_retry_after_then_success(mock_target, small_dataset, tmp_path)
 def test_malformed_sse_event_is_an_error(mock_target, small_dataset, tmp_path):
     bad_body = b"data: {not valid json}\n\n"
     responses = [{"status": 200, "content_type": "text/event-stream", "body": bad_body}]
-    base_url, _handler = mock_target(responses)
+    base_url, _handler, _stop = mock_target(responses)
     out_dir = tmp_path / "reports"
 
     code = _run([
@@ -300,7 +306,10 @@ def test_resume_does_not_duplicate_completed_prompts(mock_target, small_dataset,
          "body": json.dumps({"response": GOOD_EDU_TEXT}).encode()},
         {"status": 500, "content_type": "application/json", "body": b'{"error":"boom"}'},
     ]
-    base_url, handler_cls = mock_target(first_responses)
+    base_url, handler_cls, stop_first = mock_target(first_responses)
+    # A checkpoint is bound to the run's target (among other parameters), so
+    # a genuine resume happens against the *same* target — reuse the port.
+    port = int(base_url.rsplit(":", 1)[1])
 
     code1 = _run([
         "--target", base_url, "--auth-token", "secret-eval-token",
@@ -313,13 +322,15 @@ def test_resume_does_not_duplicate_completed_prompts(mock_target, small_dataset,
     assert report1["completed_count"] == 1
     assert report1["error_count"] == 1
     assert checkpoint.exists()  # only cleared on a PASS
+    stop_first()
 
     out_dir2 = tmp_path / "reports2"
     second_responses = [
         {"status": 200, "content_type": "application/json",
          "body": json.dumps({"response": GOOD_INJ_TEXT}).encode()},
     ]
-    base_url2, handler_cls2 = mock_target(second_responses)
+    base_url2, handler_cls2, _stop2 = mock_target(second_responses, port=port)
+    assert base_url2 == base_url
 
     code2 = _run([
         "--target", base_url2, "--auth-token", "secret-eval-token",
@@ -348,7 +359,7 @@ def test_incomplete_run_fails_closed(mock_target, small_dataset, tmp_path):
         {"status": 200, "content_type": "application/json",
          "body": json.dumps({"response": GOOD_ADV_TEXT}).encode()},
     ]
-    base_url, _handler = mock_target(responses)
+    base_url, _handler, _stop = mock_target(responses)
     out_dir = tmp_path / "reports"
 
     code = _run([
@@ -377,7 +388,7 @@ def test_bearer_token_not_leaked_into_report(mock_target, small_dataset, tmp_pat
         {"status": 200, "content_type": "application/json",
          "body": json.dumps({"response": GOOD_ADV_TEXT}).encode()},
     ]
-    base_url, handler_cls = mock_target(responses)
+    base_url, handler_cls, _stop = mock_target(responses)
     out_dir = tmp_path / "reports"
     secret_token = "super-secret-eval-jwt-should-never-leak"
 
@@ -416,3 +427,148 @@ def test_production_looking_host_rejected_even_if_allowlisted(small_dataset, tmp
     assert code == 2
     captured = capsys.readouterr()
     assert "production" in captured.err
+
+
+# ── --limit validation ──────────────────────────────────────────────────────
+
+
+def test_zero_limit_is_rejected_not_treated_as_unlimited(mock_target, small_dataset, tmp_path, capsys):
+    base_url, handler_cls, _stop = mock_target([])
+    out_dir = tmp_path / "reports"
+
+    code = _run([
+        "--target", base_url, "--auth-token", "secret-eval-token",
+        "--out-dir", str(out_dir), "--limit", "0",
+    ])
+
+    assert code == 2
+    assert len(handler_cls.calls) == 0  # no requests were sent
+    captured = capsys.readouterr()
+    assert "positive integer" in captured.err
+
+
+# ── Checkpoint fingerprint rejects a mismatched run ─────────────────────────
+
+
+def test_resume_rejects_checkpoint_from_a_different_target(mock_target, small_dataset, tmp_path):
+    out_dir = tmp_path / "reports"
+    checkpoint = tmp_path / "checkpoint.jsonl"
+
+    responses = [
+        {"status": 200, "content_type": "application/json",
+         "body": json.dumps({"response": GOOD_EDU_TEXT}).encode()},
+    ]
+    base_url, _handler, _stop = mock_target(responses)
+    code1 = _run([
+        "--target", base_url, "--auth-token", "secret-eval-token",
+        "--out-dir", str(out_dir), "--categories", "education", "--limit", "1",
+        "--checkpoint", str(checkpoint), "--requests-per-minute", "0",
+    ])
+    assert code1 == 0
+    # A PASS clears the checkpoint, so re-create one with a record that
+    # would otherwise look resumable, then resume against a *different*
+    # target than the one that produced it.
+    checkpoint.write_text(
+        json.dumps({"__fingerprint__": "not-the-real-fingerprint"}) + "\n"
+        + json.dumps({"id": "edu-t1", "category": "education", "verdict": "pass", "reasons": []}) + "\n"
+    )
+
+    base_url2, handler_cls2, _stop2 = mock_target([])
+    out_dir2 = tmp_path / "reports2"
+    code2 = _run([
+        "--target", base_url2, "--auth-token", "secret-eval-token",
+        "--out-dir", str(out_dir2), "--categories", "education", "--limit", "1",
+        "--checkpoint", str(checkpoint), "--resume", "--requests-per-minute", "0",
+    ])
+
+    assert code2 == 2
+    assert len(handler_cls2.calls) == 0  # refused before sending anything
+
+
+# ── Redirects never carry the bearer token to another host ─────────────────
+
+
+def test_redirect_is_blocked_not_followed(mock_target, small_dataset, tmp_path):
+    responses = [
+        {"status": 302, "content_type": "application/json",
+         "headers": {"Location": "http://127.0.0.1:1/api/chat"}, "body": b""},
+    ]
+    base_url, _handler, _stop = mock_target(responses)
+    out_dir = tmp_path / "reports"
+
+    code = _run([
+        "--target", base_url, "--auth-token", "secret-eval-token",
+        "--out-dir", str(out_dir), "--categories", "education", "--limit", "1",
+        "--max-retries", "0", "--requests-per-minute", "0",
+    ])
+
+    assert code == 1
+    report = _read_report(out_dir)
+    assert report["error_count"] == 1
+    assert "redirect blocked" in report["results"][0]["reasons"][0]
+
+
+# ── Oversized response bodies are bounded, not read unboundedly ────────────
+
+
+def test_oversized_response_is_bounded(mock_target, small_dataset, tmp_path):
+    oversized = json.dumps({"response": "x" * (run_evals.MAX_RESPONSE_BYTES + 1000)}).encode()
+    responses = [{"status": 200, "content_type": "application/json", "body": oversized}]
+    base_url, _handler, _stop = mock_target(responses)
+    out_dir = tmp_path / "reports"
+
+    code = _run([
+        "--target", base_url, "--auth-token", "secret-eval-token",
+        "--out-dir", str(out_dir), "--categories", "education", "--limit", "1",
+        "--max-retries", "0", "--requests-per-minute", "0",
+    ])
+
+    assert code == 1
+    report = _read_report(out_dir)
+    assert report["error_count"] == 1
+    assert "byte limit" in report["results"][0]["reasons"][0]
+
+
+# ── Malformed `choices` shapes are errors, not crashes ──────────────────────
+
+
+def test_malformed_choices_shape_is_an_error_not_a_crash(mock_target, small_dataset, tmp_path):
+    responses = [
+        {"status": 200, "content_type": "application/json",
+         "body": json.dumps({"choices": [None]}).encode()},
+    ]
+    base_url, _handler, _stop = mock_target(responses)
+    out_dir = tmp_path / "reports"
+
+    code = _run([
+        "--target", base_url, "--auth-token", "secret-eval-token",
+        "--out-dir", str(out_dir), "--categories", "education", "--limit", "1",
+        "--max-retries", "0", "--requests-per-minute", "0",
+    ])
+
+    assert code == 1
+    report = _read_report(out_dir)
+    assert report["error_count"] == 1
+    assert report["results"][0]["verdict"] == "error"
+
+
+# ── needs_review / fail verdicts carry auditable response evidence ─────────
+
+
+def test_response_excerpt_persisted_for_audit(mock_target, small_dataset, tmp_path):
+    responses = [
+        {"status": 200, "content_type": "application/json",
+         "body": json.dumps({"response": GOOD_EDU_TEXT}).encode()},
+    ]
+    base_url, _handler, _stop = mock_target(responses)
+    out_dir = tmp_path / "reports"
+
+    code = _run([
+        "--target", base_url, "--auth-token", "secret-eval-token",
+        "--out-dir", str(out_dir), "--categories", "education", "--limit", "1",
+        "--requests-per-minute", "0",
+    ])
+
+    assert code == 0
+    report = _read_report(out_dir)
+    assert report["results"][0]["response_excerpt"] == GOOD_EDU_TEXT

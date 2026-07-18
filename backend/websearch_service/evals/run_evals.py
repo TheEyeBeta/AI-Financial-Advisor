@@ -103,6 +103,12 @@ DEFAULT_MAX_TOKENS = 400
 DEFAULT_REQUESTS_PER_MINUTE = 15.0
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 HARD_AUTH_STATUS = {401, 403}
+# Hard cap on a single response body so a broken (but allowlisted) target
+# cannot exhaust runner memory before fail-closed reporting kicks in.
+MAX_RESPONSE_BYTES = 2_000_000
+MAX_ERROR_BODY_BYTES = 8_192
+# How much of a scored response to keep as auditable evidence in the report.
+RESPONSE_EXCERPT_CHARS = 4_000
 
 REFUSAL_MARKERS = re.compile(
     r"\b(can't|cannot|won't|unable to|not able to|not something I can|"
@@ -301,14 +307,21 @@ def _parse_retry_after(headers: Any) -> Optional[float]:
         return None
 
 
-def _safe_error_detail(raw_body: bytes) -> str:
+def _redact_token(text: str, token: Optional[str]) -> str:
+    """Scrub the configured bearer token (and any Bearer-header pattern) from
+    target-controlled text before it can reach a report or a log line."""
+    if token:
+        text = text.replace(token, "[redacted]")
+    return re.sub(r"Bearer\s+\S+", "Bearer [redacted]", text, flags=re.IGNORECASE)
+
+
+def _safe_error_detail(raw_body: bytes, token: Optional[str]) -> str:
     """Truncated, token-scrubbed snippet of an error body for diagnostics."""
     try:
         text = raw_body.decode("utf-8", errors="replace")
     except Exception:
         return ""
-    text = re.sub(r"Bearer\s+\S+", "Bearer [redacted]", text, flags=re.IGNORECASE)
-    return text.strip()[:200]
+    return _redact_token(text.strip(), token)[:200]
 
 
 def _parse_sse_events(raw: bytes) -> list[Any]:
@@ -392,6 +405,42 @@ class Pacer:
             pass
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Blocks all redirects.
+
+    ``urllib``'s default redirect handler copies request headers — including
+    ``Authorization`` — onto the redirected request, which would forward the
+    eval user's bearer token to whatever host a (compromised or misconfigured)
+    allowlisted target points at. The runner has no legitimate use for
+    redirects, so any redirect is treated as a hard, non-retryable error
+    instead of being followed.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            newurl, code, f"redirect blocked (eval runner does not follow redirects): {msg}", headers, fp
+        )
+
+
+_NO_REDIRECT_OPENER = urllib.request.build_opener(_NoRedirectHandler)
+
+
+def _read_response_body(fp: Any, limit: int, started: float, status: Optional[int]) -> tuple[bytes, float]:
+    """Reads at most ``limit`` bytes, raising ``TargetError`` if exceeded.
+
+    Also returns time-to-first-byte, measured against ``started``.
+    """
+    first = fp.read(1)
+    ttft = time.monotonic() - started
+    if not first:
+        return b"", ttft
+    rest = fp.read(max(0, limit - len(first)) + 1)
+    body = first + rest
+    if len(body) > limit:
+        raise TargetError(f"response exceeded {limit}-byte limit", retryable=False, status=status)
+    return body, ttft
+
+
 def call_target(cfg: RunConfig, prompt: str, pacer: Optional[Pacer] = None) -> CallOutcome:
     payload = json.dumps(
         {"messages": [{"role": "user", "content": prompt}], "max_tokens": cfg.max_tokens}
@@ -409,27 +458,27 @@ def call_target(cfg: RunConfig, prompt: str, pacer: Optional[Pacer] = None) -> C
         method="POST",
     )
 
+    token = cfg.auth_token
     started = time.monotonic()
     try:
-        with urllib.request.urlopen(req, timeout=cfg.timeout) as resp:
-            first_chunk = resp.read(1)
-            ttft = time.monotonic() - started
-            body = first_chunk + resp.read()
+        with _NO_REDIRECT_OPENER.open(req, timeout=cfg.timeout) as resp:
             status = resp.status
             content_type = (resp.headers.get("Content-Type") or "").lower()
+            resp_headers = resp.headers
+            body, ttft = _read_response_body(resp, MAX_RESPONSE_BYTES, started, status)
             if pacer is not None:
-                pacer.observe(resp.headers)
+                pacer.observe(resp_headers)
     except urllib.error.HTTPError as exc:
         if pacer is not None:
             pacer.observe(exc.headers)
         raw_body = b""
         try:
-            raw_body = exc.read()
+            raw_body = exc.read(MAX_ERROR_BODY_BYTES)
         except Exception:
             pass
         status = exc.code
-        detail = _safe_error_detail(raw_body)
-        message = f"HTTP {status} {exc.reason}" + (f": {detail}" if detail else "")
+        detail = _safe_error_detail(raw_body, token)
+        message = _redact_token(f"HTTP {status} {exc.reason}", token) + (f": {detail}" if detail else "")
         if status in HARD_AUTH_STATUS:
             raise AuthFailure(message, status=status) from None
         raise TargetError(
@@ -439,7 +488,7 @@ def call_target(cfg: RunConfig, prompt: str, pacer: Optional[Pacer] = None) -> C
             retry_after=_parse_retry_after(exc.headers),
         ) from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        raise TargetError(f"transport error: {exc}", retryable=True, status=None) from None
+        raise TargetError(f"transport error: {_redact_token(str(exc), token)}", retryable=True, status=None) from None
 
     latency = time.monotonic() - started
 
@@ -454,28 +503,35 @@ def call_target(cfg: RunConfig, prompt: str, pacer: Optional[Pacer] = None) -> C
         try:
             events = _parse_sse_events(body)
         except ValueError as exc:
-            raise TargetError(f"malformed SSE response: {exc}", retryable=False, status=status) from None
+            raise TargetError(
+                _redact_token(f"malformed SSE response: {exc}", token), retryable=False, status=status
+            ) from None
         if not events:
             raise TargetError("SSE response contained no events", retryable=False, status=status)
         text, saw_done, error_message, usage, model = _extract_from_sse(events)
         if error_message:
-            raise TargetError(f"stream reported an error: {error_message}", retryable=False, status=status)
+            raise TargetError(
+                _redact_token(f"stream reported an error: {error_message}", token), retryable=False, status=status
+            ) from None
         if not saw_done:
             raise TargetError("SSE stream ended without a done event (incomplete)", retryable=False, status=status)
     else:
         try:
             parsed = json.loads(body.decode("utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise TargetError(f"malformed JSON response: {exc}", retryable=False, status=status) from None
+            raise TargetError(
+                _redact_token(f"malformed JSON response: {exc}", token), retryable=False, status=status
+            ) from None
         if not isinstance(parsed, dict):
             raise TargetError("JSON response was not an object", retryable=False, status=status)
-        text = (
-            parsed.get("response")
-            or parsed.get("content")
-            or parsed.get("message")
-            or (parsed.get("choices") or [{}])[0].get("message", {}).get("content", "")
-            or ""
-        )
+        text = parsed.get("response") or parsed.get("content") or parsed.get("message")
+        if not text:
+            choices = parsed.get("choices")
+            if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+                choice_message = choices[0].get("message")
+                if isinstance(choice_message, dict):
+                    text = choice_message.get("content")
+        text = text or ""
         usage = parsed.get("usage") or {}
         model = parsed.get("model")
 
@@ -488,6 +544,10 @@ def call_target(cfg: RunConfig, prompt: str, pacer: Optional[Pacer] = None) -> C
 def call_with_retries(cfg: RunConfig, prompt: str, pacer: Optional[Pacer] = None) -> CallOutcome:
     attempt = 0
     while True:
+        if pacer is not None:
+            # Pace every attempt, not just the first — a retry is still a
+            # request against the target's quota.
+            pacer.wait()
         try:
             return call_target(cfg, prompt, pacer)
         except AuthFailure:
@@ -496,10 +556,14 @@ def call_with_retries(cfg: RunConfig, prompt: str, pacer: Optional[Pacer] = None
         except TargetError as exc:
             if not exc.retryable or attempt >= cfg.max_retries:
                 raise
-            base_delay = exc.retry_after if exc.retry_after is not None else min(
-                cfg.retry_max_delay, cfg.retry_base_delay * (2 ** attempt)
-            )
-            time.sleep(base_delay * (0.5 + random.random()))
+            if exc.retry_after is not None:
+                # Retry-After is the server's stated minimum wait — jitter
+                # may only add to it, never bring it below that floor.
+                delay = exc.retry_after + random.uniform(0, cfg.retry_base_delay)
+            else:
+                delay = min(cfg.retry_max_delay, cfg.retry_base_delay * (2 ** attempt))
+                delay *= 0.5 + random.random()
+            time.sleep(delay)
             attempt += 1
 
 
@@ -528,21 +592,63 @@ def validate_target(target: str, allowed_hosts: set[str]) -> urllib.parse.SplitR
 # ── Checkpoint / resume ─────────────────────────────────────────────────────
 
 
-def load_checkpoint(path: Path) -> dict[str, dict[str, Any]]:
+def _run_fingerprint(items: list[dict[str, Any]], args: argparse.Namespace, release_sha: str) -> str:
+    """Binds a checkpoint to the run parameters that determine its results.
+
+    A checkpoint from a different dataset selection, target, release, model,
+    provider or token budget cannot safely be resumed — it would splice
+    results from an unrelated run into the current report.
+    """
+    payload = {
+        "dataset_version": DATASET_VERSION,
+        "ids": sorted(i["id"] for i in items),
+        "target": args.target,
+        "release_sha": release_sha,
+        "model": args.model,
+        "provider": args.provider,
+        "max_tokens": args.max_tokens,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
+
+
+def load_checkpoint(path: Path) -> tuple[Optional[str], dict[str, dict[str, Any]]]:
+    """Returns (fingerprint, records). Raises ValueError on non-trailing corruption.
+
+    A checkpoint killed mid-append can leave a truncated final JSONL line;
+    that alone is tolerated (the in-flight item simply gets re-run). Any
+    earlier corruption is not silently ignored — a corrupt checkpoint is
+    refused outright rather than guessed at.
+    """
     if not path.exists():
-        return {}
+        return None, {}
+    lines = path.read_text().splitlines()
+    fingerprint: Optional[str] = None
     records: dict[str, dict[str, Any]] = {}
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
+    last_idx = len(lines) - 1
+    for idx, raw_line in enumerate(lines):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
             rec = json.loads(line)
-            records[rec["id"]] = rec
-    return records
+        except json.JSONDecodeError:
+            if idx == last_idx:
+                continue
+            raise ValueError(f"checkpoint corrupt at line {idx + 1}: {raw_line[:120]!r}")
+        if not isinstance(rec, dict):
+            raise ValueError(f"checkpoint record at line {idx + 1} is not an object")
+        if "__fingerprint__" in rec:
+            fingerprint = rec["__fingerprint__"]
+            continue
+        if "id" not in rec:
+            raise ValueError(f"checkpoint record at line {idx + 1} is missing 'id'")
+        records[rec["id"]] = rec
+    return fingerprint, records
 
 
 def append_checkpoint(path: Path, record: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a") as f:
         f.write(json.dumps(record) + "\n")
 
@@ -701,6 +807,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         print(f"--target rejected: {exc}", file=sys.stderr)
         return 2
 
+    # Check an explicit --out path before spending any request against the
+    # target — a rerun that is doomed to fail the immutability check should
+    # never burn staging/provider quota first. This is a courtesy check;
+    # the write itself is still exclusive/atomic further down.
+    if args.out and Path(args.out).exists():
+        print(f"refusing to overwrite existing report {args.out}", file=sys.stderr)
+        return 2
+
     if args.categories:
         wanted = {c.strip() for c in args.categories.split(",")}
         unknown = wanted - set(REQUIRED_CATEGORY_COUNTS)
@@ -708,20 +822,44 @@ def main(argv: Optional[list[str]] = None) -> int:
             print(f"unknown categories: {sorted(unknown)}", file=sys.stderr)
             return 2
         items = [i for i in items if i["category"] in wanted]
-    if args.limit:
+    if args.limit is not None:
+        if args.limit <= 0:
+            print("--limit must be a positive integer", file=sys.stderr)
+            return 2
         items = items[: args.limit]
+    if not items:
+        print("no dataset items selected to run (check --categories/--limit)", file=sys.stderr)
+        return 2
+
+    release_sha = resolve_release_sha(args.release_sha)
 
     checkpoint_path = Path(args.checkpoint) if args.checkpoint else None
     prior: dict[str, dict[str, Any]] = {}
+    fingerprint = _run_fingerprint(items, args, release_sha)
     if args.resume:
         if not checkpoint_path:
             print("--resume requires --checkpoint", file=sys.stderr)
             return 2
-        prior = load_checkpoint(checkpoint_path)
-    elif checkpoint_path and checkpoint_path.exists():
-        # A fresh (non-resumed) run must not silently inherit a stale
-        # checkpoint left over from a previous invocation.
-        checkpoint_path.unlink()
+        try:
+            loaded_fingerprint, prior = load_checkpoint(checkpoint_path)
+        except ValueError as exc:
+            print(f"checkpoint error: {exc}", file=sys.stderr)
+            return 2
+        if loaded_fingerprint != fingerprint:
+            print(
+                "checkpoint does not match the current run (dataset selection, target, "
+                "release, model, provider, or max_tokens differ) — refusing to resume "
+                "from a stale checkpoint",
+                file=sys.stderr,
+            )
+            return 2
+    else:
+        if checkpoint_path and checkpoint_path.exists():
+            # A fresh (non-resumed) run must not silently inherit a stale
+            # checkpoint left over from a previous invocation.
+            checkpoint_path.unlink()
+        if checkpoint_path:
+            append_checkpoint(checkpoint_path, {"__fingerprint__": fingerprint})
 
     cfg = RunConfig(
         target=args.target,
@@ -759,7 +897,6 @@ def main(argv: Optional[list[str]] = None) -> int:
                 "provider": args.provider,
             }
         else:
-            pacer.wait()
             try:
                 outcome = call_with_retries(cfg, item["prompt"], pacer)
                 scored = score_response(item["category"], outcome.text)
@@ -772,6 +909,10 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "ttft_seconds": round(outcome.ttft, 3) if outcome.ttft is not None else None,
                     "usage": outcome.usage,
                     "response_chars": len(outcome.text),
+                    # Auditable evidence: factuality/citation/hallucination review
+                    # (needs_review) and hard-failure disputes both require the
+                    # actual response text, not just its length.
+                    "response_excerpt": outcome.text[:RESPONSE_EXCERPT_CHARS],
                     "http_status": outcome.status,
                     "model": outcome.model or args.model,
                     "provider": args.provider,
@@ -811,7 +952,6 @@ def main(argv: Optional[list[str]] = None) -> int:
             append_checkpoint(checkpoint_path, record)
         print(f"[{record['verdict']:>12}] {item['id']}", flush=True)
 
-    release_sha = resolve_release_sha(args.release_sha)
     summary = build_report(results, len(items), args, release_sha)
     checksum = _checksum(summary)
     summary["checksum"] = f"sha256:{checksum}"
@@ -825,10 +965,14 @@ def main(argv: Optional[list[str]] = None) -> int:
         out_path = Path(args.out_dir) / default_name
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    if out_path.exists():
+    try:
+        # Exclusive create: refuses to overwrite an existing (or
+        # concurrently created) report — no check-then-write race.
+        with out_path.open("x") as report_file:
+            report_file.write(report)
+    except FileExistsError:
         print(f"refusing to overwrite existing immutable report {out_path}", file=sys.stderr)
         return 2
-    out_path.write_text(report)
     print(f"report written to {out_path}")
     print(
         f"expected={summary['expected_count']} completed={summary['completed_count']} "
