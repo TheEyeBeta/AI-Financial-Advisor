@@ -2,22 +2,28 @@
 
 **Rehearsed:** NO
 
-- **Trigger:** `/health/ready` `rate_limit` component degraded/error; Redis connection errors in Railway logs; WS ticket issuance failing.
-- **Severity:** SEV-3 (designed fallback exists) — SEV-2 if running multiple web replicas (limits/tickets become per-process and materially weaker).
-- **User impact:** none directly; protection quality degrades (rate limits reset on restart, WS tickets process-local).
+- **Trigger:** `/health/ready` `rate_limit` or `ai_budget_guard` component degraded/error; Redis connection errors in Railway logs; WS ticket issuance failing.
+- **Severity:** SEV-3 (designed fallback exists) — SEV-2 if running multiple web replicas (limits/tickets/global AI budget become per-process and materially weaker), or SEV-2 if `AI_BUDGET_FAIL_OPEN_ON_REDIS_OUTAGE=true` is set (spend becomes uncapped for the outage duration).
+- **User impact:** none directly; protection quality degrades (rate limits reset on restart, WS tickets process-local, global AI budget guard degrades to fail-closed 503s by default — see below).
 
 ## Immediate containment
-1. Confirm the fallback engaged: backend logs show memory-store fallback (`test_get_store_falls_back_to_memory_without_redis` behaviour).
+1. Confirm the fallback engaged: backend logs show memory-store fallback (`test_get_store_falls_back_to_memory_without_redis` behaviour) for the per-user rate limiter, and `AI budget guard: Redis outage during reserve()` for the global AI budget guard.
 2. Understand degraded-mode semantics while Redis is down: limits and WS
    tickets are **process-local and reset on every backend restart** — that
    is inherent to the memory fallback, not something to "fix" mid-incident.
+   The **global AI budget guard fails closed by default** (`AI_BUDGET_FAIL_OPEN_ON_REDIS_OUTAGE=false`,
+   the default) — every AI-proxy call returns 503 `reason_code: redis_unavailable`
+   until Redis recovers. This is deliberate: it protects the spend budget
+   over availability. If the outage is prolonged and availability is judged
+   more important, that is an explicit, logged operator decision (set
+   `AI_BUDGET_FAIL_OPEN_ON_REDIS_OUTAGE=true` and redeploy) — never a silent one.
 3. If running >1 web replica, scale to 1 until Redis returns — this removes
    cross-replica inconsistency (each replica keeping its own counters); it
    does **not** restore persistence across restarts.
 
 ## Diagnostics
 ```bash
-curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components.rate_limit'
+curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components | {rate_limit, ai_budget_guard}'
 redis-cli -u "$REDIS_URL" ping        # from a trusted shell, never paste the URL into logs
 ```
 Provider dashboard (Railway plugin / Upstash): memory ceiling, connection cap, eviction events.

@@ -49,7 +49,14 @@ document wins.
 - `/health/live` — liveness (no external calls). `/health/ready` — readiness:
   config validation, Supabase ping, **schema revision match** (deployed
   Alembic head vs `public.alembic_version`; mismatch = not ready), rate-limit
-  backend, startup completion; search-provider status is informational.
+  backend, **global AI budget guard backend** (`ai_budget_guard` component;
+  see `docs/ai/AI_CONTROLS.md` §1), startup completion; search-provider
+  status is informational.
+- Global AI spend/capacity: `GET /api/admin/ai-budget/status` (admin/service-role
+  JWT) — circuit-breaker state, daily/monthly spend vs budget, request/token
+  counters, concurrency. Admin-authorized time-bounded override:
+  `POST`/`DELETE /api/admin/ai-budget/override` (audited, disabled by default).
+  See `docs/runbooks/cost-spike.md` and `docs/runbooks/redis-unavailable.md`.
 - Frontend Sentry: privacy-hardened (no default PII, redaction, sampling
   policy) — `docs/security/TELEMETRY_PRIVACY.md`. Backend Sentry via
   `SENTRY_DSN`, release tagged from `APP_VERSION`.
@@ -126,8 +133,11 @@ claimed in docs that CI does not enforce.
 - Live market data depends on one upstream provider; degraded states are
   explicit but there is no secondary live provider.
 - In-process news cache (per worker) — acceptable at beta scale.
-- No billing/quota beyond rate limits; per-user AI quota is a launch
-  threshold tracked in #216.
+- Per-user AI quota (rate limiter) plus a **global** cross-tenant AI
+  request/token/concurrency limiter and an internal USD spend circuit
+  breaker (`docs/ai/AI_CONTROLS.md` §1); no UI dashboard yet beyond the
+  read-only admin status endpoint — a frontend admin page for it is a
+  follow-up, not yet built.
 
 ## Reliability program status (SLOs, dashboards, load tests, DR)
 

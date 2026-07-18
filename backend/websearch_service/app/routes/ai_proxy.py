@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from ..services.audit import audit_log
 from ..services.auth import AuthenticatedUser, require_auth, verify_service_role
 from ..services.rate_limit import rate_limiter
+from ..services.ai_budget_guard import AIBudgetDenied, BudgetReservation, ai_budget_guard
 from ..services.meridian_context import (
     _refresh_iris_context_cache_sync,
     build_iris_context,
@@ -1215,6 +1216,25 @@ def estimate_tokens(text: str, system_overhead: int = 100) -> int:
     return int(len(text) / 4 * 1.2) + system_overhead
 
 
+def _budget_denied_response(exc: AIBudgetDenied) -> JSONResponse:
+    """Build the standard 429/503 body for a global AI budget guard denial.
+
+    Always includes a safe reason code and retry guidance; never includes
+    prompt content or per-user identifiers.
+    """
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={
+            "error": f"ai_budget_{exc.reason_code}",
+            "message": exc.detail,
+            "reason_code": exc.reason_code,
+            "circuit_breaker_state": exc.state,
+            "retry_after": exc.retry_after,
+        },
+        headers={"Retry-After": str(exc.retry_after)},
+    )
+
+
 def _is_admin_profile(auth_id: str) -> bool:
     """Return True when the authenticated user has core.users.userType='Admin'."""
     if not auth_id:
@@ -2304,6 +2324,7 @@ async def chat_completion(
     stream_client: Optional[httpx.AsyncClient] = None
     upstream_response: Optional[httpx.Response] = None
     request_released = False
+    budget_reservation: Optional[BudgetReservation] = None
 
     def release_request() -> None:
         nonlocal request_released
@@ -2311,6 +2332,10 @@ async def chat_completion(
             return
         rate_limiter.release_request(raw_request, user_id=verified_user_id)
         request_released = True
+
+    def release_budget() -> None:
+        if budget_reservation is not None:
+            ai_budget_guard.release(budget_reservation)
 
     try:
         client_id = raw_request.client.host if raw_request.client else "unknown"
@@ -2344,6 +2369,19 @@ async def chat_completion(
 
             release_request()
             return StreamingResponse(injection_response(), media_type="text/event-stream")
+
+        # Cheap admission pre-check: the classifier call below is itself a
+        # billed OpenAI request, made before the model for this turn (and
+        # therefore the real, atomic budget reservation) is known. Without
+        # this, a hard_stop/restricted circuit-breaker state still lets
+        # every request pay for a classifier call before being denied.
+        # This is read-only and non-atomic — the authoritative, atomic
+        # reserve() still gates the actual generation call further down.
+        try:
+            ai_budget_guard.check_admission(essential=token_limit_exempt)
+        except AIBudgetDenied as budget_exc:
+            release_request()
+            return _budget_denied_response(budget_exc)
 
         # Tier detection — zero I/O, drives all subsequent gating decisions.
         message_tier = classify_tier(last_user_text)
@@ -2710,6 +2748,27 @@ async def chat_completion(
             (classification.get("user_level") or "").lower()
         )
 
+        # Global AI budget guard: reserve estimated cost/capacity for the model
+        # that was just selected, before the provider call is made. This is a
+        # separate, cross-tenant control from the per-user rate limiter above.
+        try:
+            budget_reservation = ai_budget_guard.reserve(
+                provider="openai",
+                model=_chat_model,
+                # Whole conversation, not just the last user turn — the
+                # provider is billed for every input token sent, and a
+                # multi-turn request that only counted the latest message
+                # would systematically under-reserve.
+                estimated_input_tokens=(
+                    estimate_tokens(combined_system) + estimate_tokens(total_text, system_overhead=0)
+                ),
+                estimated_output_tokens=effective_max_output_tokens,
+                essential=token_limit_exempt,
+            )
+        except AIBudgetDenied as budget_exc:
+            release_request()
+            return _budget_denied_response(budget_exc)
+
         if streaming_requested:
             # Tools fire only on BALANCED tier, and only for intents that need them.
             # INSTANT and FAST tiers never receive tool definitions.
@@ -2951,6 +3010,19 @@ async def chat_completion(
                     actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
                     if actual_tokens > 0:
                         rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+                    if budget_reservation is not None:
+                        # Streaming uses the Chat Completions API, whose usage
+                        # chunks carry prompt_tokens/completion_tokens (not the
+                        # Responses API's input_tokens/output_tokens used below
+                        # in the non-streaming branch). Sum across every
+                        # provider attempt in this turn (initial stream + any
+                        # tool-result follow-up stream) — using only the last
+                        # entry would drop paid tool-call round-trips.
+                        ai_budget_guard.reconcile(
+                            budget_reservation,
+                            actual_input_tokens=sum(entry.get("prompt_tokens", 0) or 0 for entry in usage_entries),
+                            actual_output_tokens=sum(entry.get("completion_tokens", 0) or 0 for entry in usage_entries),
+                        )
 
                     try:
                         await audit_log(
@@ -2981,6 +3053,7 @@ async def chat_completion(
                 finally:
                     await _close_stream_resources(stream_client, upstream_response)
                     release_request()
+                    release_budget()
 
             return StreamingResponse(
                 generate_stream(),
@@ -2993,7 +3066,7 @@ async def chat_completion(
             )
 
         payload = {
-            "model": OPENAI_CHAT_MODEL,
+            "model": _chat_model,
             "reasoning": {"effort": reasoning_effort},  # ← dynamically set based on classification
             "input": input_messages,
             "max_output_tokens": effective_max_output_tokens,
@@ -3018,7 +3091,7 @@ async def chat_completion(
         # Retry once when reasoning models exhaust the output budget without visible text.
         if (
             (not isinstance(final_answer, str) or not final_answer.strip())
-            and _is_reasoning_model(OPENAI_CHAT_MODEL)
+            and _is_reasoning_model(_chat_model)
             and _looks_like_reasoning_budget_exhaustion(data)
         ):
             retry_max_output_tokens = max(
@@ -3033,7 +3106,7 @@ async def chat_completion(
             }
             logger.warning(
                 "Retrying /api/chat after reasoning budget exhaustion: model=%s initial_effort=%s initial_max=%s retry_max=%s usage=%s",
-                OPENAI_CHAT_MODEL,
+                _chat_model,
                 reasoning_effort,
                 payload["max_output_tokens"],
                 retry_max_output_tokens,
@@ -3074,6 +3147,15 @@ async def chat_completion(
         actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
         if not token_limit_exempt:
             rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+        if budget_reservation is not None:
+            # Sum across every provider attempt in usage_entries (initial +
+            # reasoning-budget retry) — using only the final attempt's usage
+            # drops the cost of the first, already-paid-for call.
+            ai_budget_guard.reconcile(
+                budget_reservation,
+                actual_input_tokens=sum(entry.get("input_tokens", 0) or 0 for entry in usage_entries),
+                actual_output_tokens=sum(entry.get("output_tokens", 0) or 0 for entry in usage_entries),
+            )
         await audit_log(
             "chat_response",
             {
@@ -3125,6 +3207,7 @@ async def chat_completion(
     finally:
         if stream_client is None and upstream_response is None:
             release_request()
+            release_budget()
 
 
 @router.post("/api/chat/title")
@@ -3152,12 +3235,26 @@ async def chat_title(
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
     rate_limiter.add_rate_limit_headers(response, rate_limit_info)
 
+    title_model = OPENAI_TITLE_MODEL
+    # Use Chat Completions API with a lightweight model for title generation.
+    # For reasoning models (gpt-5, o-series), use higher token budget since they
+    # consume tokens on internal reasoning before producing visible output.
+    token_limit = 60 if _is_reasoning_model(title_model) else 40
+
+    budget_reservation: Optional[BudgetReservation] = None
     try:
-        title_model = OPENAI_TITLE_MODEL
-        # Use Chat Completions API with a lightweight model for title generation.
-        # For reasoning models (gpt-5, o-series), use higher token budget since they
-        # consume tokens on internal reasoning before producing visible output.
-        token_limit = 60 if _is_reasoning_model(title_model) else 40
+        budget_reservation = ai_budget_guard.reserve(
+            provider="openai",
+            model=title_model,
+            estimated_input_tokens=estimate_tokens(request.first_message, system_overhead=50),
+            estimated_output_tokens=token_limit,
+            essential=token_limit_exempt,
+        )
+    except AIBudgetDenied as budget_exc:
+        rate_limiter.release_request(raw_request, user_id=verified_user_id)
+        return _budget_denied_response(budget_exc)
+
+    try:
         payload = {
             "model": title_model,
             "messages": [
@@ -3178,6 +3275,11 @@ async def chat_title(
             actual_tokens = usage.get("total_tokens", 0)
             if not token_limit_exempt:
                 rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+            ai_budget_guard.reconcile(
+                budget_reservation,
+                actual_input_tokens=usage.get("prompt_tokens", 0) or 0,
+                actual_output_tokens=usage.get("completion_tokens", 0) or 0,
+            )
             content = _extract_text_unified(data).strip().strip('"').strip("'")
         except Exception as exc:
             logger.warning("Title generation model call failed: %s", exc)
@@ -3204,6 +3306,7 @@ async def chat_title(
         return {"title": content}
     finally:
         rate_limiter.release_request(raw_request, user_id=verified_user_id)
+        ai_budget_guard.release(budget_reservation)
 
 
 @router.post("/api/ai/analyze-quantitative")
@@ -3232,6 +3335,19 @@ async def analyze_quantitative_data(
         raise HTTPException(status_code=429, detail=error_msg or "Rate limit exceeded")
     rate_limiter.add_rate_limit_headers(response, rate_limit_info)
 
+    budget_reservation: Optional[BudgetReservation] = None
+    try:
+        budget_reservation = ai_budget_guard.reserve(
+            provider="openai",
+            model=OPENAI_QUANT_MODEL,
+            estimated_input_tokens=estimate_tokens(data_str, system_overhead=150),
+            estimated_output_tokens=500,
+            essential=token_limit_exempt,
+        )
+    except AIBudgetDenied as budget_exc:
+        rate_limiter.release_request(raw_request, user_id=verified_user_id)
+        return _budget_denied_response(budget_exc)
+
     try:
         payload = {
             "model": OPENAI_QUANT_MODEL,
@@ -3258,6 +3374,11 @@ async def analyze_quantitative_data(
         actual_tokens = usage.get("total_tokens", 0)
         if not token_limit_exempt:
             rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
+        ai_budget_guard.reconcile(
+            budget_reservation,
+            actual_input_tokens=usage.get("prompt_tokens", 0) or 0,
+            actual_output_tokens=usage.get("completion_tokens", 0) or 0,
+        )
 
         content = _extract_text_unified(data).strip()
         if not content:
@@ -3271,3 +3392,4 @@ async def analyze_quantitative_data(
         return {"response": content}
     finally:
         rate_limiter.release_request(raw_request, user_id=verified_user_id)
+        ai_budget_guard.release(budget_reservation)
