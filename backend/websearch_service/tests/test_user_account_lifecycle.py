@@ -325,7 +325,7 @@ def test_execute_delete_aborts_before_destructive_call_when_audit_persistence_fa
                         snapshot_id=snapshot_id,
                         confirmation_token=token,
                         confirmation_email="user@example.com",
-                        idempotency_key="idem-key-12345",
+                        idempotency_key="idem-key-001",
                     )
                 )
         assert exc_info.value.status_code == 503
@@ -371,7 +371,7 @@ def test_delete_completes_and_produces_no_raw_email_in_audit():
                     snapshot_id=snapshot_id,
                     confirmation_token=token,
                     confirmation_email="user@example.com",
-                    idempotency_key="idem-key-67890",
+                    idempotency_key="idem-key-002",
                 )
             )
         assert result["status"] == "deleted"
