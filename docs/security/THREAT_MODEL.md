@@ -15,7 +15,7 @@
 | Chat history (may contain personal finance details) | High | `ai.*` |
 | Paper-trading history / portfolio state | Medium | `trading.*` |
 | Academy progress | Low | `academy.*` |
-| Audit log (privileged operations) | High (integrity-critical) | audit stream + `logs/audit.jsonl` |
+| Audit log (privileged operations) | High (integrity-critical) | `core.audit_events` — durable, append-only, hash-chained (production/staging); `logs/audit.jsonl` local-dev fallback only — see `docs/security/AUDIT_TRAIL.md` |
 | Provider API keys (OpenAI, Tavily, Perplexity, DataAPI) | Critical | Railway env only |
 | Supabase service-role key + JWT secret | Critical | Railway env only |
 | Release/deploy credentials (Vercel, Railway, GitHub) | Critical | platform dashboards, GH secrets |

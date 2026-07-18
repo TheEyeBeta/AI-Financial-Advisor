@@ -46,6 +46,7 @@ from ..services.admin_jobs import (
     retry_failed_job,
 )
 from ..middleware.correlation import get_correlation_id
+from ..services.audit import audit_log
 from ..services.orphan_user_cleanup import (
     OrphanCleanupError,
     create_dry_run_snapshot,
@@ -574,7 +575,7 @@ def _idempotency_key(request: Request) -> str:
     return key
 
 
-def _enqueue_trigger_response(
+async def _enqueue_trigger_response(
     *,
     request: Request,
     admin: str,
@@ -594,6 +595,17 @@ def _enqueue_trigger_response(
     except AdminJobError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    await audit_log(
+        "admin.job_enqueued",
+        {"job_type": job_type, "duplicate": not created},
+        actor_type="admin",
+        actor_id=admin,
+        target_type="admin_job",
+        target_id=job.get("id"),
+        reason_code=job_type,
+        request_id=job.get("correlation_id"),
+    )
+
     return {
         "status": job.get("status"),
         "job_id": job.get("id"),
@@ -606,13 +618,13 @@ def _enqueue_trigger_response(
 @router.post("/api/admin/trigger-ranking")
 async def trigger_ranking(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a ranking cycle for the durable admin job worker."""
-    return _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_RANKING)
+    return await _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_RANKING)
 
 
 @router.post("/api/admin/trigger-memory-scan")
 async def trigger_memory_scan(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a full history memory scan for the durable admin job worker."""
-    response = _enqueue_trigger_response(
+    response = await _enqueue_trigger_response(
         request=request,
         admin=admin,
         job_type=JOB_TYPE_MEMORY_SCAN,
@@ -625,13 +637,13 @@ async def trigger_memory_scan(request: Request, admin: str = Depends(_require_ad
 @router.post("/api/admin/trigger-intelligence")
 async def trigger_intelligence(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue an intelligence cycle for the durable admin job worker."""
-    return _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_INTELLIGENCE)
+    return await _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_INTELLIGENCE)
 
 
 @router.post("/api/admin/trigger-memory-extraction")
 async def trigger_memory_extraction(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a live memory extraction cycle for the durable admin job worker."""
-    return _enqueue_trigger_response(
+    return await _enqueue_trigger_response(
         request=request,
         admin=admin,
         job_type=JOB_TYPE_MEMORY_EXTRACTION,
@@ -641,7 +653,7 @@ async def trigger_memory_extraction(request: Request, admin: str = Depends(_requ
 @router.post("/api/admin/trigger-meridian-refresh")
 async def trigger_meridian_refresh(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a Meridian context refresh for the durable admin job worker."""
-    return _enqueue_trigger_response(
+    return await _enqueue_trigger_response(
         request=request,
         admin=admin,
         job_type=JOB_TYPE_MERIDIAN_REFRESH,

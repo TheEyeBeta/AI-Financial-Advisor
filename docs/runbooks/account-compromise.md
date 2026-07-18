@@ -12,12 +12,16 @@
 3. Revoke sessions: Supabase dashboard → Authentication → user → sign out all sessions.
 
 ## Diagnostics
-- Audit trail: privileged operations by/on the account (`app/services/audit.py` stream).
+- Audit trail: privileged operations by/on the account, durably recorded in
+  `core.audit_events` (see `docs/security/AUDIT_TRAIL.md`) — query via the
+  service role (e.g. `SELECT * FROM core.audit_events WHERE target_pseudonymous_id = pseudonymize(<auth_id>) ORDER BY created_at DESC`).
+  Identifiers in the table are pseudonymized, not raw emails — correlate by
+  auth id, not by looking up an email string.
 - Supabase Auth logs: sign-in IPs, methods, timestamps for the account.
 - Data-access review: what the account touched (chat, trades) within the window.
 
 ## Dashboards / logs
-Supabase Auth logs, audit log, Sentry (unusual client errors can indicate credential-stuffing tooling).
+Supabase Auth logs, `core.audit_events`, Sentry (unusual client errors can indicate credential-stuffing tooling).
 
 ## Recovery
 1. Verify the real owner before restoring — the registered email alone is

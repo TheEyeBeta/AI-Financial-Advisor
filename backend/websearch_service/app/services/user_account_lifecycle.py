@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from .audit import audit_log
+from .audit import AuditPersistenceError, audit_log
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,46 @@ _DELETE_SNAPSHOTS: dict[str, dict[str, Any]] = {}
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+async def _mandatory_lifecycle_audit(
+    event: str,
+    *,
+    caller: AdminCaller,
+    target_auth_id: str,
+    request_id: str,
+    result: str,
+    reason_code: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> None:
+    """Write a durable audit record for a destructive account-lifecycle step.
+
+    Raises ``UserLifecycleError(503)`` — not the underlying persistence
+    error — so callers can safely abort a destructive operation whose audit
+    trail could not be persisted, per the "fail destructive admin operations
+    safely" requirement. Never includes raw emails: only the pseudonymized
+    actor/target identifiers travel to the audit store.
+    """
+    actor_id = caller.auth_user_id if not caller.is_service_role else "service-role"
+    try:
+        await audit_log(
+            event,
+            extra or {},
+            actor_type="service_role" if caller.is_service_role else "admin",
+            actor_id=actor_id,
+            target_type="user",
+            target_id=target_auth_id,
+            result=result,
+            reason_code=reason_code,
+            request_id=request_id,
+            mandatory=True,
+        )
+    except AuditPersistenceError as exc:
+        raise UserLifecycleError(
+            "audit trail could not be durably persisted; refusing to proceed with "
+            "this destructive operation until audit logging is restored",
+            status_code=503,
+        ) from exc
 
 
 def enforce_recent_authentication(caller: AdminCaller) -> None:
@@ -179,6 +219,17 @@ async def suspend_user_account(
         ):
             raise UserLifecycleError("cannot suspend the final active admin account", status_code=403)
 
+        request_id = str(uuid.uuid4())
+        await _mandatory_lifecycle_audit(
+            "admin.user_suspend_attempted",
+            caller=caller,
+            target_auth_id=target_auth_id,
+            request_id=request_id,
+            result="pending",
+            reason_code="suspend",
+            extra={"reason": reason},
+        )
+
         ban_resp = await http.put(
             f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
             headers=headers,
@@ -206,7 +257,6 @@ async def suspend_user_account(
         if patch_resp.status_code not in (200, 204):
             raise UserLifecycleError("failed to update application user status", status_code=502)
 
-    request_id = str(uuid.uuid4())
     logger.info(
         "User suspended actor=%s target=%s request_id=%s reason=%r",
         caller.principal,
@@ -214,15 +264,14 @@ async def suspend_user_account(
         request_id,
         reason,
     )
-    await audit_log(
+    await _mandatory_lifecycle_audit(
         "admin.user_suspended",
-        {
-            "actor": caller.principal,
-            "target_auth_id": target_auth_id,
-            "target_email": target_email,
-            "reason": reason,
-            "request_id": request_id,
-        },
+        caller=caller,
+        target_auth_id=target_auth_id,
+        request_id=request_id,
+        result="success",
+        reason_code="suspend",
+        extra={"reason": reason},
     )
     return {
         "status": "suspended",
@@ -264,6 +313,16 @@ async def restore_user_account(
                 "only a suspended account can be restored", status_code=409
             )
 
+        request_id = str(uuid.uuid4())
+        await _mandatory_lifecycle_audit(
+            "admin.user_restore_attempted",
+            caller=caller,
+            target_auth_id=target_auth_id,
+            request_id=request_id,
+            result="pending",
+            reason_code="restore",
+        )
+
         unban_resp = await http.put(
             f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
             headers=headers,
@@ -285,21 +344,19 @@ async def restore_user_account(
         if patch_resp.status_code not in (200, 204):
             raise UserLifecycleError("failed to update application user status", status_code=502)
 
-    request_id = str(uuid.uuid4())
     logger.info(
         "User restored actor=%s target=%s request_id=%s",
         caller.principal,
         target_auth_id,
         request_id,
     )
-    await audit_log(
+    await _mandatory_lifecycle_audit(
         "admin.user_restored",
-        {
-            "actor": caller.principal,
-            "target_auth_id": target_auth_id,
-            "target_email": target_email,
-            "request_id": request_id,
-        },
+        caller=caller,
+        target_auth_id=target_auth_id,
+        request_id=request_id,
+        result="success",
+        reason_code="restore",
     )
     return {
         "status": "active",
@@ -404,6 +461,16 @@ async def execute_delete_request(
             active_admin_count=active_admins,
         )
 
+        await _mandatory_lifecycle_audit(
+            "admin.user_delete_attempted",
+            caller=caller,
+            target_auth_id=target_auth_id,
+            request_id=idempotency_key,
+            result="pending",
+            reason_code="delete",
+            extra={"snapshot_id": snapshot_id, "idempotency_key": idempotency_key},
+        )
+
         del_resp = await http.delete(
             f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
             headers=headers,
@@ -411,15 +478,14 @@ async def execute_delete_request(
         if del_resp.status_code == 404:
             snapshot["status"] = "executed"
             snapshot["idempotency_key"] = idempotency_key
-            await audit_log(
+            await _mandatory_lifecycle_audit(
                 "admin.user_deleted",
-                {
-                    "actor": caller.principal,
-                    "target_auth_id": target_auth_id,
-                    "snapshot_id": snapshot_id,
-                    "idempotency_key": idempotency_key,
-                    "already_removed": True,
-                },
+                caller=caller,
+                target_auth_id=target_auth_id,
+                request_id=idempotency_key,
+                result="success",
+                reason_code="delete",
+                extra={"snapshot_id": snapshot_id, "idempotency_key": idempotency_key, "already_removed": True},
             )
             return {"status": "deleted", "auth_id": target_auth_id, "already_removed": True}
         if del_resp.status_code not in (200, 204):
@@ -434,13 +500,13 @@ async def execute_delete_request(
         snapshot_id,
         idempotency_key,
     )
-    await audit_log(
+    await _mandatory_lifecycle_audit(
         "admin.user_deleted",
-        {
-            "actor": caller.principal,
-            "target_auth_id": target_auth_id,
-            "snapshot_id": snapshot_id,
-            "idempotency_key": idempotency_key,
-        },
+        caller=caller,
+        target_auth_id=target_auth_id,
+        request_id=idempotency_key,
+        result="success",
+        reason_code="delete",
+        extra={"snapshot_id": snapshot_id, "idempotency_key": idempotency_key},
     )
     return {"status": "deleted", "auth_id": target_auth_id, "snapshot_id": snapshot_id}

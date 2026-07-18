@@ -16,7 +16,7 @@ cite this document as evidence that dashboards or alerts exist.
 | Frontend product analytics | `src/services/analytics.ts` — PostHog, gated on a PostHog key env var, no-op fallback when unset | Funnel/retention/conversion events (`AnalyticsEvents.*` calls scattered through `src/pages/*`, e.g. `chatSent`, `chatResponseFailed`, `tradeExecuted`) | Product analytics, not infra/reliability monitoring — wrong tool for latency/error-rate dashboards even if configured. |
 | Readiness/liveness probes | `app/health_checks.py` — `/health/live`, `/health/ready` (config validation, Supabase ping, schema-revision match, rate-limit backend, startup completion) | A point-in-time health signal any external monitor or Railway's own healthcheck can poll | Railway's internal use of this only gates its own deploys — it is not a recorded, queryable uptime history unless something external polls and stores the result (SLO 1). |
 | AI chat turn status | `ai.chat_turn_requests` table (migration `0030_chat_turn_requests`), reconciliation sweep in `app/services/chat_turn_reconciliation.py` | Durable, queryable record of every chat turn's outcome (`pending`/`processing`/`completed`/`failed`+`failure_code`) — exactly the data SLO 4 needs | Nothing currently runs a scheduled query against this table to produce a live rate; it's only read by the reconciliation sweep and admin dashboard/debug paths. |
-| Audit log | `app/services/audit.py` — JSONL file (`AI_AUDIT_LOG_PATH`, default `logs/audit.jsonl`), now called from `suspend_user_account`, `restore_user_account`, `execute_delete_request` (added this cycle) | A durable record of destructive account actions with actor/target/reason, independent of general app logs | It's a local file on the running instance's filesystem — on Railway's ephemeral containers this does **not** survive a redeploy or restart unless shipped somewhere durable. This is a real gap: right now the audit trail is only as durable as the container it was written on. |
+| Audit log | `app/services/audit.py` writes to `core.audit_events` (Postgres, append-only, hash-chained, migration `0036_core_audit_events`) in production/staging; local JSONL fallback (`AI_AUDIT_LOG_PATH`, default `logs/audit.jsonl`) only in development/test. Called from `suspend_user_account`, `restore_user_account`, `execute_delete_request`, admin job enqueue, and AI-proxy fallback/abuse events. See `docs/security/AUDIT_TRAIL.md`. | A durable, queryable record of destructive account actions and privileged operations with pseudonymized actor/target, independent of general app logs, that survives redeploys/restarts | Retention/export automation (item #5 below) is designed but not yet built — rows accumulate indefinitely today, which is the safe default (no silent deletion). |
 | Job run logging | `app/services/job_logger.py` — `log_job_run`, writes a summary row per background job execution | Scheduler/job success-failure history | Not surfaced on any dashboard; would need a query against wherever `log_job_run` persists to. |
 | Rate limiting | `app/services/rate_limit.py`, `app/services/rate_limit_redis.py` | Enforces limits; 429 responses are visible in the structured request logs like any other status code | No dedicated "rate-limit events" panel — would need to filter the request-log stream by `status_code == 429`. |
 
@@ -47,11 +47,12 @@ without human-run steps).
    request duration. Not implemented in this pass because it touches the
    hot streaming path and deserves its own focused change + test, not a
    drive-by edit alongside this documentation work.
-5. **Durable audit log storage.** `app/services/audit.py` writes to a local
-   file that does not survive an ephemeral container restart. Needs either
-   a persistent volume, or redirecting `AUDIT_LOG_PATH` at a durable
-   destination (e.g. shipping to the same log platform as #3, or writing to
-   a dedicated Supabase table instead of a local file).
+5. **Durable audit log storage — closed.** `app/services/audit.py` now
+   writes to `core.audit_events` (Postgres) in production/staging instead of
+   a local file; see `docs/security/AUDIT_TRAIL.md`. Remaining follow-up
+   (not yet built, tracked there): scheduled export-to-cold-storage for
+   retention, since the table has no delete grant/policy for normal
+   operation by design.
 6. **Alert routing** (PagerDuty/Slack/email/etc.) for every alert threshold
    defined in `docs/SLO.md` — no alert-routing integration exists in this
    repo today.
