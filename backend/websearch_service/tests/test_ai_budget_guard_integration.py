@@ -108,10 +108,46 @@ def test_admin_ai_budget_override_requires_auth(client: TestClient):
     assert response.status_code == 401
 
 
-def test_admin_ai_budget_reconcile_costs_is_non_fatal_when_unconfigured(client: TestClient, service_role_jwt: str):
+def test_admin_ai_budget_reconcile_costs_is_non_fatal_when_unconfigured(
+    client: TestClient, service_role_jwt: str, monkeypatch
+):
+    monkeypatch.delenv("OPENAI_ADMIN_API_KEY", raising=False)
     response = client.post(
         "/api/admin/ai-budget/reconcile-costs",
         headers={"Authorization": f"Bearer {service_role_jwt}"},
     )
     assert response.status_code == 200
     assert response.json()["status"] == "skipped"
+
+
+def test_admin_ai_budget_override_clear_failure_does_not_claim_success(
+    client: TestClient, service_role_jwt: str
+):
+    """Regression: clearing an override used to always report success even
+    when the backend mutation failed. It must now surface the failure."""
+    from app.services.ai_budget_guard import AIBudgetDenied, ai_budget_guard
+
+    denial = AIBudgetDenied("redis_unavailable", "hard_stop", 30, "backend unavailable")
+    with patch.object(ai_budget_guard, "clear_manual_override", side_effect=denial):
+        response = client.delete(
+            "/api/admin/ai-budget/override",
+            headers={"Authorization": f"Bearer {service_role_jwt}"},
+        )
+    assert response.status_code == 503
+    assert "success" not in response.json() or response.json().get("success") is not True
+
+
+def test_admin_ai_budget_override_set_failure_does_not_claim_success(
+    client: TestClient, service_role_jwt: str
+):
+    from app.services.ai_budget_guard import AIBudgetDenied, ai_budget_guard
+
+    denial = AIBudgetDenied("redis_unavailable", "hard_stop", 30, "backend unavailable")
+    with patch.object(ai_budget_guard, "set_manual_override", side_effect=denial):
+        response = client.post(
+            "/api/admin/ai-budget/override",
+            json={"duration_minutes": 5, "reason": "incident"},
+            headers={"Authorization": f"Bearer {service_role_jwt}"},
+        )
+    assert response.status_code == 503
+    assert "success" not in response.json() or response.json().get("success") is not True

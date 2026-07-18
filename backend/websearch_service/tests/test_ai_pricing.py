@@ -41,3 +41,22 @@ def test_invalid_env_override_is_ignored(monkeypatch):
     monkeypatch.setenv("AI_MODEL_PRICING_JSON", "not valid json")
     price = ai_pricing.get_model_price("gpt-4o-mini")
     assert price.input_per_million == 0.15
+
+
+def test_negative_price_override_is_rejected(monkeypatch):
+    monkeypatch.setenv(
+        "AI_MODEL_PRICING_JSON",
+        json.dumps({"gpt-4o-mini": {"input_per_million": -1.0, "output_per_million": 0.6}}),
+    )
+    price = ai_pricing.get_model_price("gpt-4o-mini")
+    # Invalid override rejected wholesale — falls back to the real base price.
+    assert price.input_per_million == 0.15
+
+
+def test_non_finite_price_override_is_rejected(monkeypatch):
+    monkeypatch.setenv(
+        "AI_MODEL_PRICING_JSON",
+        json.dumps({"gpt-4o-mini": {"input_per_million": float("inf"), "output_per_million": 0.6}}),
+    )
+    price = ai_pricing.get_model_price("gpt-4o-mini")
+    assert price.input_per_million == 0.15

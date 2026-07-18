@@ -129,25 +129,39 @@ def test_provider_and_model_concurrency_are_independent():
 # ─── Daily / monthly boundary ──────────────────────────────────────────────
 
 def test_daily_hard_stop_blocks_further_reservations():
-    guard = _redis_guard(daily_budget_usd=0.001, monthly_budget_usd=100.0)
-    # gpt-4o-mini: 10000 in + 10000 out ~= 0.0015 + 0.006 -> exceeds $0.001 daily budget once reconciled to actuals.
-    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10000, estimated_output_tokens=10000)
+    guard = _redis_guard(daily_budget_usd=0.005, monthly_budget_usd=100.0)
+    # Reserve small (fits comfortably under budget at admission time), then
+    # reconcile to a much larger actual — the classic "actual usage came in
+    # higher than estimated" case — pushing day_spend over the $0.005
+    # budget. The *next* reservation attempt must then hit hard_stop.
+    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=100, estimated_output_tokens=100)
     guard.reconcile(r1, actual_input_tokens=10000, actual_output_tokens=10000)
     guard.release(r1)
     with pytest.raises(AIBudgetDenied) as exc_info:
-        guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=1000, estimated_output_tokens=1000)
+        guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10, estimated_output_tokens=10)
     assert exc_info.value.reason_code == "hard_stop"
     assert exc_info.value.http_status == 503
     assert exc_info.value.state == STATE_HARD_STOP
 
 
+def test_a_single_oversized_reservation_is_denied_before_it_lands():
+    """A single request whose OWN estimated cost would push spend past
+    budget must be denied at admission time, not merely detected after the
+    fact on a subsequent request."""
+    guard = _redis_guard(daily_budget_usd=0.001, monthly_budget_usd=100.0)
+    with pytest.raises(AIBudgetDenied) as exc_info:
+        guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10000, estimated_output_tokens=10000)
+    assert exc_info.value.reason_code == "hard_stop"
+    assert guard.get_status()["day_spend_usd"] == pytest.approx(0.0, abs=1e-9)
+
+
 def test_monthly_hard_stop_blocks_even_when_daily_budget_has_room():
-    guard = _redis_guard(daily_budget_usd=1000.0, monthly_budget_usd=0.001)
-    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10000, estimated_output_tokens=10000)
+    guard = _redis_guard(daily_budget_usd=1000.0, monthly_budget_usd=0.005)
+    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=100, estimated_output_tokens=100)
     guard.reconcile(r1, actual_input_tokens=10000, actual_output_tokens=10000)
     guard.release(r1)
     with pytest.raises(AIBudgetDenied) as exc_info:
-        guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=1000, estimated_output_tokens=1000)
+        guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10, estimated_output_tokens=10)
     assert exc_info.value.reason_code == "hard_stop"
 
 
@@ -204,8 +218,8 @@ def test_fallback_provider_is_not_blocked_by_primary_providers_concurrency():
 # ─── Manual override expiry ─────────────────────────────────────────────────
 
 def test_manual_override_bypasses_hard_stop_and_expires():
-    guard = _redis_guard(daily_budget_usd=0.001, monthly_budget_usd=100.0)
-    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10000, estimated_output_tokens=10000)
+    guard = _redis_guard(daily_budget_usd=0.005, monthly_budget_usd=100.0)
+    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=100, estimated_output_tokens=100)
     guard.reconcile(r1, actual_input_tokens=10000, actual_output_tokens=10000)
     guard.release(r1)
 
@@ -237,8 +251,8 @@ def test_manual_override_disabled_by_default():
 
 
 def test_clear_manual_override_restores_hard_stop():
-    guard = _redis_guard(daily_budget_usd=0.001, monthly_budget_usd=100.0)
-    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10000, estimated_output_tokens=10000)
+    guard = _redis_guard(daily_budget_usd=0.005, monthly_budget_usd=100.0)
+    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=100, estimated_output_tokens=100)
     guard.reconcile(r1, actual_input_tokens=10000, actual_output_tokens=10000)
     guard.release(r1)
 
@@ -292,6 +306,24 @@ def test_redis_outage_fails_open_when_configured():
     guard.release(reservation)
 
 
+def test_redis_outage_fail_open_still_enforces_via_memory_backend():
+    """Fail-open must degrade to the in-memory backend's best-effort
+    enforcement, not to zero enforcement — a fake always-allow reservation
+    would let concurrency/spend limits vanish entirely during an outage."""
+    guard = AIBudgetGuard(
+        config=AIBudgetConfig(
+            key_prefix="test:outage-enforce", fail_open_on_redis_outage=True, global_max_concurrent=1
+        ),
+        redis_client=_ExplodingRedisClient(),
+    )
+    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10, estimated_output_tokens=10)
+    assert r1.used_memory_fallback is True
+    with pytest.raises(AIBudgetDenied) as exc_info:
+        guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10, estimated_output_tokens=10)
+    assert exc_info.value.reason_code == "global_concurrency"
+    guard.release(r1)
+
+
 def test_no_redis_configured_falls_back_to_in_memory_guard():
     """No Redis at all (e.g. local dev): the guard must still function via
     the in-memory backend rather than crashing every AI call."""
@@ -314,3 +346,146 @@ def test_in_memory_backend_enforces_concurrency_limit():
         guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=10, estimated_output_tokens=10)
     assert exc_info.value.reason_code == "global_concurrency"
     guard.release(r1)
+
+
+# ─── Regression: review-flagged bugs ───────────────────────────────────────
+
+def test_day_request_token_keys_are_date_suffixed():
+    """Regression: day_req/day_tok used to be static key names relying
+    solely on Redis TTL to roll over at midnight; a TTL unit bug meant they
+    could survive past midnight and let yesterday's counts bleed into
+    today. They must be date-suffixed like day_spend/month_spend so a day
+    boundary is a key-name change, not just a TTL race."""
+    from app.services.ai_budget_guard import _RedisBackend
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    backend = _RedisBackend(client, "test:prefix")
+    keys = backend._keys("openai", "gpt-4o-mini", "req-1", time.time())
+    assert keys["day_req"] != "test:prefix:global:req:day"
+    assert keys["day_tok"] != "test:prefix:global:tok:day"
+    assert keys["day_req"].startswith("test:prefix:global:req:day:")
+    assert keys["day_tok"].startswith("test:prefix:global:tok:day:")
+
+
+def test_check_admission_denies_in_hard_stop_regardless_of_essential():
+    """The cheap pre-admission check (used before a priced classifier call
+    whose model isn't known yet) must deny in hard_stop for every caller —
+    hard_stop has no essential-traffic exception (only restricted does)."""
+    guard = _redis_guard(daily_budget_usd=0.005, monthly_budget_usd=100.0)
+    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=100, estimated_output_tokens=100)
+    guard.reconcile(r1, actual_input_tokens=10000, actual_output_tokens=10000)
+    guard.release(r1)
+
+    with pytest.raises(AIBudgetDenied) as exc_info:
+        guard.check_admission(essential=False)
+    assert exc_info.value.reason_code == "hard_stop"
+
+    with pytest.raises(AIBudgetDenied) as exc_info:
+        guard.check_admission(essential=True)
+    assert exc_info.value.reason_code == "hard_stop"
+
+
+def test_check_admission_restricted_exempts_essential_callers():
+    guard = _redis_guard(daily_budget_usd=0.01, monthly_budget_usd=100.0, restricted_threshold_pct=0.5, warning_threshold_pct=0.2)
+    r1 = guard.reserve(provider="openai", model="gpt-4o-mini", estimated_input_tokens=50000, estimated_output_tokens=0)
+    guard.reconcile(r1, actual_input_tokens=50000, actual_output_tokens=0)
+    guard.release(r1)
+    assert guard.get_status()["state"] == STATE_RESTRICTED
+
+    with pytest.raises(AIBudgetDenied) as exc_info:
+        guard.check_admission(essential=False)
+    assert exc_info.value.reason_code == "restricted"
+
+    guard.check_admission(essential=True)  # must not raise
+
+
+def test_check_admission_allows_normal_state():
+    guard = _redis_guard()
+    guard.check_admission(essential=False)  # must not raise
+
+
+def test_in_memory_reconcile_after_day_rollover_does_not_corrupt_new_day():
+    """Regression: if a day boundary rolls over between reserve() and
+    reconcile()/release(), the delta must not be applied to the *new* day's
+    counters (which never saw that spend) — it should be dropped for the
+    stale reservation instead of corrupting the fresh bucket with a
+    negative or inflated value."""
+    from app.services.ai_budget_guard import AIBudgetConfig as _Cfg
+    from app.services.ai_budget_guard import _InMemoryBackend
+
+    config = _Cfg(key_prefix="test:rollover")
+    backend = _InMemoryBackend()
+    t0 = time.time()
+
+    allowed, reason, state, retry_after, day_spend, month_spend = backend.reserve(
+        config=config, provider="openai", model="gpt-4o-mini",
+        estimated_tokens=2000, estimated_cost=0.001, essential=False,
+        request_id="req-1", now=t0,
+    )
+    assert allowed
+    assert backend._day_spend > 0
+
+    # Simulate the reconcile/release call landing after a real day boundary
+    # (>24h later) — a legitimate race for a long-running or retried request.
+    t1 = t0 + 90_000  # > 24h later
+
+    backend.reconcile("req-1", "openai", "gpt-4o-mini", t1, actual_cost=0.5, actual_tokens=5000)
+    # The new (post-rollover) day bucket must be untouched by a reservation
+    # bound to the old day — it should read exactly what _roll_windows reset
+    # it to (0), not a value derived from the stale reservation's delta.
+    assert backend._day_spend == 0.0
+
+    backend.release("req-1", "openai", "gpt-4o-mini", t1, refund_estimate=True)
+    assert backend._day_spend == 0.0
+
+
+# ─── Startup config validation ─────────────────────────────────────────────
+
+def test_validate_numeric_config_accepts_sane_defaults():
+    from app.services.ai_budget_guard import _validate_numeric_config
+
+    _validate_numeric_config(AIBudgetConfig(key_prefix="ok"))  # must not raise
+
+
+def test_validate_numeric_config_rejects_negative_limit():
+    from app.services.ai_budget_guard import _validate_numeric_config
+
+    with pytest.raises(RuntimeError, match="global_requests_per_minute"):
+        _validate_numeric_config(AIBudgetConfig(key_prefix="ok", global_requests_per_minute=-1))
+
+
+def test_validate_numeric_config_rejects_negative_budget():
+    from app.services.ai_budget_guard import _validate_numeric_config
+
+    with pytest.raises(RuntimeError, match="daily_budget_usd"):
+        _validate_numeric_config(AIBudgetConfig(key_prefix="ok", daily_budget_usd=-5.0))
+
+
+def test_validate_numeric_config_rejects_non_finite_budget():
+    from app.services.ai_budget_guard import _validate_numeric_config
+
+    with pytest.raises(RuntimeError, match="daily_budget_usd"):
+        _validate_numeric_config(AIBudgetConfig(key_prefix="ok", daily_budget_usd=float("inf")))
+
+
+def test_validate_numeric_config_rejects_unordered_thresholds():
+    from app.services.ai_budget_guard import _validate_numeric_config
+
+    with pytest.raises(RuntimeError, match="warning"):
+        _validate_numeric_config(
+            AIBudgetConfig(key_prefix="ok", warning_threshold_pct=0.9, restricted_threshold_pct=0.5)
+        )
+
+
+def test_validate_numeric_config_rejects_zero_ttl():
+    from app.services.ai_budget_guard import _validate_numeric_config
+
+    with pytest.raises(RuntimeError, match="LEASE_TTL"):
+        _validate_numeric_config(AIBudgetConfig(key_prefix="ok", lease_ttl_seconds=0))
+
+
+def test_validate_numeric_config_rejects_empty_key_prefix():
+    from app.services.ai_budget_guard import _validate_numeric_config
+
+    with pytest.raises(RuntimeError, match="KEY_PREFIX"):
+        _validate_numeric_config(AIBudgetConfig(key_prefix="   "))

@@ -932,28 +932,47 @@ async def ai_budget_set_override(
     """
     expires_at = ai_budget_guard.compute_override_expiry(payload.duration_minutes * 60)
     expires_iso = datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
+    audit_payload = {
+        "admin": admin,
+        "duration_minutes": payload.duration_minutes,
+        "reason": payload.reason,
+        "expires_at": expires_iso,
+    }
 
-    # Audit before acting: this widens AI spend risk, so the audit record
-    # must exist even if the subsequent Redis write somehow fails partway.
+    # Audit the ATTEMPT before acting (this widens AI spend risk, so the
+    # attempt must be durably recorded even if the write below fails), then
+    # audit the CONFIRMED outcome after — never claim "success" for a
+    # mutation that has not actually been confirmed against the backend.
     await audit_log(
         "ai_budget_manual_override_set",
-        {
-            "admin": admin,
-            "duration_minutes": payload.duration_minutes,
-            "reason": payload.reason,
-            "expires_at": expires_iso,
-        },
+        audit_payload,
         actor_type="admin",
         actor_id=admin,
-        result="success",
+        result="pending",
         mandatory=True,
     )
 
     try:
         ai_budget_guard.set_manual_override(expires_at=expires_at, admin_id=admin, reason=payload.reason)
     except AIBudgetDenied as exc:
+        await audit_log(
+            "ai_budget_manual_override_set",
+            {**audit_payload, "error": exc.detail},
+            actor_type="admin",
+            actor_id=admin,
+            result="failure",
+            mandatory=False,
+        )
         raise HTTPException(status_code=exc.http_status, detail=exc.detail) from exc
 
+    await audit_log(
+        "ai_budget_manual_override_set",
+        audit_payload,
+        actor_type="admin",
+        actor_id=admin,
+        result="success",
+        mandatory=True,
+    )
     return {"success": True, "expires_at": expires_iso}
 
 
@@ -964,10 +983,31 @@ async def ai_budget_clear_override(admin: str = Depends(_require_admin)) -> dict
         {"admin": admin},
         actor_type="admin",
         actor_id=admin,
+        result="pending",
+        mandatory=True,
+    )
+
+    try:
+        ai_budget_guard.clear_manual_override()
+    except AIBudgetDenied as exc:
+        await audit_log(
+            "ai_budget_manual_override_cleared",
+            {"admin": admin, "error": exc.detail},
+            actor_type="admin",
+            actor_id=admin,
+            result="failure",
+            mandatory=False,
+        )
+        raise HTTPException(status_code=exc.http_status, detail=exc.detail) from exc
+
+    await audit_log(
+        "ai_budget_manual_override_cleared",
+        {"admin": admin},
+        actor_type="admin",
+        actor_id=admin,
         result="success",
         mandatory=True,
     )
-    ai_budget_guard.clear_manual_override()
     return {"success": True}
 
 

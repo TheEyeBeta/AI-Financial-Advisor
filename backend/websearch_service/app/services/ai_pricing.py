@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from dataclasses import dataclass
 
@@ -55,10 +56,11 @@ def _load_overrides() -> dict[str, ModelPrice]:
         parsed = json.loads(raw)
         overrides: dict[str, ModelPrice] = {}
         for model, entry in parsed.items():
-            overrides[model] = ModelPrice(
-                input_per_million=float(entry["input_per_million"]),
-                output_per_million=float(entry["output_per_million"]),
-            )
+            input_rate = float(entry["input_per_million"])
+            output_rate = float(entry["output_per_million"])
+            if not all(math.isfinite(rate) and rate >= 0 for rate in (input_rate, output_rate)):
+                raise ValueError(f"Invalid pricing for model {model!r}: rates must be finite and >= 0")
+            overrides[model] = ModelPrice(input_per_million=input_rate, output_per_million=output_rate)
         return overrides
     except Exception as exc:
         logger.error("Invalid AI_MODEL_PRICING_JSON, ignoring overrides: %s", exc)

@@ -237,11 +237,26 @@ redis.call("ZREMRANGEBYSCORE", model_leases_key, "-inf", tostring(now * 1000))
 local day_spend = tonumber(redis.call("GET", day_spend_key) or "0")
 local month_spend = tonumber(redis.call("GET", month_spend_key) or "0")
 
+-- Reported/gating state for warning+restricted uses CURRENT spend (not
+-- including this reservation) — otherwise the very reservation that would
+-- carry spend into the restricted band gets rejected as "restricted" before
+-- it can ever land, and the band becomes unreachable.
 local day_ratio = 0
 if daily_budget > 0 then day_ratio = day_spend / daily_budget end
 local month_ratio = 0
 if monthly_budget > 0 then month_ratio = month_spend / monthly_budget end
 local worst_ratio = math.max(day_ratio, month_ratio)
+
+-- The hard-stop DENIAL, however, is gated on PROJECTED spend (existing +
+-- this reservation) so a single large request cannot itself push spend past
+-- the configured budget before being denied.
+local projected_day_spend = day_spend + estimated_cost
+local projected_month_spend = month_spend + estimated_cost
+local projected_day_ratio = 0
+if daily_budget > 0 then projected_day_ratio = projected_day_spend / daily_budget end
+local projected_month_ratio = 0
+if monthly_budget > 0 then projected_month_ratio = projected_month_spend / monthly_budget end
+local projected_worst_ratio = math.max(projected_day_ratio, projected_month_ratio)
 
 local state = "normal"
 if worst_ratio >= 1.0 then
@@ -256,8 +271,8 @@ if override_active then
   state = "manual_override"
 end
 
-if state == "hard_stop" and not override_active then
-  return {0, "hard_stop", state, "3600", tostring(day_spend), tostring(month_spend)}
+if projected_worst_ratio >= 1.0 and not override_active then
+  return {0, "hard_stop", "hard_stop", "3600", tostring(day_spend), tostring(month_spend)}
 end
 
 if state == "restricted" and is_essential == 0 and not override_active then
@@ -431,6 +446,12 @@ class _RedisBackend:
         self._reconcile = self._register(_RECONCILE_SCRIPT)
         self._release = self._register(_RELEASE_SCRIPT)
 
+    def ping(self) -> bool:
+        try:
+            return bool(self._client.ping())
+        except Exception:
+            return False
+
     def _register(self, script: str):
         registered = self._client.register_script(script)
 
@@ -452,8 +473,11 @@ class _RedisBackend:
         return {
             "minute_req": f"{p}:global:req:minute",
             "minute_tok": f"{p}:global:tok:minute",
-            "day_req": f"{p}:global:req:day",
-            "day_tok": f"{p}:global:tok:day",
+            # Date-suffixed (like day_spend/month_spend below) so a day
+            # boundary is a key-name change, not just a TTL race — the
+            # correct PEXPIRE alone isn't load-bearing for correctness.
+            "day_req": f"{p}:global:req:day:{day_suffix}",
+            "day_tok": f"{p}:global:tok:day:{day_suffix}",
             "global_leases": f"{p}:leases:global",
             "provider_leases": f"{p}:leases:provider:{provider}",
             "model_leases": f"{p}:leases:model:{model}",
@@ -497,7 +521,7 @@ class _RedisBackend:
                 repr(float(config.warning_threshold_pct)), repr(float(config.restricted_threshold_pct)),
                 request_id,
                 str(max(60_000, (60 - int(now) % 60) * 1000 + 2000)),
-                str(max(60_000, day_reset - int(now)) * 1000 + 2000),
+                str(max(60_000, (day_reset - int(now)) * 1000 + 2000)),
                 str(lease_ttl_ms),
                 str(_seconds_until_next_month(now) * 1000 + 2000),
                 "1" if essential else "0",
@@ -637,10 +661,24 @@ class _InMemoryBackend:
                     del leases[rid]
 
             override_active = self._override_expiry > now
+            # State (used for warning/restricted reporting+gating) reflects
+            # CURRENT spend — see the matching comment in _RESERVE_SCRIPT for
+            # why projecting this reservation into the restricted check would
+            # make the restricted band unreachable.
             state = _derive_state(config, self._day_spend, self._month_spend, self._override_expiry, now)
 
-            if state == STATE_HARD_STOP and not override_active:
-                return False, "hard_stop", state, 3600, self._day_spend, self._month_spend
+            # The hard-stop DENIAL is gated on PROJECTED spend so one large
+            # request can't itself push spend past budget undetected.
+            projected_day_spend = self._day_spend + estimated_cost
+            projected_month_spend = self._month_spend + estimated_cost
+            projected_day_ratio = (projected_day_spend / config.daily_budget_usd) if config.daily_budget_usd > 0 else 0
+            projected_month_ratio = (
+                (projected_month_spend / config.monthly_budget_usd) if config.monthly_budget_usd > 0 else 0
+            )
+            projected_worst_ratio = max(projected_day_ratio, projected_month_ratio)
+
+            if projected_worst_ratio >= 1.0 and not override_active:
+                return False, "hard_stop", STATE_HARD_STOP, 3600, self._day_spend, self._month_spend
             if state == STATE_RESTRICTED and not essential and not override_active:
                 return False, "restricted", state, 120, self._day_spend, self._month_spend
             if config.global_max_concurrent > 0 and len(self._global_leases) >= config.global_max_concurrent:
@@ -673,6 +711,14 @@ class _InMemoryBackend:
                 "estimated_tokens": estimated_tokens,
                 "provider": provider,
                 "model": model,
+                # Bind to the windows active at reservation time so a
+                # boundary roll-over before reconcile/release can't apply
+                # this reservation's delta to the *next* window's counters
+                # (which would corrupt a bucket that never actually saw
+                # this spend/tokens).
+                "minute_window_start": self._minute_window_start,
+                "day_key": self._day_key,
+                "month_key": self._month_key,
             }
             return True, "", state, 0, self._day_spend, self._month_spend
 
@@ -681,12 +727,16 @@ class _InMemoryBackend:
             reservation = self._reservations.get(request_id)
             if not reservation:
                 return
+            self._roll_windows(now)
             cost_delta = actual_cost - reservation["estimated_cost"]
             token_delta = actual_tokens - reservation["estimated_tokens"]
-            self._day_spend += cost_delta
-            self._month_spend += cost_delta
-            self._day_tokens += token_delta
-            self._minute_tokens += token_delta
+            if reservation["day_key"] == self._day_key:
+                self._day_spend += cost_delta
+                self._day_tokens += token_delta
+            if reservation["month_key"] == self._month_key:
+                self._month_spend += cost_delta
+            if reservation["minute_window_start"] == self._minute_window_start:
+                self._minute_tokens += token_delta
             reservation["estimated_cost"] = actual_cost
             reservation["estimated_tokens"] = actual_tokens
 
@@ -697,10 +747,14 @@ class _InMemoryBackend:
             self._model_leases.get(model, {}).pop(request_id, None)
             reservation = self._reservations.pop(request_id, None)
             if refund_estimate and reservation:
-                self._day_spend -= reservation["estimated_cost"]
-                self._month_spend -= reservation["estimated_cost"]
-                self._day_tokens -= reservation["estimated_tokens"]
-                self._minute_tokens -= reservation["estimated_tokens"]
+                self._roll_windows(now)
+                if reservation["day_key"] == self._day_key:
+                    self._day_spend -= reservation["estimated_cost"]
+                    self._day_tokens -= reservation["estimated_tokens"]
+                if reservation["month_key"] == self._month_key:
+                    self._month_spend -= reservation["estimated_cost"]
+                if reservation["minute_window_start"] == self._minute_window_start:
+                    self._minute_tokens -= reservation["estimated_tokens"]
 
     def status(self, config: AIBudgetConfig, now: float) -> dict[str, Any]:
         with self._lock:
@@ -766,6 +820,13 @@ class AIBudgetGuard:
     def uses_redis(self) -> bool:
         return self._redis_backend is not None
 
+    def redis_is_healthy(self) -> bool:
+        """Live Redis health probe (not just "was a client configured").
+        Used by readiness checks — a Redis client having been constructed
+        at startup says nothing about whether it's reachable right now.
+        """
+        return self._redis_backend is not None and self._redis_backend.ping()
+
     def _reserve_backend(self):
         """Backend used for a *new* reservation. Redis is authoritative
         whenever configured; a mid-flight Redis outage here is handled
@@ -806,23 +867,30 @@ class AIBudgetGuard:
             if self._redis_backend is not None and backend is self._redis_backend:
                 logger.error("AI budget guard: Redis outage during reserve(): %s", exc)
                 if self.config.fail_open_on_redis_outage:
-                    allowed, reason, state, retry_after = (
-                        True,
-                        "",
-                        STATE_WARNING,
-                        0,
-                    )
+                    # Fail OPEN means "degrade to single-process best-effort
+                    # enforcement", never "skip enforcement entirely" — route
+                    # through the in-memory backend so concurrency/rate/spend
+                    # limits still apply (best-effort) during the outage.
                     used_memory_fallback = True
-                    reservation = BudgetReservation(request_id, provider, model, estimated_tokens, 0.0)
-                    reservation.reconciled = True  # never accounted; nothing to reconcile/refund later
-                    return reservation
-                raise AIBudgetDenied(
-                    "redis_unavailable",
-                    STATE_HARD_STOP,
-                    _DEFAULT_RETRY_AFTER["redis_unavailable"],
-                    "AI budget accounting is temporarily unavailable. Please retry shortly.",
-                ) from exc
-            raise
+                    allowed, reason, state, retry_after, _day_spend, _month_spend = self._memory_backend.reserve(
+                        config=self.config,
+                        provider=provider,
+                        model=model,
+                        estimated_tokens=estimated_tokens,
+                        estimated_cost=estimated_cost,
+                        essential=essential,
+                        request_id=request_id,
+                        now=now,
+                    )
+                else:
+                    raise AIBudgetDenied(
+                        "redis_unavailable",
+                        STATE_HARD_STOP,
+                        _DEFAULT_RETRY_AFTER["redis_unavailable"],
+                        "AI budget accounting is temporarily unavailable. Please retry shortly.",
+                    ) from exc
+            else:
+                raise
 
         if not allowed:
             retry_after = retry_after or _DEFAULT_RETRY_AFTER.get(reason, 30)
@@ -874,6 +942,30 @@ class AIBudgetGuard:
             logger.warning("AI budget guard: status read failed, falling back to in-memory view: %s", exc)
             return self._memory_backend.status(self.config, time.time())
 
+    def check_admission(self, *, essential: bool = False) -> None:
+        """Cheap, read-only pre-check for call sites that must not spend
+        money (e.g. an OpenAI classifier call) before the real reservation
+        can be made — for example when the model to reserve against isn't
+        known until after that classifier call returns. This only reads
+        current state (not projected-with-this-request state, unlike
+        ``reserve()``) and does not commit anything, so it does not replace
+        the atomic ``reserve()`` immediately before the priced provider
+        call; it only avoids paying for I/O that a hard `hard_stop`/
+        `restricted` state would reject anyway.
+        """
+        status = self.get_status()
+        state = status.get("state", STATE_NORMAL)
+        if state == STATE_HARD_STOP:
+            raise AIBudgetDenied(
+                "hard_stop", state, _DEFAULT_RETRY_AFTER["hard_stop"],
+                _denial_detail("hard_stop", state, _DEFAULT_RETRY_AFTER["hard_stop"]),
+            )
+        if state == STATE_RESTRICTED and not essential:
+            raise AIBudgetDenied(
+                "restricted", state, _DEFAULT_RETRY_AFTER["restricted"],
+                _denial_detail("restricted", state, _DEFAULT_RETRY_AFTER["restricted"]),
+            )
+
     def compute_override_expiry(self, duration_seconds: int) -> float:
         """Pure helper so callers (e.g. the admin route) can compute and audit
         the override expiry *before* actually setting it — audit-before-action
@@ -893,7 +985,9 @@ class AIBudgetGuard:
         try:
             self._reserve_backend().clear_override()
         except Exception as exc:
-            logger.warning("AI budget guard: clear_manual_override failed: %s", exc)
+            raise AIBudgetDenied(
+                "redis_unavailable", STATE_HARD_STOP, 30, "Cannot clear override: budget backend unavailable."
+            ) from exc
 
 
 def _denial_detail(reason: str, state: str, retry_after: int) -> str:
@@ -927,8 +1021,52 @@ def _worker_count() -> int:
     return 1
 
 
+def _validate_numeric_config(config: AIBudgetConfig) -> None:
+    """Fail fast on config that would corrupt Lua arithmetic or silently
+    disable enforcement (negative/non-finite limits, empty key prefix,
+    non-finite thresholds, unordered warning/restricted thresholds).
+    Runs in every environment — this class of bug is never environment-
+    specific.
+    """
+    import math
+
+    non_negative_int_fields = (
+        "global_requests_per_minute", "global_tokens_per_minute",
+        "global_requests_per_day", "global_tokens_per_day",
+        "global_max_concurrent", "provider_max_concurrent", "model_max_concurrent",
+    )
+    for name in non_negative_int_fields:
+        value = getattr(config, name)
+        if value < 0:
+            raise RuntimeError(f"FATAL: AI budget config {name}={value} must be >= 0.")
+
+    for name in ("daily_budget_usd", "monthly_budget_usd"):
+        value = getattr(config, name)
+        if not math.isfinite(value) or value < 0:
+            raise RuntimeError(f"FATAL: AI budget config {name}={value} must be a finite number >= 0.")
+
+    warning = config.warning_threshold_pct
+    restricted = config.restricted_threshold_pct
+    if not (math.isfinite(warning) and math.isfinite(restricted)):
+        raise RuntimeError("FATAL: AI budget warning/restricted thresholds must be finite numbers.")
+    if not (0 <= warning < restricted <= 1):
+        raise RuntimeError(
+            f"FATAL: AI budget thresholds must satisfy 0 <= warning ({warning}) < "
+            f"restricted ({restricted}) <= 1."
+        )
+
+    if config.lease_ttl_seconds <= 0:
+        raise RuntimeError(f"FATAL: AI_BUDGET_LEASE_TTL_SECONDS={config.lease_ttl_seconds} must be > 0.")
+
+    if not config.key_prefix.strip():
+        raise RuntimeError("FATAL: AI_BUDGET_REDIS_KEY_PREFIX must not be empty.")
+
+
 def validate_ai_budget_configuration() -> None:
-    """Fail fast when production cannot enforce the global AI budget guard."""
+    """Fail fast when the global AI budget guard is misconfigured, and when
+    production cannot enforce it."""
+    _validate_numeric_config(ai_budget_guard.config)
+
     env = (os.getenv("ENVIRONMENT") or "").strip().lower()
     if env != "production":
         return
@@ -962,7 +1100,15 @@ def ai_budget_readiness_status() -> dict[str, Any]:
     """Component status for /health/ready."""
     env = (os.getenv("ENVIRONMENT") or "").strip().lower()
     if ai_budget_guard.uses_redis():
-        return {"status": "ok", "mode": "redis"}
+        if ai_budget_guard.redis_is_healthy():
+            return {"status": "ok", "mode": "redis"}
+        # A client was configured at startup but isn't reachable right now —
+        # this is exactly the outage state reserve() already handles via
+        # fail-open/fail-closed; readiness must reflect it, not just "ok"
+        # because a client object exists.
+        if ai_budget_guard.config.fail_open_on_redis_outage:
+            return {"status": "degraded", "mode": "fail-open", "detail": "Redis unreachable; spend is uncapped"}
+        return {"status": "error", "mode": "redis", "detail": "Redis configured but unreachable"}
     if env == "production":
         if ai_budget_guard.config.fail_open_on_redis_outage:
             return {"status": "degraded", "mode": "fail-open", "detail": "Redis unavailable; spend is uncapped"}

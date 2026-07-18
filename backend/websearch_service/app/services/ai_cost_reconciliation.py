@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -35,15 +34,23 @@ OPENAI_COSTS_ENDPOINT = "https://api.openai.com/v1/organization/costs"
 OPENAI_ADMIN_API_KEY_ENV = "OPENAI_ADMIN_API_KEY"
 
 
-async def reconcile_openai_costs(*, lookback_hours: int = 26) -> dict[str, Any]:
-    """Fetch OpenAI's billed cost for the recent window and compare it to
-    our internally tracked spend. Returns a status dict; never raises.
+async def reconcile_openai_costs() -> dict[str, Any]:
+    """Fetch OpenAI's billed cost since the start of the current UTC day and
+    compare it to our internally tracked ``day_spend_usd``. Returns a status
+    dict; never raises.
+
+    The query window deliberately matches the budget guard's daily bucket
+    (UTC-midnight-aligned) rather than a fixed trailing lookback — comparing
+    a 26h provider window against a same-day internal bucket produced
+    systematic false drift.
     """
     admin_key = (os.getenv(OPENAI_ADMIN_API_KEY_ENV) or "").strip()
     if not admin_key:
         return {"status": "skipped", "reason": "OPENAI_ADMIN_API_KEY not configured"}
 
-    start_time = int(time.time()) - (lookback_hours * 3600)
+    now = datetime.now(timezone.utc)
+    day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_time = int(day_start.timestamp())
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
@@ -58,7 +65,7 @@ async def reconcile_openai_costs(*, lookback_hours: int = 26) -> dict[str, Any]:
         logger.warning("OpenAI Costs API reconciliation failed (non-fatal, local hard stop unaffected): %s", exc)
         await audit_log(
             "ai_cost_reconciliation_failed",
-            {"reason": str(exc)[:200], "lookback_hours": lookback_hours},
+            {"reason": str(exc)[:200], "window_start": day_start.isoformat()},
             actor_type="system",
             result="error",
         )
@@ -78,7 +85,7 @@ async def reconcile_openai_costs(*, lookback_hours: int = 26) -> dict[str, Any]:
 
     result = {
         "status": "ok",
-        "window_start": datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat(),
+        "window_start": day_start.isoformat(),
         "provider_reported_usd": round(provider_total_usd, 4),
         "internal_tracked_usd": round(internal_day_spend, 4),
         "drift_usd": round(drift_usd, 4),

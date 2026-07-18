@@ -341,7 +341,13 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
 
     with patch("app.routes.ai_proxy.classify_tier", return_value="FAST"), \
          patch("app.routes.ai_proxy.classify_intent", new=AsyncMock(return_value="general")), \
+         patch("app.routes.ai_proxy.BALANCED_MODEL", "gpt-5"), \
          patch("httpx.AsyncClient", return_value=mock_client):
+        # FAST tier resolves _chat_model to BALANCED_MODEL; the reasoning-
+        # budget-exhaustion retry only applies to reasoning models, so this
+        # test forces BALANCED_MODEL to one — the budget guard reserves and
+        # reconciles against whichever model is actually called (_chat_model),
+        # matching the payload.
         response = client.post("/api/chat", json={"message": "Hello", "max_tokens": 700})
         assert response.status_code == 200
         assert response.json()["response"] == "Recovered answer after retry."
