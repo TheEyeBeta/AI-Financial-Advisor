@@ -64,40 +64,81 @@ def upgrade() -> None:
         CREATE INDEX IF NOT EXISTS idx_audit_events_request_id
             ON core.audit_events (request_id);
 
+        -- Singleton "chain head" row. A plain advisory lock is not enough to
+        -- serialize the hash chain: under READ COMMITTED, a blocked
+        -- transaction's SELECT still uses the snapshot taken at the start of
+        -- its own INSERT statement, so it would not see a concurrently
+        -- committed predecessor row even after the lock is released. A
+        -- `SELECT ... FOR UPDATE` against an existing row does not have that
+        -- problem — once the lock is granted, Postgres re-fetches the
+        -- latest committed version of that specific row, which is exactly
+        -- the guarantee the chain needs.
+        CREATE TABLE IF NOT EXISTS core.audit_events_chain_head (
+            id BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (id),
+            integrity_hash TEXT
+        );
+        INSERT INTO core.audit_events_chain_head (id, integrity_hash)
+        VALUES (TRUE, NULL)
+        ON CONFLICT (id) DO NOTHING;
+
+        -- No direct grants to any role — only the SECURITY DEFINER trigger
+        -- function below touches this table.
+        REVOKE ALL ON core.audit_events_chain_head FROM PUBLIC, anon, authenticated, service_role;
+
         -- Append-only hash chain: each row's integrity_hash commits to the
         -- previous row's hash plus this row's own content, computed inside
         -- the trigger (not supplied by the application) so a compromised
         -- or buggy app-layer client cannot forge or omit the chain.
+        -- SECURITY DEFINER (owned by the migration role) so callers only
+        -- need INSERT on core.audit_events, never direct access to the
+        -- chain-head table.
         CREATE OR REPLACE FUNCTION core.audit_events_set_integrity()
         RETURNS trigger
         LANGUAGE plpgsql
+        SECURITY DEFINER
+        -- public is included because pgcrypto's digest() is installed there
+        -- by CREATE EXTENSION IF NOT EXISTS pgcrypto (no schema qualifier)
+        -- above.
+        SET search_path = core, public, pg_temp
         AS $$
         DECLARE
             prior_hash TEXT;
         BEGIN
             SELECT integrity_hash INTO prior_hash
-            FROM core.audit_events
-            ORDER BY created_at DESC, id DESC
-            LIMIT 1;
+            FROM core.audit_events_chain_head
+            WHERE id = TRUE
+            FOR UPDATE;
 
             NEW.prev_integrity_hash := prior_hash;
             NEW.integrity_hash := encode(
                 digest(
                     COALESCE(prior_hash, '<genesis>') || '|' ||
                     NEW.id::text || '|' ||
-                    NEW.created_at::text || '|' ||
+                    -- Fixed UTC serialization: NEW.created_at::text is
+                    -- session-timezone dependent, which would make the hash
+                    -- unreproducible across connections with different
+                    -- TimeZone settings.
+                    to_char(NEW.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') || '|' ||
                     NEW.actor_type || '|' ||
                     COALESCE(NEW.actor_pseudonymous_id, '') || '|' ||
                     NEW.action || '|' ||
                     COALESCE(NEW.target_type, '') || '|' ||
                     COALESCE(NEW.target_pseudonymous_id, '') || '|' ||
+                    COALESCE(NEW.request_id::text, '') || '|' ||
+                    COALESCE(NEW.release_sha, '') || '|' ||
                     NEW.result || '|' ||
                     COALESCE(NEW.reason_code, '') || '|' ||
-                    NEW.metadata::text,
+                    NEW.metadata::text || '|' ||
+                    NEW.schema_version::text,
                     'sha256'
                 ),
                 'hex'
             );
+
+            UPDATE core.audit_events_chain_head
+            SET integrity_hash = NEW.integrity_hash
+            WHERE id = TRUE;
+
             RETURN NEW;
         END;
         $$;
@@ -133,6 +174,18 @@ def upgrade() -> None:
         CREATE TRIGGER trg_audit_events_reject_delete
             BEFORE DELETE ON core.audit_events
             FOR EACH ROW
+            EXECUTE FUNCTION core.audit_events_reject_mutation();
+
+        -- TRUNCATE bypasses BEFORE UPDATE/DELETE FOR EACH ROW triggers
+        -- entirely; it needs its own FOR EACH STATEMENT trigger to be
+        -- blocked. (No role other than the table owner has TRUNCATE
+        -- privilege here anyway — see the REVOKE/GRANT below — but this
+        -- keeps the guarantee "even the owner/a superuser session can't
+        -- wipe this table" consistent with the UPDATE/DELETE triggers.)
+        DROP TRIGGER IF EXISTS trg_audit_events_reject_truncate ON core.audit_events;
+        CREATE TRIGGER trg_audit_events_reject_truncate
+            BEFORE TRUNCATE ON core.audit_events
+            FOR EACH STATEMENT
             EXECUTE FUNCTION core.audit_events_reject_mutation();
 
         ALTER TABLE core.audit_events ENABLE ROW LEVEL SECURITY;
@@ -171,11 +224,13 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute(
         """
+        DROP TRIGGER IF EXISTS trg_audit_events_reject_truncate ON core.audit_events;
         DROP TRIGGER IF EXISTS trg_audit_events_reject_delete ON core.audit_events;
         DROP TRIGGER IF EXISTS trg_audit_events_reject_update ON core.audit_events;
         DROP TRIGGER IF EXISTS trg_audit_events_set_integrity ON core.audit_events;
         DROP FUNCTION IF EXISTS core.audit_events_reject_mutation();
         DROP FUNCTION IF EXISTS core.audit_events_set_integrity();
         DROP TABLE IF EXISTS core.audit_events;
+        DROP TABLE IF EXISTS core.audit_events_chain_head;
         """
     )

@@ -110,6 +110,12 @@ def test_redact_recurses_into_nested_dicts():
     assert redacted["outer"]["safe"] == "ok"
 
 
+def test_redact_recurses_into_lists_and_tuples():
+    redacted = _redact({"items": [{"email": "victim@example.com"}, {"safe": "ok"}]})
+    assert redacted["items"][0]["email"] == "[REDACTED]"
+    assert redacted["items"][1]["safe"] == "ok"
+
+
 @pytest.mark.asyncio
 async def test_audit_log_metadata_never_contains_raw_email(tmp_path, monkeypatch):
     log_path = tmp_path / "audit.jsonl"
@@ -155,6 +161,43 @@ def test_pseudonymize_requires_pepper_outside_dev(monkeypatch):
     monkeypatch.delenv("AUDIT_PSEUDONYM_PEPPER", raising=False)
     with pytest.raises(AuditPersistenceError):
         pseudonymize("someone@example.com")
+
+
+def test_pseudonymize_treats_unset_environment_as_non_dev(monkeypatch):
+    """A misconfigured deployment (ENVIRONMENT unset entirely) must fail
+    toward the strict/DB-backed behavior, not silently default to the
+    insecure dev-only pepper."""
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.delenv("AUDIT_PSEUDONYM_PEPPER", raising=False)
+    with pytest.raises(AuditPersistenceError):
+        pseudonymize("someone@example.com")
+
+
+@pytest.mark.asyncio
+async def test_audit_log_non_mandatory_survives_missing_pepper_in_production(monkeypatch):
+    """Row construction (which calls pseudonymize()) must be covered by the
+    same mandatory/best-effort policy as a persistence failure — a
+    non-mandatory caller (e.g. admin job enqueue) must never be crashed by a
+    misconfigured pepper."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("AUDIT_PSEUDONYM_PEPPER", raising=False)
+
+    await audit_log("admin.job_enqueued", {"job_type": "ranking"}, actor_id="admin-1")
+
+
+@pytest.mark.asyncio
+async def test_audit_log_mandatory_raises_on_missing_pepper_in_production(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("AUDIT_PSEUDONYM_PEPPER", raising=False)
+
+    with pytest.raises(AuditPersistenceError):
+        await audit_log(
+            "admin.user_suspended",
+            {},
+            actor_id="admin-1",
+            target_id="user-1",
+            mandatory=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +280,24 @@ async def test_audit_log_non_mandatory_swallows_db_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_audit_log_promotes_user_id_to_pseudonymous_actor(tmp_path, monkeypatch):
+    """chat/search call sites pass the verified Supabase auth UUID as
+    data['user_id'] — it must become actor_pseudonymous_id, never survive
+    raw in metadata."""
+    log_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("AI_AUDIT_LOG_PATH", str(log_path))
+
+    await audit_log("search_request", {"user_id": "11111111-1111-1111-1111-111111111111", "query_length": 5})
+
+    entry = json.loads(log_path.read_text().splitlines()[0])
+    assert entry["actor_type"] == "user"
+    assert entry["actor_pseudonymous_id"] is not None
+    assert entry["actor_pseudonymous_id"] != "11111111-1111-1111-1111-111111111111"
+    assert "user_id" not in entry["metadata"]
+    assert "11111111-1111-1111-1111-111111111111" not in json.dumps(entry["metadata"])
+
+
+@pytest.mark.asyncio
 async def test_audit_log_infers_service_role_actor(tmp_path, monkeypatch):
     log_path = tmp_path / "audit.jsonl"
     monkeypatch.setenv("AI_AUDIT_LOG_PATH", str(log_path))
@@ -271,3 +332,18 @@ async def test_audit_log_non_uuid_request_id_preserved_in_metadata(tmp_path, mon
     entry = json.loads(log_path.read_text().splitlines()[0])
     assert entry["request_id"] is None
     assert entry["metadata"]["client_request_id"] == "not-a-uuid"
+
+
+@pytest.mark.asyncio
+async def test_audit_log_rejects_unsafe_non_uuid_request_id(tmp_path, monkeypatch):
+    """A client-supplied X-Request-ID is attacker-controlled input — anything
+    that doesn't look like a plausible correlation id must be dropped, never
+    passed through into metadata unvalidated."""
+    log_path = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("AI_AUDIT_LOG_PATH", str(log_path))
+
+    await audit_log("search_query", {}, request_id="victim@example.com; DROP TABLE x;--")
+
+    entry = json.loads(log_path.read_text().splitlines()[0])
+    assert entry["request_id"] is None
+    assert "client_request_id" not in entry["metadata"]

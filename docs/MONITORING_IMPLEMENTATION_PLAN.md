@@ -70,8 +70,10 @@ without human-run steps).
    `log_event` stream that already exists.
 3. Add the missing time-to-first-token instrumentation (SLO 5) as its own
    focused change.
-4. Move the audit log off local-file storage before relying on it for any
-   compliance/incident-investigation claim.
+4. Build the audit-retention export job (design in `docs/security/AUDIT_TRAIL.md`)
+   before relying on `core.audit_events` for any long-term compliance claim —
+   rows are durable and queryable today, but nothing yet exports/archives
+   them past the point where the table would need active retention management.
 5. Configure the external uptime monitor (SLO 1) and backup-freshness check
    (SLO 9) — both are small, tool-specific configuration tasks once #1 is
    decided.
@@ -88,7 +90,9 @@ This plan does **not** claim:
 - `SENTRY_DSN` is set in any real environment (unverified in this pass).
 - The structured logs are currently retained anywhere beyond Railway's
   default log retention.
-- The audit log survives a container restart in production today.
+- The audit-retention export job described in `docs/security/AUDIT_TRAIL.md`
+  exists yet — `core.audit_events` itself is durable (Postgres) as of
+  migration `0036_core_audit_events`, but nothing exports/archives rows.
 
 Any of the above being true requires verification against the actual
 running environment, not an assumption from reading source code.

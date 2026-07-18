@@ -28,6 +28,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -72,6 +73,7 @@ _STRUCTURAL_KEYS = frozenset(
         "actor",
         "actor_id",
         "actor_type",
+        "user_id",
         "target_auth_id",
         "target_id",
         "target_type",
@@ -93,8 +95,14 @@ class AuditPersistenceError(RuntimeError):
 
 
 def _is_dev_fallback_environment() -> bool:
-    """Only development/test use the local file fallback; everything else is DB-backed."""
-    env = (os.getenv("ENVIRONMENT") or "development").strip().lower()
+    """Only development/test use the local file fallback; everything else is DB-backed.
+
+    Deliberately does NOT default an unset/unrecognized ``ENVIRONMENT`` to
+    "development" — a misconfigured deployment must fail toward the durable
+    DB path (and its stricter pepper requirement), not silently fall back to
+    an ephemeral local file.
+    """
+    env = (os.getenv("ENVIRONMENT") or "").strip().lower()
     return env in ("development", "test")
 
 
@@ -122,6 +130,14 @@ def pseudonymize(value: str | None) -> str | None:
     return digest.hexdigest()[:32]
 
 
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return _redact(value)
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(item) for item in value]
+    return value
+
+
 def _redact(data: dict[str, Any]) -> dict[str, Any]:
     redacted: dict[str, Any] = {}
     for key, value in data.items():
@@ -130,10 +146,8 @@ def _redact(data: dict[str, Any]) -> dict[str, Any]:
         lowered = key.lower()
         if any(marker in lowered for marker in _REDACT_KEY_MARKERS):
             redacted[key] = "[REDACTED]"
-        elif isinstance(value, dict):
-            redacted[key] = _redact(value)
         else:
-            redacted[key] = value
+            redacted[key] = _redact_value(value)
     return redacted
 
 
@@ -152,6 +166,18 @@ def _safe_uuid(value: str | None) -> str | None:
         return str(uuid.UUID(str(value)))
     except (ValueError, AttributeError, TypeError):
         return None
+
+
+# Correlation-id shape: hex/UUID-like tokens only, bounded length. request_id
+# can come from a client-supplied X-Request-ID header — never store arbitrary
+# attacker-controlled content in metadata just because it isn't a valid UUID.
+_SAFE_CLIENT_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _safe_client_request_id(value: str | None) -> str | None:
+    if not value or not _SAFE_CLIENT_REQUEST_ID_RE.match(str(value)):
+        return None
+    return str(value)
 
 
 def _correlation_request_id() -> str | None:
@@ -222,36 +248,49 @@ async def audit_log(
     operations: persistence failure raises :class:`AuditPersistenceError`
     instead of being swallowed, so the caller can abort safely.
     """
-    actor_raw = actor_id or data.get("actor") or data.get("actor_id")
-    target_raw = target_id or data.get("target_auth_id") or data.get("target_id")
+    try:
+        actor_raw = actor_id or data.get("actor") or data.get("actor_id") or data.get("user_id")
+        target_raw = target_id or data.get("target_auth_id") or data.get("target_id")
 
-    resolved_actor_type = actor_type or data.get("actor_type") or _infer_actor_type(event, actor_raw)
-    if resolved_actor_type not in VALID_ACTOR_TYPES:
-        resolved_actor_type = "system"
+        resolved_actor_type = actor_type or data.get("actor_type") or _infer_actor_type(event, actor_raw)
+        if resolved_actor_type not in VALID_ACTOR_TYPES:
+            resolved_actor_type = "system"
 
-    metadata = _redact(data)
-    raw_request_id = request_id or data.get("request_id") or _correlation_request_id()
-    safe_request_id = _safe_uuid(raw_request_id)
-    if raw_request_id and safe_request_id is None:
-        # Non-UUID client-supplied correlation id (e.g. a free-form X-Request-ID
-        # header) — keep it visible in metadata instead of dropping it, since
-        # the dedicated column is typed UUID.
-        metadata["client_request_id"] = raw_request_id
+        metadata = _redact(data)
+        raw_request_id = request_id or data.get("request_id") or _correlation_request_id()
+        safe_request_id = _safe_uuid(raw_request_id)
+        if raw_request_id and safe_request_id is None:
+            # Non-UUID client-supplied correlation id (e.g. a free-form
+            # X-Request-ID header). Only keep it if it matches a bounded,
+            # plausible-id shape — never pass arbitrary attacker-controlled
+            # header content into metadata unvalidated.
+            safe_client_id = _safe_client_request_id(raw_request_id)
+            if safe_client_id is not None:
+                metadata["client_request_id"] = safe_client_id
 
-    row = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "actor_type": resolved_actor_type,
-        "actor_pseudonymous_id": pseudonymize(actor_raw) if actor_raw not in (None, "service-role", "service_role") else None,
-        "action": event,
-        "target_type": target_type or data.get("target_type") or ("user" if target_raw else None),
-        "target_pseudonymous_id": pseudonymize(target_raw),
-        "request_id": safe_request_id,
-        "release_sha": _release_sha(),
-        "result": _coerce_result(data, result),
-        "reason_code": reason_code or data.get("reason_code") or data.get("reason"),
-        "metadata": metadata,
-        "schema_version": SCHEMA_VERSION,
-    }
+        row = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "actor_type": resolved_actor_type,
+            "actor_pseudonymous_id": pseudonymize(actor_raw) if actor_raw not in (None, "service-role", "service_role") else None,
+            "action": event,
+            "target_type": target_type or data.get("target_type") or ("user" if target_raw else None),
+            "target_pseudonymous_id": pseudonymize(target_raw),
+            "request_id": safe_request_id,
+            "release_sha": _release_sha(),
+            "result": _coerce_result(data, result),
+            "reason_code": reason_code or data.get("reason_code") or data.get("reason"),
+            "metadata": metadata,
+            "schema_version": SCHEMA_VERSION,
+        }
+    except AuditPersistenceError as exc:
+        # e.g. pseudonymize() raising because AUDIT_PSEUDONYM_PEPPER is unset
+        # outside dev/test — apply the same mandatory/best-effort policy as a
+        # persistence failure, so a non-mandatory caller (AI-fallback
+        # telemetry, admin job enqueue, ...) is never crashed by this.
+        if mandatory:
+            raise
+        logger.warning("audit_log: failed to build audit row for event %r: %s", event, exc)
+        return
 
     if _is_dev_fallback_environment():
         try:

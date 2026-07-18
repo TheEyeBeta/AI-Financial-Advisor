@@ -476,8 +476,10 @@ async def execute_delete_request(
             headers=headers,
         )
         if del_resp.status_code == 404:
-            snapshot["status"] = "executed"
-            snapshot["idempotency_key"] = idempotency_key
+            # Do not mark the snapshot "executed" until the outcome audit
+            # record has actually persisted — otherwise a mandatory-audit
+            # failure here would still leave a retry hitting the idempotent
+            # early-return path above and silently skip the missing audit.
             await _mandatory_lifecycle_audit(
                 "admin.user_deleted",
                 caller=caller,
@@ -487,12 +489,12 @@ async def execute_delete_request(
                 reason_code="delete",
                 extra={"snapshot_id": snapshot_id, "idempotency_key": idempotency_key, "already_removed": True},
             )
+            snapshot["status"] = "executed"
+            snapshot["idempotency_key"] = idempotency_key
             return {"status": "deleted", "auth_id": target_auth_id, "already_removed": True}
         if del_resp.status_code not in (200, 204):
             raise UserLifecycleError("failed to delete auth user", status_code=502)
 
-    snapshot["status"] = "executed"
-    snapshot["idempotency_key"] = idempotency_key
     logger.info(
         "User deleted actor=%s target=%s snapshot=%s idempotency=%s",
         caller.principal,
@@ -500,6 +502,8 @@ async def execute_delete_request(
         snapshot_id,
         idempotency_key,
     )
+    # Same ordering rationale as above: persist the outcome audit record
+    # first, then mark the snapshot executed.
     await _mandatory_lifecycle_audit(
         "admin.user_deleted",
         caller=caller,
@@ -509,4 +513,6 @@ async def execute_delete_request(
         reason_code="delete",
         extra={"snapshot_id": snapshot_id, "idempotency_key": idempotency_key},
     )
+    snapshot["status"] = "executed"
+    snapshot["idempotency_key"] = idempotency_key
     return {"status": "deleted", "auth_id": target_auth_id, "snapshot_id": snapshot_id}

@@ -13,8 +13,22 @@
 
 ## Diagnostics
 - Audit trail: privileged operations by/on the account, durably recorded in
-  `core.audit_events` (see `docs/security/AUDIT_TRAIL.md`) — query via the
-  service role (e.g. `SELECT * FROM core.audit_events WHERE target_pseudonymous_id = pseudonymize(<auth_id>) ORDER BY created_at DESC`).
+  `core.audit_events` (see `docs/security/AUDIT_TRAIL.md`). Pseudonymization
+  is an **application-level** HMAC helper (`app/services/audit.py:pseudonymize`)
+  keyed by the server-side `AUDIT_PSEUDONYM_PEPPER` secret — it is not a SQL
+  function, and the pepper must never be typed into a SQL client. From a
+  backend shell with that env var available, compute the pseudonym first,
+  then query by its output:
+  ```bash
+  cd backend/websearch_service
+  python -c "from app.services.audit import pseudonymize; print(pseudonymize('<auth_id>'))"
+  ```
+  ```sql
+  -- using the printed value, as the service role:
+  SELECT * FROM core.audit_events
+  WHERE target_pseudonymous_id = '<printed_value>'
+  ORDER BY created_at DESC;
+  ```
   Identifiers in the table are pseudonymized, not raw emails — correlate by
   auth id, not by looking up an email string.
 - Supabase Auth logs: sign-in IPs, methods, timestamps for the account.
