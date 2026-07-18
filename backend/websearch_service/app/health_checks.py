@@ -11,6 +11,7 @@ from typing import Any
 from .routes.search import check_search_provider
 from .services.auth import validate_auth_configuration
 from .services.rate_limit import rate_limit_readiness_status
+from .services.ai_budget_guard import ai_budget_readiness_status
 
 READINESS_TIMEOUT_SECONDS = float(os.getenv("READINESS_TIMEOUT_SECONDS", "3"))
 
@@ -169,6 +170,9 @@ async def assess_readiness() -> dict[str, Any]:
     rate_limit = rate_limit_readiness_status()
     components["rate_limit"] = rate_limit
 
+    ai_budget = ai_budget_readiness_status()
+    components["ai_budget_guard"] = ai_budget
+
     components["startup"] = {
         "status": "ok" if _startup_complete else "error",
         "detail": None if _startup_complete else "lifespan startup incomplete",
@@ -188,12 +192,14 @@ async def assess_readiness() -> dict[str, Any]:
         # A confirmed schema mismatch fails readiness; "unknown" does not.
         and schema.get("status") != "error"
         and rate_limit.get("status") == "ok"
+        and ai_budget.get("status") in ("ok", "degraded")
         and _startup_complete
     )
 
     degraded = (
         search.get("status") not in ("connected", "ok")
         or schema.get("status") == "unknown"
+        or ai_budget.get("status") == "degraded"
     )
 
     return {

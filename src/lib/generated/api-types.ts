@@ -1225,10 +1225,97 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/ai-budget/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Ai Budget Status
+         * @description Read-only global AI spend/capacity status.
+         *
+         *     Returns aggregate totals and circuit-breaker state only — never prompt
+         *     content, per-user identifiers, or anything else audit-sensitive.
+         */
+        get: operations["ai_budget_status_api_admin_ai_budget_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai-budget/override": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ai Budget Set Override
+         * @description Admin-authorized, time-bounded manual override of the AI budget
+         *     circuit breaker's hard-stop/restricted gating. Disabled by default
+         *     (no override key exists until an admin sets one) and always expires —
+         *     there is no "leave it on" path.
+         */
+        post: operations["ai_budget_set_override_api_admin_ai_budget_override_post"];
+        /** Ai Budget Clear Override */
+        delete: operations["ai_budget_clear_override_api_admin_ai_budget_override_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/ai-budget/reconcile-costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ai Budget Reconcile Costs
+         * @description Scheduled/on-demand reconciliation against the OpenAI Costs API.
+         *
+         *     Read-only against our own budget state — this never adjusts the local
+         *     spend counters or the circuit breaker. A failure (missing credentials,
+         *     network error, API error) is reported here but never raised as an
+         *     error response and never disables the local hard stop; see
+         *     ``ai_cost_reconciliation.py`` for the non-fatal-by-design contract.
+         *
+         *     Schedule: hourly, via an external scheduler (Railway cron / GitHub
+         *     Actions) calling this endpoint with a service-role JWT — same pattern
+         *     as ``/api/meridian/refresh-all``.
+         */
+        post: operations["ai_budget_reconcile_costs_api_admin_ai_budget_reconcile_costs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AIBudgetOverrideRequest */
+        AIBudgetOverrideRequest: {
+            /**
+             * Duration Minutes
+             * @description Override duration in minutes (max 24h).
+             */
+            duration_minutes: number;
+            /** Reason */
+            reason: string;
+        };
         /**
          * AIContextResponse
          * @description Full AI context response matching frontend TradeEngineAIContext interface.
@@ -3774,6 +3861,107 @@ export interface operations {
         };
     };
     chat_dashboard_api_admin_chat_dashboard_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    ai_budget_status_api_admin_ai_budget_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    ai_budget_set_override_api_admin_ai_budget_override_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AIBudgetOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ai_budget_clear_override_api_admin_ai_budget_override_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    ai_budget_reconcile_costs_api_admin_ai_budget_reconcile_costs_post: {
         parameters: {
             query?: never;
             header?: never;

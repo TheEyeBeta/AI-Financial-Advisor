@@ -122,6 +122,7 @@ class TestCreateAppFactory:
         monkeypatch.setenv("ENVIRONMENT", "production")
         monkeypatch.setenv("AUTH_REQUIRED", "true")
         monkeypatch.setenv("ALLOW_IN_MEMORY_RATE_LIMIT", "true")
+        monkeypatch.setenv("AI_BUDGET_ALLOW_IN_MEMORY", "true")
         monkeypatch.setenv("WORKERS", "1")
         monkeypatch.setenv("CORS_ORIGINS", "https://app.example.com")
         monkeypatch.setenv("TRUSTED_HOSTS", "app.example.com")
