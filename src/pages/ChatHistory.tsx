@@ -27,6 +27,11 @@ function getDateLabel(dateStr: string): string {
   if (isToday(date)) return "Today";
   if (isYesterday(date)) return "Yesterday";
   if (isThisWeek(date)) return format(date, "EEEE");
+  // Include the year outside the current year so e.g. Jul 18 2025 and
+  // Jul 18 2026 never collapse into one "Jul 18" group.
+  if (date.getFullYear() !== new Date().getFullYear()) {
+    return format(date, "MMM d, yyyy");
+  }
   return format(date, "MMM d");
 }
 
