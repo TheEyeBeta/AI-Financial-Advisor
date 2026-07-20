@@ -59,7 +59,7 @@ Where a row says NOT VERIFIED, that is the claim.
 | Threat model (STRIDE, all listed components) | IMPLEMENTED | [`docs/security/THREAT_MODEL.md`](../security/THREAT_MODEL.md) |
 | Security test inventory mapped to CI evidence | IMPLEMENTED / AUTOMATED TEST PASSED per row | [`docs/security/SECURITY_TEST_INVENTORY.md`](../security/SECURITY_TEST_INVENTORY.md) — 18 categories; gaps G-2 (ai/academy RLS tests), G-3 (mass-assignment sweep), G-4 (fuzz corpus), G-5 (secret-scan canary) stated |
 | Secrets controls inspection (hardcoded, .env, VITE keys, artifacts, URLs, logs, docs, history) | IMPLEMENTED | inventory §Secrets-control inspection; gitleaks gate `security.yml#secret-scan` + `SECRET_SCANNING.md` |
-| Key-rotation runbook (Supabase SRK/JWT, OpenAI, Google, Redis, Sentry, platform+GitHub tokens) | IMPLEMENTED; rotations MANUAL VERIFICATION REQUIRED (never rehearsed) | [`docs/security/KEY_ROTATION.md`](../security/KEY_ROTATION.md) |
+| Key-rotation runbook (Supabase SRK/JWT, OpenAI, Google, Redis/Valkey, Sentry, platform+GitHub tokens) | IMPLEMENTED; rotations MANUAL VERIFICATION REQUIRED (never rehearsed) | [`docs/security/KEY_ROTATION.md`](../security/KEY_ROTATION.md) |
 | Independent-review handoff package (architecture, flows, RLS, admin, WS, limitations, accounts, RoE, reporting) | IMPLEMENTED | [`docs/security/SECURITY_REVIEW_PACKAGE.md`](../security/SECURITY_REVIEW_PACKAGE.md) |
 | External penetration test | EXTERNAL ACCESS REQUIRED | not commissioned; package ready |
 | No known critical/high security issue open | IMPLEMENTED (as of this audit) | top residual risks ranked in `THREAT_MODEL.md` §4 — none assessed critical/high *for a 150-user capped beta*; the global-AI-cap and unapplied-ruleset items are the two to watch |

@@ -5,7 +5,7 @@ written and reviewed (syntax-checked, safety logic traced by hand and
 exercised via `scripts/run-load-test.sh --dry-run`), but **none of it has
 been executed against a real target** — this session's network egress is
 blocked from reaching any staging host, and even once that's open, the
-known staging environment currently shares Supabase/Redis/AI quota with
+known staging environment currently shares Supabase/Valkey/AI quota with
 production, which the safety gate is specifically designed to refuse. Do
 not treat any number in this directory as a real measurement. No
 `tests/load/results/*.json` file exists yet because no run has happened.
@@ -68,7 +68,7 @@ DRY_RUN=true summary if the binary isn't present).
 | `BACKEND_URL` | every run | Target backend base URL |
 | `LOAD_TEST_ALLOWED_HOSTS` | every run | Comma-separated allowlist; target must match |
 | `LOAD_TEST_PRODUCTION_HOSTNAMES` | every run | Comma-separated denylist of real production hosts — **you must state these explicitly**, this repo has no committed source of truth for them |
-| `LOAD_TEST_ISOLATED_INFRA_CONFIRMED=true` | every run | Confirms target's Supabase/Redis/AI quota are dedicated, not shared with production |
+| `LOAD_TEST_ISOLATED_INFRA_CONFIRMED=true` | every run | Confirms target's Supabase/Valkey/AI quota are dedicated, not shared with production |
 | `K6_AUTH_TOKEN` / `K6_AUTH_TOKENS` / `K6_AUTH_TOKENS_JSON` | every run | Test-user session JWT(s) |
 | `LOAD_TEST_DEDICATED_USERS_CONFIRMED=true` | every run | Confirms those credentials are dedicated test users |
 | `LOAD_TEST_MAX_VUS` | every run | Hard cap on virtual users; profiles clamp to `min(profile default, this)` |
@@ -194,7 +194,7 @@ without a live target:
 ## Tests requiring isolated staging
 
 All of A, B, C, D, and every Test E scenario require a target that is
-**genuinely isolated** from production (dedicated Supabase project, Redis
+**genuinely isolated** from production (dedicated Supabase project, Valkey
 instance, and AI provider quota) — not just a different hostname. The
 currently known staging URL
 (`ai-financial-advisor-backend-staging.up.railway.app`) does **not**
@@ -207,7 +207,7 @@ gate is designed to block exactly this.
 
 1. A staging Supabase project that is **not** the production project (own
    URL, own service-role key, own data).
-2. A staging Redis instance that is **not** the production Redis.
+2. A staging Valkey instance that is **not** the production Valkey (production runs Valkey, a Redis-protocol-compatible fork — see `deployment/DEPLOYMENT.md`).
 3. A staging Railway (or equivalent) backend deployment pointed at #1 and
    #2, reachable from wherever k6 runs.
 4. Network egress from the k6-running machine to that backend's hostname

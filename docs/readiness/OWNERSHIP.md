@@ -11,7 +11,7 @@ year-round.
 | Frontend (Vercel project) | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta (Sentry frontend) | owner → backup → Vercel support |
 | Backend (Railway services: prod, staging, scheduler) | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta (Sentry backend) | owner → backup → Railway support |
 | Database/Auth (Supabase project) | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta | owner → backup → Supabase support |
-| Redis | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta | owner → provider support |
+| Redis/Valkey | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta | owner → provider support |
 | AI providers (OpenAI, Perplexity, Tavily) | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta (billing alerts — verify configured, EXTERNAL) | owner → provider support |
 | Market data (TheEyeBetaDataAPI) | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta | owner → substrate operator |
 | GitHub repo + Actions + rulesets | TheEyeBeta | `[UNASSIGNED]` | TheEyeBeta | TheEyeBeta | owner → GitHub support |

@@ -24,7 +24,7 @@ git history and in any clone/cache. Follow all steps:
 
 1. **Revoke/rotate first.** Rotate the credential at its provider
    (Supabase dashboard → API keys / JWT secret; OpenAI/Tavily/Perplexity
-   dashboards; Redis provider). Assume the old value is compromised.
+   dashboards; Valkey provider). Assume the old value is compromised.
 2. **Deploy the new value** to the affected environments (Railway/Vercel env
    vars — human dashboard step per `AGENTS.md` §3).
 3. **Remove the string from the tree** in a normal commit.

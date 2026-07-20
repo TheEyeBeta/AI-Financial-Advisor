@@ -10,12 +10,12 @@ so a script that *does* deliberately induce a failure
 (`enforceSafety({ requiresFailureInjection: true })` in
 `tests/load/lib/safety.js`) refuses to run without it; it does not, and
 cannot, perform the injection itself, and no such script exists in this
-directory today. None of these scenarios have real Railway/Redis/Supabase
+directory today. None of these scenarios have real Railway/Valkey/Supabase
 admin access from this repo or from an agent session; the steps below are
 written for whoever does have that access.
 
 **Never run any of these against production or a target sharing production
-Supabase/Redis/AI-quota** — same rule as Tests A-D
+Supabase/Valkey/AI-quota** — same rule as Tests A-D
 (`LOAD_TEST_ISOLATED_INFRA_CONFIRMED=true`).
 
 ## Shared preconditions (all scenarios)
@@ -74,16 +74,21 @@ Supabase/Redis/AI-quota** — same rule as Tests A-D
 - **Recovery check:** send one more chat request post-restore and confirm
   a normal streamed response.
 
-## 2. Redis unavailable
+## 2. Redis (Valkey) unavailable
+
+Production backs `REDIS_URL` with [Valkey](https://valkey.io)
+(BSD-3-Clause Redis-protocol fork — see `deployment/DEPLOYMENT.md`), not
+Redis Ltd.'s Redis. It's wire-compatible, so everything below (env var
+name, log strings, code paths) is identical either way.
 
 - **Purpose:** verify the app degrades to the documented local-fallback
   rate-limiting mode (`app/services/rate_limit_redis.py`, logged as
   `"Redis-backed rate limiting unavailable, using local fallback"`) rather
   than failing requests outright, and that WebSocket tickets (also
-  Redis-backed) fail gracefully.
-- **Preconditions:** isolated staging Redis instance you can stop/block
-  independently of production Redis.
-- **How to induce:** stop the staging Redis instance, or block network
+  Redis/Valkey-backed) fail gracefully.
+- **Preconditions:** isolated staging Valkey instance you can stop/block
+  independently of production Valkey.
+- **How to induce:** stop the staging Valkey instance, or block network
   access to it from the staging backend (do not touch `REDIS_URL` — that
   would just look like config unset, not a real dependency failure).
 - **What to observe:** backend logs for the fallback message; rate-limit
@@ -92,13 +97,16 @@ Supabase/Redis/AI-quota** — same rule as Tests A-D
   (`app/health_checks.py`).
 - **Pass criteria:** requests continue to be served (possibly with
   degraded, per-instance-only rate limiting per `docs/OPERATIONS.md`'s
-  documented multi-worker caveat); no 5xx spike attributable to Redis
-  absence; readiness does not flip to "not ready" purely because Redis is
-  down (Redis is a resilience feature, not a hard readiness dependency —
+  documented multi-worker caveat); no 5xx spike attributable to Valkey
+  absence; readiness does not flip to "not ready" purely because Valkey is
+  down (Valkey is a resilience feature, not a hard readiness dependency —
   confirm this is actually true in `health_checks.py`, don't assume it).
-- **Restore:** restart/unblock the staging Redis instance.
+  Also distinguish a real outage from `maxclients` exhaustion — the latter
+  makes `ping()` fail the same way and can crash-loop multi-worker
+  deployments outright (see `docs/runbooks/redis-unavailable.md`).
+- **Restore:** restart/unblock the staging Valkey instance.
 - **Recovery check:** confirm rate-limit-backend in `/health/ready`
-  reports Redis again, not local-fallback.
+  reports Redis/Valkey again, not local-fallback.
 
 ## 3. Market-data provider unavailable
 

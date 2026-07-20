@@ -54,7 +54,7 @@ Ranked residual risks: `THREAT_MODEL.md` §4. Highlights:
 4. Direct RLS tests uneven across schemas (trading ✔, ai/academy ✖).
 5. Duplicate-email OAuth/password linking behaviour depends on Supabase
    project setting (undefined in code).
-6. Rate limits fall back to process-local state if Redis is absent.
+6. Rate limits fall back to process-local state if Redis/Valkey is absent.
 
 ## 5. Rules of engagement (proposed — confirm before testing)
 

@@ -39,12 +39,15 @@ After any rotation, record: date, key, reason, rotator, verification evidence
 - **Rotate:** Google Cloud Console → create new client secret → paste into Supabase provider config → verify Google sign-in on staging → delete old secret in Google Console.
 - **Caution:** keep both secrets valid during the switchover; deleting the old one first breaks all Google sign-ins.
 
-## 5. Redis credentials
+## 5. Redis/Valkey credentials
 
 - **Used by:** backend (`REDIS_URL`) for shared rate limits + WS tickets.
-- **Rotate:** provider dashboard (Railway plugin/Upstash) → new credentials → update `REDIS_URL` → redeploy.
+  Production runs [Valkey](https://valkey.io) (BSD-3-Clause Redis-protocol
+  fork), not Redis Ltd.'s Redis — see `deployment/DEPLOYMENT.md`. The env
+  var name and rotation steps are unchanged either way.
+- **Rotate:** provider dashboard (Railway Valkey service) → new credentials → update `REDIS_URL` → redeploy.
 - **Verify:** `/health/ready` `rate_limit` component `ok`; WS ticket round-trip.
-- **Degradation note:** backend falls back to process-local state without Redis (rate limits weaken with >1 replica) — rotate promptly but calmly.
+- **Degradation note:** backend falls back to process-local state without Redis/Valkey (rate limits weaken with >1 replica) — rotate promptly but calmly. See `docs/runbooks/redis-unavailable.md`.
 
 ## 6. Sentry DSNs (frontend + backend)
 
@@ -70,7 +73,7 @@ After any rotation, record: date, key, reason, rotator, verification evidence
 | Supabase service-role / JWT secret | `[OWNER — fill in]` | 180 days or on suspicion |
 | OpenAI / Tavily / Perplexity / DataAPI | `[OWNER — fill in]` | 180 days |
 | Google OAuth secret | `[OWNER — fill in]` | 365 days |
-| Redis | `[OWNER — fill in]` | 180 days |
+| Redis/Valkey | `[OWNER — fill in]` | 180 days |
 | Sentry DSNs | `[OWNER — fill in]` | on suspicion |
 | Railway/Vercel/GitHub tokens | `[OWNER — fill in]` | 90 days |
 

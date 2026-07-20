@@ -18,7 +18,7 @@ evidence.
 | Maximum user-input length | **IMPLEMENTED** | Pydantic `max_length=50000` (`MAX_CHAT_MESSAGE_CONTENT_LENGTH`); oversize requests are rejected with 422, never silently truncated |
 | Maximum output-token budget | **IMPLEMENTED** | `OPENAI_MAX_TOKENS` (default 8000, env-configurable); bounded retry for reasoning-budget exhaustion (`test_ai_proxy.py`) |
 | Conversation-history window | **IMPLEMENTED** | Bounded, paginated history retrieval (#212); context assembly caps in `ai_proxy.py` |
-| Global requests/minute·day (cross-user) | **IMPLEMENTED + AUTOMATED TEST PASSED — G-1a closed** | `app/services/ai_budget_guard.py` (Redis-atomic, `AI_BUDGET_GLOBAL_REQUESTS_PER_MINUTE`/`_PER_DAY`); `test_ai_budget_guard.py`, `test_ai_budget_guard_integration.py` |
+| Global requests/minute·day (cross-user) | **IMPLEMENTED + AUTOMATED TEST PASSED — G-1a closed** | `app/services/ai_budget_guard.py` (Valkey-atomic, `AI_BUDGET_GLOBAL_REQUESTS_PER_MINUTE`/`_PER_DAY`); `test_ai_budget_guard.py`, `test_ai_budget_guard_integration.py` |
 | Global concurrent generations (+ per-provider/per-model) | **IMPLEMENTED + AUTOMATED TEST PASSED — G-1b closed** | Same module; `AI_BUDGET_GLOBAL_MAX_CONCURRENT`/`_PROVIDER_MAX_CONCURRENT`/`_MODEL_MAX_CONCURRENT`; concurrency-race test in `test_ai_budget_guard.py` |
 | Maximum daily AI expenditure (global) | **IMPLEMENTED + AUTOMATED TEST PASSED — G-1c closed** | Internal cost reservation/reconciliation against `AI_BUDGET_DAILY_USD` (default $50 beta); daily-boundary test |
 | Maximum monthly AI expenditure (global) | **IMPLEMENTED + AUTOMATED TEST PASSED — G-1d closed** | `AI_BUDGET_MONTHLY_USD` (default $1000 beta); monthly-boundary test |
@@ -30,7 +30,8 @@ tested (`test_ai_budget_guard_integration.py`). Oversize input is a 422, not
 a truncation. Per-user 429s (`X-RateLimit-*`) are unchanged.
 
 **G-1 status (2026-07-18):** closed by the global AI budget guard. Design:
-Redis-atomic reserve→reconcile→release lifecycle (no race-based overspend),
+Valkey-atomic (Redis-protocol-compatible; see `deployment/DEPLOYMENT.md`)
+reserve→reconcile→release lifecycle (no race-based overspend),
 a `normal`/`warning`/`restricted`/`hard_stop`/`manual_override` circuit
 breaker driven purely by our own recorded spend (never a provider-side
 signal — OpenAI budget alerts are soft/advisory), and a disabled-by-default,
@@ -39,9 +40,9 @@ time-bounded, audited admin override. Read-only status:
 the OpenAI Costs API: `POST /api/admin/ai-budget/reconcile-costs`
 (`app/services/ai_cost_reconciliation.py`) — observability only, never
 gates the local hard stop. Beta defaults live in `.env.example`
-(`AI_BUDGET_*`), not hard-coded. Production still requires Redis at startup
-(`validate_ai_budget_configuration`) unless explicitly opted into an
-in-memory or fail-open single-worker beta mode.
+(`AI_BUDGET_*`), not hard-coded. Production still requires Redis/Valkey at
+startup (`validate_ai_budget_configuration`) unless explicitly opted into
+an in-memory or fail-open single-worker beta mode.
 
 ## 2. Cost accounting
 

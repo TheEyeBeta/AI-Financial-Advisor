@@ -1,7 +1,7 @@
 # Threat Model — Lens (AI Financial Advisor)
 
 **Owner:** TheEyeBeta · **Date:** 2026-07-16 · **Methodology:** STRIDE per trust boundary
-**Scope:** the deployed beta system (Vercel SPA, Railway FastAPI, Supabase, Redis, OpenAI/Tavily/Perplexity, TheEyeBetaDataAPI)
+**Scope:** the deployed beta system (Vercel SPA, Railway FastAPI, Supabase, Valkey (Redis-protocol-compatible; see `deployment/DEPLOYMENT.md`), OpenAI/Tavily/Perplexity, TheEyeBetaDataAPI)
 **Companions:** [`SECURITY_TEST_INVENTORY.md`](./SECURITY_TEST_INVENTORY.md) (control → test mapping),
 [`SECURITY_REVIEW_PACKAGE.md`](./SECURITY_REVIEW_PACKAGE.md) (reviewer handoff),
 [`docs/SECURITY_ANALYSIS.md`](../SECURITY_ANALYSIS.md) (2026-03 point-in-time audit, partially remediated since).
@@ -27,7 +27,7 @@
 [Browser SPA (untrusted)] --user JWT-------------> [FastAPI backend (Railway)]
 [FastAPI] --service-role key (schema-qualified)---> [Supabase]
 [FastAPI] --provider keys-------------------------> [OpenAI / Tavily / Perplexity]
-[FastAPI] --credentials---------------------------> [TheEyeBetaDataAPI, Redis]
+[FastAPI] --credentials---------------------------> [TheEyeBetaDataAPI, Valkey]
 [Scheduler/worker (single replica)] ---------------> [Supabase, providers]
 [Browser] --single-use ticket---------------------> [FastAPI WebSockets]
 [GitHub Actions] --secrets------------------------> [staging deploy, scans]
@@ -47,7 +47,7 @@ provider response (prompt-injection vector).
 | **T**ampering | Parameter tampering (mass assignment) | Pydantic models bound per route; length caps (`MAX_CHAT_MESSAGE_CONTENT_LENGTH`) | Medium — no dedicated mass-assignment test sweep (inventory G-3) |
 | **R**epudiation | Disputed privileged ops | Audit events on lifecycle/admin ops (`test_audit.py`) | Low |
 | **I**nfo disclosure | Provider error pass-through; verbose errors | Sanitized error responses (SEC-02 F2 remediation); Sentry redaction (`TELEMETRY_PRIVACY.md`) | Low-Med |
-| **D**oS | LLM-relay abuse, request floods | Multi-tier per-user/IP rate limits + token budgets + concurrent cap (`app/services/rate_limit.py`, extensive tests); Redis-shared in prod | Medium — no **global** (cross-user) request/concurrency/spend cap: see `docs/ai/AI_CONTROLS.md` |
+| **D**oS | LLM-relay abuse, request floods | Multi-tier per-user/IP rate limits + token budgets + concurrent cap (`app/services/rate_limit.py`, extensive tests); Valkey-shared in prod | Medium — no **global** (cross-user) request/concurrency/spend cap: see `docs/ai/AI_CONTROLS.md` |
 | **E**levation | Onboarding/admin bypass | `ProtectedRoute` client-side + backend role checks (`test_admin_route_auth.py`); RLS as final layer | Low |
 
 ### B2 Browser → Supabase (direct)

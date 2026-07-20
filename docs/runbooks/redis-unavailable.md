@@ -1,8 +1,16 @@
-# Runbook: Redis unavailable
+# Runbook: Redis (Valkey) unavailable
 
 **Rehearsed:** NO
 
-- **Trigger:** `/health/ready` `rate_limit` or `ai_budget_guard` component degraded/error; Redis connection errors in Railway logs; WS ticket issuance failing.
+**Backing store:** production runs [Valkey](https://valkey.io) (BSD-3-Clause,
+Linux Foundation fork of Redis 7.2.4), not Redis Ltd.'s Redis — see
+`docs/security/KEY_ROTATION.md` §5 and `deployment/DEPLOYMENT.md` for why.
+It is wire-compatible with Redis (RESP protocol, same Lua `EVAL` support),
+so the app still connects via `redis-py` and the `REDIS_URL` /
+`RATE_LIMIT_REDIS_URL` env vars are unchanged — every command below
+(`redis-cli`, log strings, code paths) applies identically.
+
+- **Trigger:** `/health/ready` `rate_limit` or `ai_budget_guard` component degraded/error; Valkey connection errors in Railway logs; WS ticket issuance failing.
 - **Severity:** SEV-3 (designed fallback exists) — SEV-2 if running multiple web replicas (limits/tickets/global AI budget become per-process and materially weaker), or SEV-2 if `AI_BUDGET_FAIL_OPEN_ON_REDIS_OUTAGE=true` is set (spend becomes uncapped for the outage duration).
 - **User impact:** none directly; protection quality degrades (rate limits reset on restart, WS tickets process-local, global AI budget guard degrades to fail-closed 503s by default — see below).
 
@@ -26,10 +34,16 @@
 curl -sS https://<backend>/health/ready | jq '(.detail // .) | .components | {rate_limit, ai_budget_guard}'
 redis-cli -u "$REDIS_URL" ping        # from a trusted shell, never paste the URL into logs
 ```
-Provider dashboard (Railway plugin / Upstash): memory ceiling, connection cap, eviction events.
+Provider dashboard (Railway Valkey service): memory ceiling, `maxclients`
+connection cap, eviction events. A crash-loop where every worker dies with
+`FATAL: Production is configured with multiple workers but REDIS_URL is
+missing` while `REDIS_URL` *is* set is usually **not** a missing-config
+issue — check `CLIENT LIST` / connection count against `maxclients` first;
+`ping()` failing due to connection exhaustion is indistinguishable from
+"no Redis configured" to `validate_rate_limit_configuration()`.
 
 ## Dashboards / logs
-Redis provider dashboard; Railway backend logs.
+Valkey provider dashboard; Railway backend logs.
 
 ## Recovery
 - Provider incident: wait/restore; backend reconnects without redeploy.

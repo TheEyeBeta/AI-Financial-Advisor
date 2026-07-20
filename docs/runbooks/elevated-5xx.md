@@ -23,7 +23,7 @@ curl -s https://<backend>/health | jq '.release'   # what SHA is serving?
 Sentry backend (release-tagged — compare error rate by release SHA), Railway metrics + logs.
 
 ## Recovery
-Deploy-correlated → rollback. Dependency-correlated → that dependency's runbook. Load-correlated → verify rate limiting is engaged (`abuse-rate-limit.md`) before scaling replicas (remember: >1 replica requires Redis for correct limits).
+Deploy-correlated → rollback. Dependency-correlated → that dependency's runbook. Load-correlated → verify rate limiting is engaged (`abuse-rate-limit.md`) before scaling replicas (remember: >1 replica requires Redis/Valkey for correct limits).
 
 ## Rollback
 `production-rollback.md`.
