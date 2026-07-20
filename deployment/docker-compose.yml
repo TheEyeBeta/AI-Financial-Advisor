@@ -1,6 +1,26 @@
 version: '3.8'
 
 services:
+  # Valkey (Redis-protocol-compatible, BSD-3-Clause) — shared rate limits,
+  # global AI budget guard, and WebSocket tickets. See deployment/DEPLOYMENT.md
+  # and docs/runbooks/redis-unavailable.md for why this replaces Redis.
+  valkey:
+    image: valkey/valkey:8-alpine
+    container_name: ai-financial-advisor-valkey
+    ports:
+      - "${VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkey-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - app-network
+
   # Python FastAPI Backend Service
   backend:
     build:
@@ -19,9 +39,14 @@ services:
       - APP_VERSION=${APP_VERSION:-0.1.0}
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - AI_AUDIT_LOG_PATH=/app/logs/audit.jsonl
+      - WORKERS=${WORKERS:-1}
+      - REDIS_URL=${REDIS_URL:-redis://valkey:6379/0}
     volumes:
       - ./backend/websearch_service/logs:/app/logs
     restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health/live', timeout=5)"]
       interval: 30s
@@ -59,3 +84,6 @@ services:
 networks:
   app-network:
     driver: bridge
+
+volumes:
+  valkey-data:
