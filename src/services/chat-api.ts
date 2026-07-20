@@ -281,10 +281,12 @@ export const chatsApi = {
 
     if (error) {
       if (isSchemaOrTableNotFound(error) || (error as { code?: string }).code === '42883') {
+        // Surface the failure instead of returning an empty page — an empty
+        // page here renders the "No conversations yet" state and makes a
+        // broken backend indistinguishable from a genuinely empty archive.
         console.warn(
-          'ai.get_chat_page unavailable (missing grants or Alembic revision 0033 not applied). Returning empty chat list.',
+          'ai.get_chat_page unavailable (missing grants or Alembic revision 0033 not applied).',
         );
-        return { chats: [], nextCursor: null };
       }
       throw error;
     }

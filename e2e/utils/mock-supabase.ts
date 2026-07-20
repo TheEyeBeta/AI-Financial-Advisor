@@ -217,6 +217,12 @@ export async function installSupabaseMocks(page: Page, options?: { onboardingCom
     }
   });
 
+  // Chat list RPC (ai.get_chat_page). Without this, the generic POST handler
+  // above answers with a placeholder row whose shape breaks the chat list.
+  await page.route('**/rest/v1/rpc/get_chat_page*', async (route) => {
+    await fulfillJson(route, []);
+  });
+
   await page.route('**/rest/v1/user_profiles*', async (route) => {
     const method = route.request().method();
     const prefer = route.request().headers()['prefer'] ?? '';

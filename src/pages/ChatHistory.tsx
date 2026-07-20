@@ -27,6 +27,11 @@ function getDateLabel(dateStr: string): string {
   if (isToday(date)) return "Today";
   if (isYesterday(date)) return "Yesterday";
   if (isThisWeek(date)) return format(date, "EEEE");
+  // Include the year outside the current year so e.g. Jul 18 2025 and
+  // Jul 18 2026 never collapse into one "Jul 18" group.
+  if (date.getFullYear() !== new Date().getFullYear()) {
+    return format(date, "MMM d, yyyy");
+  }
   return format(date, "MMM d");
 }
 
@@ -328,7 +333,7 @@ const ChatHistory = () => {
                                     {chat.messageCount} message{chat.messageCount !== 1 ? "s" : ""}
                                   </span>
                                 </div>
-                                <p className="mt-2 line-clamp-2 text-sm leading-6 text-muted-foreground">
+                                <p className="mt-2 line-clamp-2 break-words text-sm leading-6 text-muted-foreground">
                                   {getPreviewText(chat)}
                                 </p>
                                 <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
@@ -364,7 +369,7 @@ const ChatHistory = () => {
                               <AlertDialogContent className="max-w-sm">
                                 <AlertDialogHeader>
                                   <AlertDialogTitle className="text-base">Delete conversation?</AlertDialogTitle>
-                                  <AlertDialogDescription className="text-sm">
+                                  <AlertDialogDescription className="break-words text-sm">
                                     "{chat.title}" and all {chat.messageCount} messages will be permanently deleted.
                                   </AlertDialogDescription>
                                 </AlertDialogHeader>

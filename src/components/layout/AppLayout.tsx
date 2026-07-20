@@ -11,9 +11,17 @@ export function AppLayout({ children, title }: AppLayoutProps) {
   return (
     <SidebarProvider>
       <AppSidebar />
-      <SidebarInset style={{ "--app-layout-header-height": "3.5rem" } as React.CSSProperties}>
+      {/* h-svh bounds the inset to the viewport so pages with internal flex
+          scrolling (e.g. the Advisor chat column) resolve h-full against a
+          definite height; min-w-0 stops unbreakable content (long words/URLs)
+          from inflating the inset past the viewport width. The div below is
+          the app's single scroll container. */}
+      <SidebarInset
+        className="h-svh min-w-0"
+        style={{ "--app-layout-header-height": "3.5rem" } as React.CSSProperties}
+      >
         <header
-          className="sticky top-0 z-10 flex items-center gap-2 border-b bg-background/95 px-3 sm:gap-4 sm:px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+          className="flex shrink-0 items-center gap-2 border-b bg-background px-3 sm:gap-4 sm:px-4"
           style={{ height: "var(--app-layout-header-height)" }}
         >
           <SidebarTrigger className="h-8 w-8 shrink-0" />
@@ -22,7 +30,7 @@ export function AppLayout({ children, title }: AppLayoutProps) {
             <UserAuth />
           </div>
         </header>
-        <div className="flex-1 overflow-auto p-4 sm:p-6">
+        <div className="min-h-0 flex-1 overflow-auto p-4 sm:p-6">
           {children}
         </div>
       </SidebarInset>

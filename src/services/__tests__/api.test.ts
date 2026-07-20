@@ -508,14 +508,11 @@ describe('chatsApi', () => {
       });
     });
 
-    it('returns an empty page when the RPC is missing (migration not applied)', async () => {
-      mockRpc = vi.fn().mockResolvedValue({
-        data: null,
-        error: { code: '42883', message: 'function ai.get_chat_page does not exist' },
-      });
+    it('surfaces an error when the RPC is missing so the UI can show its unavailable state', async () => {
+      const rpcError = { code: '42883', message: 'function ai.get_chat_page does not exist' };
+      mockRpc = vi.fn().mockResolvedValue({ data: null, error: rpcError });
 
-      const page = await chatsApi.getPage('user-123');
-      expect(page).toEqual({ chats: [], nextCursor: null });
+      await expect(chatsApi.getPage('user-123')).rejects.toEqual(rpcError);
     });
 
     it('returns null when a chat does not exist', async () => {
