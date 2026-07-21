@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-REDACTION-20260721T115857Z",
+  "work_package": "WP-B2-REDACTION",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "pytest tests/test_log_redaction.py",
+  "scenario": "Value-based log redaction",
+  "preconditions": [],
+  "assertions": [
+    "JWTs/bearer/api-keys/DB-URIs/inline-secrets scrubbed in string values",
+    "financial keys redacted",
+    "non-secret text unchanged"
+  ],
+  "result": "pass",
+  "metrics": {
+    "redaction_tests": 22,
+    "correlation_coverage_pct": 91
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/app/middleware/correlation.py",
+    "docs/observability/ALERTS.md",
+    "docs/observability/METRICS.md"
+  ],
+  "remaining_risks": [],
+  "reviewer_notes": "",
+  "content_sha256": "ce7e785f267fdab8391519e445625590464f323ff94277cbfa66976728b2e470"
+}

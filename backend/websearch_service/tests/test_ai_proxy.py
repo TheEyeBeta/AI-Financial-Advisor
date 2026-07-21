@@ -356,9 +356,15 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
         # [0] complexity classifier, [1] first chat, [2] retry
         first_chat_payload = call_args[1].kwargs["json"]
         retry_chat_payload = call_args[2].kwargs["json"]
-        assert first_chat_payload["max_output_tokens"] == 8000
+        # Phase 2: the configured OPENAI_MAX_TOKENS (8000) is a CEILING, not a
+        # floor. A 700-token request on a reasoning model is bounded up only to
+        # the reasoning floor (MIN_REASONING_MAX_OUTPUT_TOKENS=1200), never
+        # inflated to the 8000 ceiling.
+        assert first_chat_payload["max_output_tokens"] == 1200
         assert retry_chat_payload["reasoning"]["effort"] == "low"
-        assert retry_chat_payload["max_output_tokens"] == 8000
+        # The retry gains headroom up to RETRY_REASONING_MAX_OUTPUT_TOKENS=1800
+        # but still stays under the 8000 server ceiling.
+        assert retry_chat_payload["max_output_tokens"] == 1800
 
 
 def test_chat_endpoint_rate_limit(client: TestClient):

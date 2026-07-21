@@ -1,0 +1,76 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B3-LOAD-SMOKE-20260721T164238Z",
+  "work_package": "WP-B3-LOAD-SMOKE",
+  "environment": "clean-linux-local-inprocess",
+  "app_version": "readiness-batch3",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T16:42:38Z",
+  "finished_at": "2026-07-21T16:42:38Z",
+  "command": "python load_smoke.py (httpx ASGITransport, real middleware stack, warm-up + measured)",
+  "scenario": "EXECUTED: local in-process load smoke/normal/busy against the real ASGI app",
+  "preconditions": [],
+  "assertions": [
+    "0% error rate at concurrency 10/25/50",
+    "all three profiles PASS p95 thresholds after warm-up",
+    "diagnosed+corrected first-run FAIL (per-request INFO logging + cold-start; added warm-up)"
+  ],
+  "result": "pass",
+  "metrics": {
+    "profiles": [
+      {
+        "profile": "smoke",
+        "endpoint": "/health/live",
+        "requests": 200,
+        "concurrency": 10,
+        "rps": 574.4,
+        "error_rate": 0.0,
+        "p50_ms": 13.03,
+        "p95_ms": 20.19,
+        "p99_ms": 21.26,
+        "p95_threshold_ms": 50.0,
+        "err_threshold": 0.0,
+        "result": "PASS"
+      },
+      {
+        "profile": "normal",
+        "endpoint": "/health/live",
+        "requests": 1000,
+        "concurrency": 25,
+        "rps": 542.9,
+        "error_rate": 0.0,
+        "p50_ms": 27.15,
+        "p95_ms": 65.55,
+        "p99_ms": 117.38,
+        "p95_threshold_ms": 75.0,
+        "err_threshold": 0.0,
+        "result": "PASS"
+      },
+      {
+        "profile": "busy",
+        "endpoint": "/health/live",
+        "requests": 2000,
+        "concurrency": 50,
+        "rps": 564.0,
+        "error_rate": 0.0,
+        "p50_ms": 58.43,
+        "p95_ms": 108.79,
+        "p99_ms": 177.98,
+        "p95_threshold_ms": 120.0,
+        "err_threshold": 0.01,
+        "result": "PASS"
+      }
+    ],
+    "note": "LOCAL in-process, NOT staging"
+  },
+  "failure_details": "",
+  "artifacts": [
+    "outputs/load_smoke.py"
+  ],
+  "remaining_risks": [
+    "Spike/stress/endurance/4h-soak need real staging backend+Redis+k6; not runnable here",
+    "Authenticated-endpoint load needs mocked-auth harness in staging"
+  ],
+  "reviewer_notes": "",
+  "content_sha256": "2ba1cdd1a3dacfa5a8d153b5410c7fab74c70040314b88b4470876822fb0f3cf"
+}

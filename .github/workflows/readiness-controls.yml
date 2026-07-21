@@ -1,0 +1,106 @@
+name: Readiness Controls
+
+# Enforces the production-readiness controls added in the readiness programme.
+# Complements existing jobs (secret scanning -> security.yml; Alembic migration
+# validation + full backend pytest incl. token-ceiling/network-guard/env-validator
+# tests -> ci.yml "Backend Tests"). These jobs use ONLY synthetic values — never
+# real staging/production credentials.
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  env-schema:
+    name: Environment-schema validation (synthetic vars)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Safe synthetic production config must PASS
+        working-directory: ./backend/websearch_service
+        env:
+          ENVIRONMENT: production
+          AUTH_REQUIRED: 'true'
+          ENABLE_DEBUG_ROUTES: 'false'
+          CORS_ORIGINS: https://app.example.com
+          TRUSTED_HOSTS: app.example.com,api.example.com
+          REDIS_URL: redis://synthetic-ci-host:6379/0
+          SUPABASE_URL: https://synthetic-ci-ref.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: synthetic-ci-service-role-value
+          SUPABASE_JWT_SECRET: synthetic-ci-jwt-secret-value
+          OPENAI_API_KEY: synthetic-ci-openai-key-value
+          OPENAI_CHAT_MODEL: gpt-5
+          OPENAI_MAX_TOKENS: '8000'
+        run: python -m app.env_validation --json
+
+      - name: Unsafe synthetic production config must FAIL (auth off / wildcard / placeholder)
+        working-directory: ./backend/websearch_service
+        env:
+          ENVIRONMENT: production
+          AUTH_REQUIRED: 'false'
+          CORS_ORIGINS: '*'
+          TRUSTED_HOSTS: '*'
+          SUPABASE_URL: https://synthetic-ci-ref.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: your-service-role-key
+          SUPABASE_JWT_SECRET: synthetic-ci-jwt-secret-value
+          OPENAI_API_KEY: synthetic-ci-openai-key-value
+        run: |
+          if python -m app.env_validation --json; then
+            echo "::error::env validator PASSED an unsafe production config"; exit 1
+          else
+            echo "OK: env validator correctly rejected the unsafe config (exit non-zero)"
+          fi
+
+  evidence-schema:
+    name: Evidence-schema validation (tamper-evident digests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify all readiness evidence digests
+        run: |
+          python - <<'PY'
+          import glob, sys
+          from scripts.evidence_recorder import verify_file
+          files = sorted(glob.glob("docs/evidence/readiness/WP-*.json"))
+          if not files:
+              print("::error::no evidence artifacts found"); sys.exit(1)
+          bad = [f for f in files if not verify_file(f)]
+          if bad:
+              print("::error::tamper-evident digest check FAILED for:", bad); sys.exit(1)
+          print(f"OK: {len(files)} evidence artifacts verified")
+          PY
+
+  network-guard:
+    name: AI-provider test-network guard active
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Guard blocks a real AI-provider host
+        working-directory: ./backend/websearch_service
+        run: |
+          python - <<'PY'
+          import socket, sys
+          sys.path.insert(0, ".")
+          from tests.ai_network_guard import install_ai_network_guard, AIProviderNetworkGuardError
+          install_ai_network_guard()
+          try:
+              socket.getaddrinfo("api.openai.com", 443)
+          except AIProviderNetworkGuardError:
+              print("OK: guard blocked api.openai.com"); sys.exit(0)
+          print("::error::network guard did NOT block a real provider host"); sys.exit(1)
+          PY

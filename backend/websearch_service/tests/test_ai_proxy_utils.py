@@ -359,10 +359,21 @@ class TestIsReasoningModel:
 # ── _effective_chat_max_output_tokens ─────────────────────────────────────────────
 
 class TestEffectiveChatMaxOutputTokens:
-    def test_returns_at_least_openai_max_tokens(self):
+    def test_never_exceeds_server_ceiling(self):
+        # Phase 2 core invariant: the configured maximum is an upper bound.
         from app.routes.ai_proxy import OPENAI_MAX_TOKENS
-        result = _effective_chat_max_output_tokens(100)
-        assert result >= OPENAI_MAX_TOKENS
+        assert _effective_chat_max_output_tokens(1_000_000) == OPENAI_MAX_TOKENS
+        assert _effective_chat_max_output_tokens(100) <= OPENAI_MAX_TOKENS
+
+    def test_small_request_preserved_for_non_reasoning_model(self, monkeypatch):
+        # Ceiling is not a floor: a small request stays small.
+        monkeypatch.setattr("app.routes.ai_proxy.OPENAI_CHAT_MODEL", "gpt-4o")
+        monkeypatch.setattr("app.routes.ai_proxy.OPENAI_MAX_TOKENS", 8000)
+        assert _effective_chat_max_output_tokens(400) == 400
+
+    def test_oversized_request_capped_to_ceiling(self, monkeypatch):
+        monkeypatch.setattr("app.routes.ai_proxy.OPENAI_MAX_TOKENS", 8000)
+        assert _effective_chat_max_output_tokens(16000) == 8000
 
 
 # ── _looks_like_reasoning_budget_exhaustion ──────────────────────────────────────

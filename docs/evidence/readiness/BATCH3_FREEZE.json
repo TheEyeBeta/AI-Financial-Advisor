@@ -1,0 +1,44 @@
+{
+  "batch": "batch-3-freeze",
+  "recorded_at": "2026-07-21T16:23:11Z",
+  "base_commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "branch": "main",
+  "tested_revision": "base_commit + uncommitted Batch 1/2 changes (pinned by manifest below)",
+  "working_tree": {
+    "tracked_modified_incl_eol_noise": 576,
+    "untracked": 53,
+    "note": "576 tracked-modified are pre-existing Windows CRLF/EOL noise, not this work"
+  },
+  "batch12_file_count": 21,
+  "batch12_manifest_sha256": "f9771405296b70073f2d64430418d2ffe4279cbba1c4b59077804903b8dc1afb",
+  "files": {
+    "backend/websearch_service/app/routes/ai_proxy.py": "1ede2e5e144a8b32ecd08b9fbd7925e55df30be60848ac9b6c1a4a5c25d0c060",
+    "backend/websearch_service/tests/test_ai_proxy_helpers.py": "28e8da7834ffb337c14286b8126dc5c299aef1c705979ce677b60088c85040e0",
+    "backend/websearch_service/tests/test_ai_proxy_utils.py": "8e6743811ed4b9385edb67a049c886ebd716adcfff84deb7e3280a1bc18d5417",
+    "backend/websearch_service/tests/test_ai_proxy.py": "bbb1cc934bbd69b5dd49c1744b02c56dcab0466fcfbcd10a2e48bffc8290b5df",
+    "backend/websearch_service/tests/conftest.py": "2638761eb0be0bc56258104ed3f6e9fb7deb7f5e5913fa347676d3ef0541c872",
+    "backend/websearch_service/app/env_validation.py": "8a3fb02e7e640e6cb6384fcc17a6adc0c3fc06dce4ed89f1d1b01c34292b238e",
+    "backend/websearch_service/tests/ai_network_guard.py": "42ba182785147833c53f4ed802b2b2ebe9e3c9193a4375d78af8026e87ba55ed",
+    "backend/websearch_service/tests/test_network_guard.py": "de6dff8db9aab95ad11ef6dca64c135b3ca7bceb9cfb13f4d6c4641388400c04",
+    "backend/websearch_service/tests/test_env_validation.py": "cad28ee1fcd27ee7a9f65999e56e3ae37d640ec870d282b3ca715bb61bead057",
+    "scripts/evidence_recorder.py": "b32140c470bf65823157a5805c1fdacdf4e9e001b08af79fb58d94ac00193843",
+    "scripts/__tests__/test_evidence_recorder.py": "165425010274831efed5f2fcda82d0475598f0ce1720a19f53b4f6d3333929be",
+    "backend/websearch_service/app/main.py": "e1ecf1d0b231a90c6674a1e30874e9d36e9fcf9b19cea3196f26fedfb1ddb445",
+    "backend/websearch_service/app/middleware/correlation.py": "04269b57f31142a824c52f91565d00d57536210b1f7c316329f08e9712acf511",
+    "backend/websearch_service/app/services/recovery_validator.py": "bb9b818e562146cb7dcfccf605c56f800fa9adf87890add9719153186d500d9d",
+    "backend/websearch_service/app/services/invite_redemption.py": "be3222f805b81b3e5952d785a8002b1188176b204b5220f56fe7945a5778e89a",
+    "backend/websearch_service/tests/fake_ai_provider.py": "5b2bad93930bcc4ba2723f3789e98baa48d1ba7c44bcb9a959527ac7ec839012",
+    "backend/websearch_service/tests/test_fake_ai_provider.py": "64cc26837f458281710cc56d8c5afd350f2bc334f5e0dc4c87983a7fb6a6eb85",
+    "backend/websearch_service/tests/test_log_redaction.py": "cb96924a6d6157d586909ca032fa10d8ff5a2a1156bcc72c8e31bca3a3d57a41",
+    "backend/websearch_service/tests/test_recovery_validator.py": "32332ab4ba7b57f6ead4b8dadb0c4a014d41bc77bbf457a4fe20703205523c98",
+    "backend/websearch_service/tests/test_invite_redemption.py": "71e58eca0eff573ab4ef8ebfd49687fa7bcf96588bcb8bf825baff60039cd8c9",
+    ".github/workflows/readiness-controls.yml": "80d47c7396b695b31542bceab299f0e89138e625b041e77e7f03571fe8170afa"
+  },
+  "baseline_backend_result": {
+    "passed": 1247,
+    "skipped": 41,
+    "failed": 0
+  },
+  "evidence_digests_verified": "15/15",
+  "secret_scan": "clean (only fake redaction fixtures matched)"
+}

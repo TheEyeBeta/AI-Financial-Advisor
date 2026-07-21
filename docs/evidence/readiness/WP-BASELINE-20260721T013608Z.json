@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-BASELINE-20260721T013608Z",
+  "work_package": "WP-BASELINE",
+  "environment": "test",
+  "app_version": "readiness-session",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T01:36:08Z",
+  "finished_at": "2026-07-21T01:36:08Z",
+  "command": "python -m pytest -o addopts='' -q  (backend/websearch_service)",
+  "scenario": "Full backend test suite (authoritative, post-change)",
+  "preconditions": [
+    "deps installed in sandbox",
+    "AI-provider network guard active",
+    "socksio present so sandbox SOCKS proxy is tolerated"
+  ],
+  "assertions": [
+    "0 failed",
+    "no real AI-provider network access",
+    "new controls covered"
+  ],
+  "result": "pass",
+  "metrics": {
+    "passed": 1170,
+    "skipped": 41,
+    "failed": 0,
+    "duration_s": 36.2,
+    "delta_vs_baseline_passed": "+30 (new guard/validator/boundary tests)"
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/tests/"
+  ],
+  "remaining_risks": [
+    "Full --cov run exceeds the 45s sandbox window; CI enforces --cov-fail-under=69"
+  ],
+  "reviewer_notes": "Baseline first run showed 15 failures: 13 were sandbox SOCKS-proxy artifacts (httpx needs socksio), 2 were bug-encoding token tests corrected under WP-02.",
+  "content_sha256": "908342c08fd831c9974976aa59e254c45abd5532bb947407ad09988184ed7294"
+}

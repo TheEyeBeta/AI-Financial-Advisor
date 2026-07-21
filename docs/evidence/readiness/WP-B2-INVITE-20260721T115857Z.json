@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-INVITE-20260721T115857Z",
+  "work_package": "WP-B2-INVITE",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "pytest tests/test_invite_redemption.py",
+  "scenario": "Atomic invite-redemption primitive (anti-oversubscription)",
+  "preconditions": [],
+  "assertions": [
+    "single-use/N-use/expiry/revocation/email-binding",
+    "50 and 200 concurrent threads -> exactly one winner",
+    "no over-consumption",
+    "audit trail"
+  ],
+  "result": "pass",
+  "metrics": {
+    "invite_tests": 11,
+    "coverage_pct": 97,
+    "max_threads": 200
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/app/services/invite_redemption.py"
+  ],
+  "remaining_risks": [
+    "Full invite DB schema (migration 0032 + RLS + routes) not yet implemented; primitive is drop-in ready"
+  ],
+  "reviewer_notes": "",
+  "content_sha256": "c7a5a4dc4ba096911a7cf010bfb60099c4a151bdd29a9921d453e578ea4c3623"
+}

@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-PROVIDER-20260721T115857Z",
+  "work_package": "WP-B2-PROVIDER",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "pytest tests/test_fake_ai_provider.py",
+  "scenario": "Deterministic AI provider stub + 23 scenarios + 8 invariants",
+  "preconditions": [],
+  "assertions": [
+    "no live provider calls",
+    "bounded retries",
+    "output capped",
+    "cancellation releases",
+    "partial-stream integrity",
+    "failed request rolls back final quota",
+    "usage reconciliation",
+    "concurrency limit respected"
+  ],
+  "result": "pass",
+  "metrics": {
+    "provider_tests": 25,
+    "scenarios": 23
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/tests/fake_ai_provider.py",
+    "backend/websearch_service/tests/test_fake_ai_provider.py"
+  ],
+  "remaining_risks": [],
+  "reviewer_notes": "",
+  "content_sha256": "930c15eeb2af7a9be2d12efaf5f6dbec4e555372d2ddf0ee2cfe42b95fb5eedd"
+}

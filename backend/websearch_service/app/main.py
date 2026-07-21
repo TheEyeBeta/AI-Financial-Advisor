@@ -44,6 +44,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response as StarletteResponse
 
 from .config import get_app_settings, resolve_allowed_origins, validate_app_settings
+from .env_validation import enforce_startup_environment
 from .health_checks import assess_readiness, liveness_payload, mark_startup_complete, release_info
 from .middleware.correlation import CorrelationIdMiddleware
 from .observability import init_observability
@@ -162,6 +163,11 @@ def create_app() -> FastAPI:
     validate_auth_configuration()
     validate_rate_limit_configuration()
     validate_ai_budget_configuration()
+    # Stricter outer gate: fails fast in staging/production on unsafe config the
+    # dedicated validators above don't cover (auth disabled, debug routes on,
+    # cross-environment resource contamination, invalid token ceiling, placeholder
+    # / missing mandatory config). Never prints secret values. No-op in dev/test.
+    enforce_startup_environment()
     init_observability()
 
     app = FastAPI(

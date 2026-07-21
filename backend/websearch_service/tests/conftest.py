@@ -42,6 +42,17 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 with patch("supabase.create_client", return_value=MagicMock()):
     from app.main import create_app
 
+# ─── AI-provider network guard (Phase 3) ──────────────────────────────────
+# Fail fast if any test tries to reach a real AI provider (openai/perplexity/
+# anthropic). Blocks only AI-provider hostnames so integration tests against a
+# test Supabase / local Redis are unaffected. Escape hatch for the sanctioned
+# capped live validation: set ALLOW_REAL_AI_PROVIDER_NETWORK=1.
+try:  # package import mode (tests/ has __init__.py)
+    from tests.ai_network_guard import install_ai_network_guard
+except ImportError:  # pragma: no cover - rootdir import-mode fallback
+    from ai_network_guard import install_ai_network_guard
+install_ai_network_guard()
+
 
 def supabase_test_issuer() -> str:
     """Issuer claim expected by auth._verify_issuer for the test Supabase project."""
