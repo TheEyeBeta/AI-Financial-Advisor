@@ -5,7 +5,7 @@ IDs, security headers, CORS) in-process via httpx ASGITransport, under real
 asyncio concurrency, to get throughput / latency-percentile / error-rate evidence
 with explicit pass/fail thresholds. Staging soak/spike/stress remain external.
 """
-import asyncio, os, statistics, time, json, logging
+import asyncio, os, pathlib, statistics, time, json, logging, tempfile
 from unittest.mock import patch, MagicMock
 
 # Diagnosis from the first run: per-request INFO logging (httpx + app.request)
@@ -22,7 +22,8 @@ os.environ.update({
     "APP_VERSION": "batch3-loadsmoke",
 })
 import sys
-sys.path.insert(0, "/sessions/optimistic-wizardly-wright/mnt/AI-Financial-Advisor/backend/websearch_service")
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT / "backend" / "websearch_service"))
 
 import httpx
 with patch("supabase.create_client", return_value=MagicMock()):
@@ -81,8 +82,11 @@ async def main():
               f"rps={res['rps']:<7} err={res['error_rate']:<6} "
               f"p50={res['p50_ms']}ms p95={res['p95_ms']}ms p99={res['p99_ms']}ms "
               f"(p95_thr={res['p95_threshold_ms']}ms)")
-    open("/tmp/load_smoke_result.json", "w").write(json.dumps(results, indent=2))
+    result_fd, result_name = tempfile.mkstemp(prefix="load_smoke_result_", suffix=".json")
+    with os.fdopen(result_fd, "w") as f:
+        f.write(json.dumps(results, indent=2))
     overall = all(r["result"] == "PASS" for r in results)
+    print(f"    result: {result_name}")
     print("OVERALL:", "PASS" if overall else "FAIL")
     return 0 if overall else 1
 

@@ -1620,7 +1620,9 @@ def _is_reasoning_model(model: str) -> bool:
     return model.startswith(REASONING_MODEL_PREFIXES)
 
 
-def _effective_chat_max_output_tokens(requested_tokens: Optional[int]) -> int:
+def _effective_chat_max_output_tokens(
+    requested_tokens: Optional[int], model: Optional[str] = None
+) -> int:
     """Resolve the effective output-token limit for a chat request.
 
     The configured ``OPENAI_MAX_TOKENS`` is a *server-side ceiling*, never a
@@ -1637,6 +1639,13 @@ def _effective_chat_max_output_tokens(requested_tokens: Optional[int]) -> int:
     * Reasoning models keep a minimum output floor so hidden reasoning tokens do
       not starve the visible answer — but that floor is *also* clamped to the
       ceiling and can never raise the effective limit above it.
+
+    ``model`` should be the model actually routed for this request (e.g. the
+    tier-selected ``_chat_model``); it defaults to the configured
+    ``OPENAI_CHAT_MODEL`` only for callers made before routing is known (e.g. an
+    early, conservative rate-limit estimate). Applying the reasoning floor
+    based on the wrong model would either starve a reasoning model's answer or
+    needlessly inflate a non-reasoning model's ceiling.
 
     This single helper is used by both the streaming and non-streaming chat
     paths so the two behave identically.
@@ -1655,7 +1664,7 @@ def _effective_chat_max_output_tokens(requested_tokens: Optional[int]) -> int:
 
     # Reasoning models need a minimum budget, but the floor cannot breach the
     # ceiling (Phase 2: "reasoning-model minimums must never exceed the ceiling").
-    if _is_reasoning_model(OPENAI_CHAT_MODEL):
+    if _is_reasoning_model(model if model is not None else OPENAI_CHAT_MODEL):
         reasoning_floor = min(MIN_REASONING_MAX_OUTPUT_TOKENS, ceiling)
         effective = max(effective, reasoning_floor)
 
@@ -2742,6 +2751,15 @@ async def chat_completion(
             _deep_mode = _is_deep_request(subagent_category, classification)
             _chat_model = DEEP_MODEL if _deep_mode else BALANCED_MODEL
 
+        # Recompute against the model actually routed for this request — the
+        # earlier value (used only for the pre-routing rate-limit estimate) was
+        # based on the configured default model, which the reasoning floor
+        # would otherwise wrongly apply to (or withhold from) a tier-routed
+        # model that differs from the default.
+        effective_max_output_tokens = _effective_chat_max_output_tokens(
+            request.max_tokens, model=_chat_model
+        )
+
         logger.info(
             f"[MODEL] tier={message_tier} "
             f"category={subagent_category} "
@@ -3046,7 +3064,7 @@ async def chat_completion(
                             yield _sse_event({"content": suffix})
 
                     actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
-                    if actual_tokens > 0:
+                    if actual_tokens > 0 and not token_limit_exempt:
                         rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
                     if budget_reservation is not None:
                         # Streaming uses the Chat Completions API, whose usage

@@ -26,7 +26,7 @@ os.environ.setdefault("APP_VERSION", "test-version")
 import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 def run_async(coro):
     """Run a coroutine in a fresh event loop (Python 3.12+ safe)."""
@@ -98,7 +98,8 @@ def client() -> TestClient:
 async def async_client() -> AsyncGenerator[AsyncClient, None]:
     """Create an async test client for the FastAPI app."""
     app = create_app()
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 

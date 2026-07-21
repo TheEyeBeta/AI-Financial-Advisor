@@ -40,5 +40,6 @@
     "failed": 0
   },
   "evidence_digests_verified": "15/15",
-  "secret_scan": "clean (only fake redaction fixtures matched)"
+  "secret_scan": "clean (only fake redaction fixtures matched)",
+  "content_sha256": "76511f1f4d18e8c690cb8d8f69173e2e4a11345aae61f993395c3839a18894ab"
 }

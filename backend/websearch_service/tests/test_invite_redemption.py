@@ -61,6 +61,7 @@ def test_email_binding_enforced():
     ledger = InMemoryInviteLedger()
     inv = ledger.create(max_uses=1, email_binding="alice@example.com")
     assert ledger.redeem(inv.code, email="bob@example.com").reason == RedeemReason.EMAIL_MISMATCH
+    assert ledger.redeem(inv.code).reason == RedeemReason.EMAIL_MISMATCH  # omitted email must not bypass binding
     assert ledger.redeem(inv.code, email="ALICE@example.com").success is True  # case-insensitive
 
 

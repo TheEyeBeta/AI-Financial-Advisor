@@ -298,6 +298,25 @@ def test_effective_chat_max_output_tokens_ceiling_is_not_a_floor(monkeypatch):
     assert _effective_chat_max_output_tokens(16000) == 8000    # oversized -> capped
 
 
+def test_effective_chat_max_output_tokens_uses_routed_model_not_default(monkeypatch):
+    # The reasoning floor must follow the model actually routed for the
+    # request, not the configured default — otherwise a reasoning default with
+    # a non-reasoning routed model (or vice versa) applies the wrong floor.
+    monkeypatch.setattr(ai_proxy, "REASONING_MODEL_PREFIXES", ("gpt-5",))
+    monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-5")       # reasoning default
+    monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 8000)
+    monkeypatch.setattr(ai_proxy, "MIN_REASONING_MAX_OUTPUT_TOKENS", 1200)
+
+    # No model override: falls back to the (reasoning) default -> floor applies.
+    assert _effective_chat_max_output_tokens(400) == 1200
+    # Routed to a non-reasoning model: floor must NOT apply.
+    assert _effective_chat_max_output_tokens(400, model="gpt-4o") == 400
+
+    monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-4o")      # non-reasoning default
+    # Routed to a reasoning model: floor must apply even though the default doesn't.
+    assert _effective_chat_max_output_tokens(400, model="gpt-5-mini") == 1200
+
+
 @pytest.mark.parametrize(
     "requested,expected",
     [

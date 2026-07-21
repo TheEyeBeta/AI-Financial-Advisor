@@ -43,6 +43,11 @@ dashboard/config).
    emitting `*_latency_ms`; today only up/down status is exposed.
 3. **Gauges** — active-AI-requests and scheduler-lag as point-in-time gauges.
 
-All three are additive log fields consumed by the AL-02/05/09 alerts in
-`ALERTS.md`; none block the existing signals, which are already emitted or
-directly derivable from the structured request log.
+All three are additive log fields; none block the existing signals, which are
+already emitted or directly derivable from the structured request log. They are
+not yet consumed by any alert in `ALERTS.md` — AL-02 covers overall p95 request
+latency (not per-dependency), AL-05 covers AI provider error ratio (not
+latency), and AL-09 covers scheduler heartbeat presence (not latency). Once
+`ai_first_token_ms` and the per-dependency `*_latency_ms` fields are emitted,
+add dedicated threshold alerts for them in `ALERTS.md` rather than folding them
+into AL-02/05/09.

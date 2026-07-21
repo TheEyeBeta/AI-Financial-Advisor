@@ -53,7 +53,7 @@ def _host_is_blocked(host: object, blocked: Iterable[str]) -> bool:
 
 def _guard_disabled_via_env() -> bool:
     """The escape hatch must be an explicit opt-in truthy value."""
-    return os.getenv(_ALLOW_ENV_FLAG, "").strip() not in ("", "0", "false", "no")
+    return os.getenv(_ALLOW_ENV_FLAG, "").strip().lower() not in ("", "0", "false", "no")
 
 
 def _should_block(

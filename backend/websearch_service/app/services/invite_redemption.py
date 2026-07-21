@@ -29,10 +29,11 @@ import secrets
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import Dict, Optional
 
 
-class RedeemReason(str):
+class RedeemReason(str, Enum):
     OK = "ok"
     NOT_FOUND = "not_found"
     REVOKED = "revoked"
@@ -117,8 +118,9 @@ class InMemoryInviteLedger:
                 result = RedeemResult(False, RedeemReason.REVOKED, code)
             elif inv.expires_at is not None and _aware(inv.expires_at) <= now:
                 result = RedeemResult(False, RedeemReason.EXPIRED, code)
-            elif inv.email_binding is not None and email is not None and \
-                    inv.email_binding.lower() != email.lower():
+            elif inv.email_binding is not None and (
+                email is None or inv.email_binding.lower() != email.lower()
+            ):
                 result = RedeemResult(False, RedeemReason.EMAIL_MISMATCH, code)
             elif inv.remaining <= 0:
                 result = RedeemResult(False, RedeemReason.EXHAUSTED, code)

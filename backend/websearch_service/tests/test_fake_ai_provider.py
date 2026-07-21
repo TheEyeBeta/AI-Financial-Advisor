@@ -13,6 +13,7 @@ Proves the invariants the readiness plan requires:
 from __future__ import annotations
 
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -263,7 +264,7 @@ def test_malformed_json_raises_on_parse():
     provider = FakeAIProvider(ProviderConfig(scenario=Scenario.MALFORMED_JSON))
     resp = run(provider.post("url", json={}))
     assert resp.status_code == 200
-    with pytest.raises(Exception):
+    with pytest.raises(json.JSONDecodeError):
         resp.json()
 
 

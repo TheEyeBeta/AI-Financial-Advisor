@@ -7,7 +7,7 @@ the Supabase + Google Cloud consoles.
 
 ## Preconditions (must be green first)
 - [ ] Password auth verified end-to-end in staging (sign-up, sign-in, sign-out, refresh, expiry).
-- [ ] Backend JWT verification covers Supabase-issued Google-provider tokens (same `iss`, ES256/JWKS path — already tested by `test_es256_service_role_jwt_uses_supabase_jwks`).
+- [ ] Backend JWT verification covers Supabase-issued Google-provider tokens (same `iss`, ES256/JWKS path). **Unverified**: `test_es256_service_role_jwt_uses_supabase_jwks` only exercises the service-role JWT path, not Google user tokens. Add a dedicated end-to-end test covering Supabase issuer validation, JWKS verification, Google-user-specific claims, authorization scope, and profile provisioning before checking this off.
 - [ ] Env validator green for staging (`python -m app.env_validation`).
 
 ## Configuration validation (repo-side, no secrets committed)

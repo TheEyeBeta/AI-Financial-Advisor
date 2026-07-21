@@ -5,14 +5,17 @@ Non-destructive; disposable local cluster in /tmp. Emulates the Supabase baselin
 migrations from clean, `alembic check`, and the recovery validator against the
 live schema.
 """
-import os, subprocess, sys, pathlib, json
+import os, subprocess, sys, pathlib, json, tempfile
 
-BACKEND = "/sessions/optimistic-wizardly-wright/mnt/AI-Financial-Advisor/backend/websearch_service"
+REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+BACKEND = str(REPO_ROOT / "backend" / "websearch_service")
 sys.path.insert(0, BACKEND)
 
 import pgserver  # noqa: E402
 
-DATA = pathlib.Path("/tmp/pgdata_rehearsal")
+RUN_TMP = pathlib.Path(tempfile.mkdtemp(prefix="pg_rehearsal_"))
+print(f"    run artifacts: {RUN_TMP}", flush=True)
+DATA = RUN_TMP / "pgdata_rehearsal"
 print("[1] starting userspace postgres ...", flush=True)
 server = pgserver.get_server(DATA, cleanup_mode="stop")
 uri = server.get_uri()               # postgresql://.../postgres?host=/tmp/...
@@ -47,7 +50,7 @@ print("[3] alembic upgrade head (all migrations from clean) ...", flush=True)
 up = alembic("upgrade", "head")
 print("    upgrade rc:", up.returncode)
 if up.returncode != 0:
-    open("/tmp/alembic_err.txt", "w").write(up.stdout + "\n----STDERR----\n" + up.stderr)
+    (RUN_TMP / "alembic_err.txt").write_text(up.stdout + "\n----STDERR----\n" + up.stderr)
     errlines = [l for l in up.stderr.splitlines()
                 if any(k in l for k in ("ERROR", "error", "DETAIL", "HINT", "psycopg",
                                         "does not exist", "already exists", "Running upgrade"))]
@@ -67,43 +70,41 @@ print("[5] recovery validator against live schema ...", flush=True)
 import psycopg
 from app.services.recovery_validator import validate_recovery, CheckStatus
 
-conn = psycopg.connect(uri)  # socket URI works for psycopg3
-def run_sql(sql, *params):
-    with conn.cursor() as c:
-        c.execute(sql, params or None)
-        try:
-            return c.fetchall()
-        except psycopg.ProgrammingError:
-            return []
+with psycopg.connect(uri) as conn:  # socket URI works for psycopg3
+    def run_sql(sql, *params):
+        with conn.cursor() as c:
+            c.execute(sql, params or None)
+            try:
+                return c.fetchall()
+            except psycopg.ProgrammingError:
+                return []
 
-# discover the real head from alembic_version
-real_head = run_sql("SELECT version_num FROM alembic_version")
-real_head = real_head[0][0] if real_head else None
+    # discover the real head from alembic_version
+    real_head = run_sql("SELECT version_num FROM alembic_version")
+    real_head = real_head[0][0] if real_head else None
 
-# Inventory the real schema.table names (executed-evidence, corrects Batch-2 guesses)
-inv = run_sql("""SELECT table_schema, table_name FROM information_schema.tables
-                 WHERE table_schema IN ('core','ai','trading','market','academy','meridian')
-                 ORDER BY 1,2""")
-print("    LIVE TABLES (core/ai shown):")
-for sch, tbl in inv:
-    if sch in ("core", "ai"):
-        print(f"        {sch}.{tbl}")
+    # Inventory the real schema.table names (executed-evidence, corrects Batch-2 guesses)
+    inv = run_sql("""SELECT table_schema, table_name FROM information_schema.tables
+                     WHERE table_schema IN ('core','ai','trading','market','academy','meridian')
+                     ORDER BY 1,2""")
+    print("    LIVE TABLES (core/ai shown):")
+    for sch, tbl in inv:
+        if sch in ("core", "ai"):
+            print(f"        {sch}.{tbl}")
 
-report = validate_recovery(
-    run_sql,
-    expected_migration_head=real_head,
-    required_schemas=("core", "ai", "trading", "market", "academy", "meridian"),
-    required_tables=("core.users",),  # narrowed to a table verified to exist; full set set after inventory
-    required_extensions=("pgcrypto",),
-    row_count_minimums={},               # fresh DB: no row-count assertions
-    backup_metadata={"available": True, "last_backup_at": "2026-07-21T00:00:00Z"},
-)
-d = report.to_dict()
-print("    recovery ok:", d["ok"], "| counts:", d["counts"])
-for c in d["checks"]:
-    print(f"      - {c['name']:<28} {c['status']:<5} {c['detail'][:60]}")
-
-conn.close()
+    report = validate_recovery(
+        run_sql,
+        expected_migration_head=real_head,
+        required_schemas=("core", "ai", "trading", "market", "academy", "meridian"),
+        required_tables=("core.users",),  # narrowed to a table verified to exist; full set set after inventory
+        required_extensions=("pgcrypto",),
+        row_count_minimums={},               # fresh DB: no row-count assertions
+        backup_metadata={"available": True, "last_backup_at": "2026-07-21T00:00:00Z"},
+    )
+    d = report.to_dict()
+    print("    recovery ok:", d["ok"], "| counts:", d["counts"])
+    for c in d["checks"]:
+        print(f"      - {c['name']:<28} {c['status']:<5} {c['detail'][:60]}")
 
 # ── emit a machine-readable result for the evidence recorder ────────────────
 out = {
@@ -113,5 +114,6 @@ out = {
     "recovery_ok": d["ok"],
     "recovery_counts": d["counts"],
 }
-open("/tmp/pg_rehearsal_result.json", "w").write(json.dumps(out, indent=2))
-print("[done]", json.dumps(out))
+result_path = RUN_TMP / "pg_rehearsal_result.json"
+result_path.write_text(json.dumps(out, indent=2))
+print(f"[done] (result: {result_path})", json.dumps(out))
