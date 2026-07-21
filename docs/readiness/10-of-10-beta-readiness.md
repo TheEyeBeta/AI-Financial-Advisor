@@ -59,10 +59,10 @@ Where a row says NOT VERIFIED, that is the claim.
 | Threat model (STRIDE, all listed components) | IMPLEMENTED | [`docs/security/THREAT_MODEL.md`](../security/THREAT_MODEL.md) |
 | Security test inventory mapped to CI evidence | IMPLEMENTED / AUTOMATED TEST PASSED per row | [`docs/security/SECURITY_TEST_INVENTORY.md`](../security/SECURITY_TEST_INVENTORY.md) — 18 categories; gaps G-2 (ai/academy RLS tests), G-3 (mass-assignment sweep), G-4 (fuzz corpus), G-5 (secret-scan canary) stated |
 | Secrets controls inspection (hardcoded, .env, VITE keys, artifacts, URLs, logs, docs, history) | IMPLEMENTED | inventory §Secrets-control inspection; gitleaks gate `security.yml#secret-scan` + `SECRET_SCANNING.md` |
-| Key-rotation runbook (Supabase SRK/JWT, OpenAI, Google, Redis, Sentry, platform+GitHub tokens) | IMPLEMENTED; rotations MANUAL VERIFICATION REQUIRED (never rehearsed) | [`docs/security/KEY_ROTATION.md`](../security/KEY_ROTATION.md) |
+| Key-rotation runbook (Supabase SRK/JWT, OpenAI, Google, Redis/Valkey, Sentry, platform+GitHub tokens) | IMPLEMENTED; rotations MANUAL VERIFICATION REQUIRED (never rehearsed) | [`docs/security/KEY_ROTATION.md`](../security/KEY_ROTATION.md) |
 | Independent-review handoff package (architecture, flows, RLS, admin, WS, limitations, accounts, RoE, reporting) | IMPLEMENTED | [`docs/security/SECURITY_REVIEW_PACKAGE.md`](../security/SECURITY_REVIEW_PACKAGE.md) |
 | External penetration test | EXTERNAL ACCESS REQUIRED | not commissioned; package ready |
-| No known critical/high security issue open | IMPLEMENTED (as of this audit) | top residual risks ranked in `THREAT_MODEL.md` §4 — none assessed critical/high *for a 150-user capped beta*; the global-AI-cap and unapplied-ruleset items are the two to watch |
+| No known critical/high security issue open | IMPLEMENTED (as of this audit) | top residual risks ranked in `THREAT_MODEL.md` §4 — none assessed critical/high *for a 150-user capped beta*; the global AI spend/concurrency cap (G-1) closed 2026-07-18, see `docs/ai/AI_CONTROLS.md` §1 — the unapplied-ruleset item remains the one to watch |
 
 ## Phase 7 — AI reliability, cost and safety
 
@@ -133,7 +133,7 @@ Where a row says NOT VERIFIED, that is the claim.
 
 1. Apply the GitHub branch rulesets (`CI_GUIDELINES.md` §3.8) — the single highest-leverage open item.
 2. Verify Vercel system-env exposure + Railway SHA/APP_VERSION vars, then run `release-verification.yml` once against staging.
-3. Configure/verify OpenAI (and Perplexity) budget alarms — compensating control for the missing global spend cap.
+3. Configure/verify OpenAI (and Perplexity) budget alarms — defense-in-depth alongside the internal global spend cap (`docs/ai/AI_CONTROLS.md` §1, G-1 closed), since provider-side alerts are advisory/soft and the internal guard is the enforced hard stop.
 4. Confirm the Supabase signup toggle + account-linking setting; rehearse pause/unpause once.
 5. Create the beta feedback form and link it.
 6. Commission the independent security review (package is ready).
@@ -151,7 +151,7 @@ Where a row says NOT VERIFIED, that is the claim.
 
 - **B-1** Branch ruleset unapplied → "production cannot receive a red release" is documented, not yet technically enforced. (External, ~15 minutes.)
 - **B-2** IRIS retry-after-failure design gap (duplicate-message risk on manual retype) — `BLOCKED` on a design decision; acceptable for beta only because failed sends are visibly surfaced.
-- **B-3** No global AI spend ceiling — bounded by account cap + per-user quotas; provider budget alarm must be confirmed before Cohort 1.
+- **B-3** ~~No global AI spend ceiling~~ **CLOSED** — the global AI budget guard (`app/services/ai_budget_guard.py`) enforces daily/monthly USD ceilings plus global/provider/model concurrency caps, tested (`docs/ai/AI_CONTROLS.md` §1, G-1 closed 2026-07-18). Enforcement depends on Valkey availability (fails closed on outage, see `docs/runbooks/redis-unavailable.md`); provider budget alarms remain a recommended defense-in-depth secondary control, not the primary one.
 - **B-4** Zero rehearsals (restore, rollback, rotation, runbooks) — procedures exist; evidence of execution does not. Cohort gates require the first ones.
 
 With B-1 closed and the Cohort-0/1 entry conditions executed as gated above,

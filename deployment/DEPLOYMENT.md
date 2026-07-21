@@ -92,9 +92,28 @@ Use the Vercel dashboard to redeploy a previous commit or manually promote a dep
    PORT=8000
    WORKERS=1
    REDIS_URL=redis://...            # Required for multi-worker rate limits + WebSocket tickets
-   ALLOW_IN_MEMORY_RATE_LIMIT=true  # Only when WORKERS=1 and Redis intentionally omitted
+   ALLOW_IN_MEMORY_RATE_LIMIT=true  # Only when WORKERS=1 and Redis/Valkey intentionally omitted
    SCHEDULER_ENABLED=false          # Web service — do NOT enable on API replicas
    ```
+
+   **Backing store for `REDIS_URL`:** use [Valkey](https://valkey.io)
+   (BSD-3-Clause, Linux Foundation-governed fork of Redis 7.2.4), not Redis
+   Ltd.'s Redis — Redis relicensed under RSALv2/SSPL as of 7.4/8, which is
+   source-available but not OSI open source. Valkey is wire-compatible
+   (same RESP protocol, same Lua `EVAL`/`register_script` support this repo's
+   `rate_limit_redis.py` and `ai_budget_guard.py` use), so the app code and
+   the `REDIS_URL`/`RATE_LIMIT_REDIS_URL` env var names are unchanged —
+   only the server behind the URL differs. On Railway, add a service from
+   the official `valkey/valkey` Docker image (or the Railway Valkey
+   template if listed in the marketplace) and point `REDIS_URL` at its
+   internal connection string, same as you would a Redis addon.
+
+   If you hit a crash-loop where every worker dies with `FATAL: Production
+   is configured with multiple workers but REDIS_URL is missing` even
+   though `REDIS_URL` **is** set, check the store's `maxclients` limit —
+   `validate_rate_limit_configuration()` treats a failed `ping()` (e.g.
+   "max number of clients reached") identically to "no Redis/Valkey
+   configured." See `docs/runbooks/redis-unavailable.md`.
 
    **Process topology (beta):**
    - **Web service** (`uvicorn app.main:app`): `WORKERS=1`, `SCHEDULER_ENABLED=false`, health check `/health/ready`.
