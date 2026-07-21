@@ -176,7 +176,9 @@ def validate_recovery(
                 report.add(f"row_count[{table}]", CheckStatus.FAIL, "unsafe table identifier — refused")
                 continue
             try:
-                count = int(_scalar(run_sql(f"SELECT count(*) FROM {table}"), 0) or 0)
+                # nosec B608: `table` is validated by _is_safe_identifier() above
+                # (bare `schema.table` only) before interpolation — not user input.
+                count = int(_scalar(run_sql(f"SELECT count(*) FROM {table}"), 0) or 0)  # nosec B608
                 if count >= minimum:
                     report.add(f"row_count[{table}]", CheckStatus.OK, f"{count} >= {minimum}")
                 else:

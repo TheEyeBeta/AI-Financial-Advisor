@@ -68,7 +68,7 @@ def test_redacts_inline_password_and_secret():
         ("password", "hunter2"),
         ("service_role_key", "svc-role-abc"),
         ("supabase_jwt_secret", "jwt-secret-abc"),
-        ("openai_api_key", "sk-abcdef012345"),
+        ("openai_api_key", "fake-openai-key-abc"),
         ("client_secret", "oauth-client-secret"),
         ("database_url", "postgres://u:p@h/db"),
         ("ssn", "123-45-6789"),
