@@ -14,8 +14,8 @@ SEV-4 — Minor or cosmetic defect
 | Level | Definition (this product) | Examples |
 | --- | --- | --- |
 | SEV-1 | Confirmed data loss/corruption, account or key compromise, or `/health/ready` down across all backend replicas with the frontend unusable | service-role key leaked; trading tables corrupted; auth fully broken |
-| SEV-2 | A core journey (sign-in, onboarding, IRIS chat, paper trading) unavailable or majorly degraded for many users | OpenAI + fallback both failing; DB schema mismatch blocking readiness; Google OAuth broken |
-| SEV-3 | Degraded with a workaround; single feature or subset of users | market data on snapshot fallback; Redis/Valkey down (rate limits process-local); academy quiz save flaky |
+| SEV-2 | A core journey (sign-in, onboarding, IRIS chat, paper trading) unavailable or majorly degraded for many users | OpenAI + fallback both failing; DB schema mismatch blocking readiness; Google OAuth broken; Valkey down with >1 web worker/replica (`validate_rate_limit_configuration()` refuses to start — full outage, not degradation) or the global AI budget guard failing closed (503s on every AI-proxy call, default behavior on a Valkey outage) or WebSocket tickets breaking across replicas |
+| SEV-3 | Degraded with a workaround; single feature or subset of users | market data on snapshot fallback; Valkey down with exactly 1 web worker and `ALLOW_IN_MEMORY_RATE_LIMIT=true` (rate limits process-local only, no crash); academy quiz save flaky |
 | SEV-4 | Cosmetic/minor, no journey blocked | styling glitch, copy error, non-blocking console noise |
 
 ## Response targets (beta, single-operator reality)

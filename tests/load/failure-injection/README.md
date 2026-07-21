@@ -81,11 +81,17 @@ Production backs `REDIS_URL` with [Valkey](https://valkey.io)
 Redis Ltd.'s Redis. It's wire-compatible, so everything below (env var
 name, log strings, code paths) is identical either way.
 
-- **Purpose:** verify the app degrades to the documented local-fallback
-  rate-limiting mode (`app/services/rate_limit_redis.py`, logged as
-  `"Redis-backed rate limiting unavailable, using local fallback"`) rather
-  than failing requests outright, and that WebSocket tickets (also
-  Redis/Valkey-backed) fail gracefully.
+- **Purpose:** verify the app's actual documented behavior on a Valkey
+  outage — which is **not** uniformly "degrade gracefully." In
+  single-worker beta mode with `ALLOW_IN_MEMORY_RATE_LIMIT=true`, rate
+  limiting degrades to the local-fallback mode
+  (`app/services/rate_limit_redis.py`, logged as `"Redis-backed rate
+  limiting unavailable, using local fallback"`). With >1 web
+  worker/replica, `validate_rate_limit_configuration()` is designed to
+  refuse to start rather than run an unsafe per-process fallback — verify
+  that fail-fast actually fires. Also verify the global AI budget guard
+  fails closed (503s) and that WebSocket tickets (also Redis/Valkey-backed)
+  fail gracefully rather than silently succeeding cross-replica.
 - **Preconditions:** isolated staging Valkey instance you can stop/block
   independently of production Valkey.
 - **How to induce:** stop the staging Valkey instance, or block network
@@ -95,18 +101,30 @@ name, log strings, code paths) is identical either way.
   behavior (does it still work locally, at least per-instance?); the
   `/health/ready` payload's rate-limit-backend field
   (`app/health_checks.py`).
-- **Pass criteria:** requests continue to be served (possibly with
-  degraded, per-instance-only rate limiting per `docs/OPERATIONS.md`'s
-  documented multi-worker caveat); no 5xx spike attributable to Valkey
-  absence; readiness does not flip to "not ready" purely because Valkey is
-  down (Valkey is a resilience feature, not a hard readiness dependency —
-  confirm this is actually true in `health_checks.py`, don't assume it).
-  Also distinguish a real outage from `maxclients` exhaustion — the latter
-  makes `ping()` fail the same way and can crash-loop multi-worker
-  deployments outright (see `docs/runbooks/redis-unavailable.md`).
+- **Pass criteria — depends on staging's `WORKERS`/replica count, test both if feasible:**
+  - **Single web worker, `ALLOW_IN_MEMORY_RATE_LIMIT=true`:** requests
+    continue to be served with degraded, per-instance-only rate limiting;
+    `/health/ready`'s `rate_limit` component reflects the fallback (not a
+    hard readiness dependency in this mode — confirm this is actually true
+    in `health_checks.py`, don't assume it).
+  - **>1 web worker/replica:** this is **not** a soft-degradation case —
+    `validate_rate_limit_configuration()` and
+    `validate_ai_budget_configuration()` raise `FATAL` at startup, so the
+    expected outcome is the backend failing to (re)start, not serving
+    degraded traffic. Confirm this actually happens rather than assuming a
+    graceful fallback.
+  - **In all configurations:** the global AI budget guard fails **closed**
+    by default — expect every AI-proxy call to return 503
+    `reason_code: redis_unavailable` for the duration of the outage; this
+    is expected/pass behavior, not a bug. Don't score it as an unexpected
+    5xx spike.
+  - Distinguish a real outage from `maxclients` exhaustion — the latter
+    makes `ping()` fail the same way and can crash-loop multi-worker
+    deployments outright (see `docs/runbooks/redis-unavailable.md`).
 - **Restore:** restart/unblock the staging Valkey instance.
 - **Recovery check:** confirm rate-limit-backend in `/health/ready`
-  reports Redis/Valkey again, not local-fallback.
+  reports Redis/Valkey again, not local-fallback; confirm `ai_budget_guard`
+  returns to `ok` and a chat request succeeds without a 503.
 
 ## 3. Market-data provider unavailable
 

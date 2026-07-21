@@ -41,13 +41,24 @@ After any rotation, record: date, key, reason, rotator, verification evidence
 
 ## 5. Redis/Valkey credentials
 
-- **Used by:** backend (`REDIS_URL`) for shared rate limits + WS tickets.
-  Production runs [Valkey](https://valkey.io) (BSD-3-Clause Redis-protocol
-  fork), not Redis Ltd.'s Redis — see `deployment/DEPLOYMENT.md`. The env
-  var name and rotation steps are unchanged either way.
+- **Used by:** backend (`REDIS_URL`) for shared rate limits, the global AI
+  budget guard, and WS tickets. Production runs [Valkey](https://valkey.io)
+  (BSD-3-Clause Redis-protocol fork), not Redis Ltd.'s Redis — see
+  `deployment/DEPLOYMENT.md`. The env var name and rotation steps are
+  unchanged either way.
 - **Rotate:** provider dashboard (Railway Valkey service) → new credentials → update `REDIS_URL` → redeploy.
-- **Verify:** `/health/ready` `rate_limit` component `ok`; WS ticket round-trip.
-- **Degradation note:** backend falls back to process-local state without Redis/Valkey (rate limits weaken with >1 replica) — rotate promptly but calmly. See `docs/runbooks/redis-unavailable.md`.
+- **Verify:** `/health/ready` `rate_limit` **and** `ai_budget_guard` components `ok`; WS ticket round-trip.
+- **Degradation note:** impact depends on worker count. With exactly 1 web
+  worker and `ALLOW_IN_MEMORY_RATE_LIMIT=true`, rate limits fall back to
+  process-local state. With >1 web worker/replica, the backend **fails to
+  start** rather than degrading (`validate_rate_limit_configuration()`
+  raises `FATAL`) — a bad rotation is a full outage, not a soft
+  degradation. Independent of worker count, the global AI budget guard
+  fails **closed** by default on any Valkey outage (503s on every
+  AI-proxy call, `reason_code: redis_unavailable`), and WebSocket tickets
+  can fail cross-replica. Rotate promptly but calmly — verify the new
+  credentials work *before* removing the old ones. See
+  `docs/runbooks/redis-unavailable.md`.
 
 ## 6. Sentry DSNs (frontend + backend)
 

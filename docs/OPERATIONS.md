@@ -40,10 +40,11 @@ document wins.
   where `SCHEDULER_ENABLED=true` — exactly one replica (or the dedicated
   `run_scheduler.py` process). The admin job worker runs in the scheduler
   process.
-- With >1 web worker/replica and no Redis/Valkey, rate limiting and
-  WebSocket tickets fall back to process-local state — configure
-  `REDIS_URL` (pointed at a Valkey instance; see `deployment/DEPLOYMENT.md`)
-  in production.
+- With >1 web worker/replica, rate limiting and WebSocket tickets require a
+  shared store, and the service will fail to start without one
+  (`validate_rate_limit_configuration()` raises `FATAL` rather than
+  degrading) — configure `REDIS_URL` (pointed at a Valkey instance; see
+  `deployment/DEPLOYMENT.md`) in production.
 
 ## Health, monitoring, telemetry
 

@@ -5,10 +5,14 @@ services:
   # global AI budget guard, and WebSocket tickets. See deployment/DEPLOYMENT.md
   # and docs/runbooks/redis-unavailable.md for why this replaces Redis.
   valkey:
-    image: valkey/valkey:8-alpine
+    image: valkey/valkey:8-alpine@sha256:94365b275456ae14621001c03556c732b1d93a0cdeacc317d1bdd52eba680885
     container_name: ai-financial-advisor-valkey
+    # Bound to localhost only (not published on all host interfaces): the
+    # official image has no password by default, and the backend already
+    # reaches this over the internal app-network, so a wide-open port would
+    # expose WS tickets, rate-limit counters, and AI-budget state.
     ports:
-      - "${VALKEY_PORT:-6379}:6379"
+      - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
     volumes:
       - valkey-data:/data
     restart: unless-stopped
