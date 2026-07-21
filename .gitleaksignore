@@ -12,3 +12,8 @@ baf03b505c27fa69836e9969d6ababbcf9f2538c:.github/workflows/ci.yml:generic-api-ke
 # by the repo's existing low-entropy "idem-key-00N" convention in a later commit.
 c6258ad0c67c7b3b147ff1866649b36a30c3acd2:backend/websearch_service/tests/test_user_account_lifecycle.py:generic-api-key:328
 c6258ad0c67c7b3b147ff1866649b36a30c3acd2:backend/websearch_service/tests/test_user_account_lifecycle.py:generic-api-key:374
+
+# Test-fixture openai_api_key value ("sk-abcdef012345"), not a real secret,
+# flagged by the generic-api-key entropy heuristic. Replaced by a low-entropy
+# placeholder ("fake-openai-key-abc") in a later commit.
+0cc7c877785d8ff5abc370c392f0c4b72b08f24f:backend/websearch_service/tests/test_log_redaction.py:generic-api-key:71

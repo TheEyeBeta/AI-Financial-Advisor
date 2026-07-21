@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-12-20260721T013608Z",
+  "work_package": "WP-12",
+  "environment": "test",
+  "app_version": "readiness-session",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T01:36:08Z",
+  "finished_at": "2026-07-21T01:36:08Z",
+  "command": "python -m pytest tests/test_env_validation.py -o addopts=''  ;  python -m app.env_validation --json",
+  "scenario": "Standalone environment/config validator (Phase 12)",
+  "preconditions": [],
+  "assertions": [
+    "missing required / placeholder values flagged (error in prod)",
+    "AUTH_REQUIRED=false and ENABLE_DEBUG_ROUTES=true in prod are errors",
+    "fail-open flags (AI_BUDGET_FAIL_OPEN_ON_REDIS_OUTAGE, *_ALLOW_IN_MEMORY, ALLOW_IN_MEMORY_RATE_LIMIT) are errors in prod",
+    "CORS/TRUSTED_HOSTS wildcard/empty are errors; cross-env resource denylist enforced",
+    "report never emits secret values"
+  ],
+  "result": "pass",
+  "metrics": {
+    "env_validation_tests_passed": 17
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/app/env_validation.py",
+    "backend/websearch_service/tests/test_env_validation.py"
+  ],
+  "remaining_risks": [
+    "Wire validator into app startup + a CI env-schema job (documented as next step)"
+  ],
+  "reviewer_notes": "",
+  "content_sha256": "d1560a0cdc461179395c43b48c75b3af16334b29d673c1d5ce3e5acd21ea04b6"
+}

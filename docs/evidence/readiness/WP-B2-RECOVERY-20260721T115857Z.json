@@ -1,0 +1,33 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-RECOVERY-20260721T115857Z",
+  "work_package": "WP-B2-RECOVERY",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "pytest tests/test_recovery_validator.py",
+  "scenario": "Non-destructive recovery validator",
+  "preconditions": [],
+  "assertions": [
+    "migration head / schemas / tables / extensions / functions / triggers / indexes",
+    "row-count sanity",
+    "auth-profile provisioning",
+    "backup metadata freshness",
+    "unsafe identifier refused",
+    "read-only"
+  ],
+  "result": "pass",
+  "metrics": {
+    "recovery_tests": 13,
+    "coverage_pct": 84
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/app/services/recovery_validator.py"
+  ],
+  "remaining_risks": [],
+  "reviewer_notes": "",
+  "content_sha256": "61050ee503f2e513e92f07a3492434081b7ec5b8a58d96cf2aa20ed391df62d9"
+}

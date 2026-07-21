@@ -84,6 +84,10 @@ TEST_MODE_DISCLAIMER = "Test mode only. Not financial advice."
 REASONING_MODEL_PREFIXES = ("gpt-5", "o1", "o3", "o4")
 MIN_REASONING_MAX_OUTPUT_TOKENS = 1200
 RETRY_REASONING_MAX_OUTPUT_TOKENS = 1800
+# Safe fallback used when a request omits max_tokens or supplies a non-positive
+# value. Mirrors the ChatRequest.max_tokens Pydantic default and is itself
+# clamped to the server ceiling (OPENAI_MAX_TOKENS) at use sites.
+DEFAULT_CHAT_MAX_OUTPUT_TOKENS = 2000
 STREAM_TIMEOUT_SECONDS = 90.0
 STREAM_CONNECT_TIMEOUT_SECONDS = 10.0
 
@@ -1616,12 +1620,55 @@ def _is_reasoning_model(model: str) -> bool:
     return model.startswith(REASONING_MODEL_PREFIXES)
 
 
-def _effective_chat_max_output_tokens(requested_tokens: int) -> int:
-    """Reasoning models often need extra output budget before returning visible text."""
-    base_tokens = max(requested_tokens, OPENAI_MAX_TOKENS)
-    if _is_reasoning_model(OPENAI_CHAT_MODEL):
-        return max(base_tokens, MIN_REASONING_MAX_OUTPUT_TOKENS)
-    return base_tokens
+def _effective_chat_max_output_tokens(
+    requested_tokens: Optional[int], model: Optional[str] = None
+) -> int:
+    """Resolve the effective output-token limit for a chat request.
+
+    The configured ``OPENAI_MAX_TOKENS`` is a *server-side ceiling*, never a
+    floor. The effective limit is::
+
+        min(valid_requested_limit, server_ceiling)
+
+    Boundary handling:
+
+    * Missing / ``None`` / zero / negative requests fall back to a safe
+      configured default (``DEFAULT_CHAT_MAX_OUTPUT_TOKENS``), itself clamped to
+      the ceiling.
+    * Requests larger than the ceiling are capped to the ceiling.
+    * Reasoning models keep a minimum output floor so hidden reasoning tokens do
+      not starve the visible answer — but that floor is *also* clamped to the
+      ceiling and can never raise the effective limit above it.
+
+    ``model`` should be the model actually routed for this request (e.g. the
+    tier-selected ``_chat_model``); it defaults to the configured
+    ``OPENAI_CHAT_MODEL`` only for callers made before routing is known (e.g. an
+    early, conservative rate-limit estimate). Applying the reasoning floor
+    based on the wrong model would either starve a reasoning model's answer or
+    needlessly inflate a non-reasoning model's ceiling.
+
+    This single helper is used by both the streaming and non-streaming chat
+    paths so the two behave identically.
+    """
+    # Server ceiling is authoritative and always >= 1 (enforced at module load).
+    ceiling = max(1, OPENAI_MAX_TOKENS)
+
+    # Normalise missing / non-positive requests to a safe default.
+    if not isinstance(requested_tokens, int) or requested_tokens <= 0:
+        requested = DEFAULT_CHAT_MAX_OUTPUT_TOKENS
+    else:
+        requested = requested_tokens
+
+    # Hard cap: the requested budget may never exceed the server ceiling.
+    effective = min(requested, ceiling)
+
+    # Reasoning models need a minimum budget, but the floor cannot breach the
+    # ceiling (Phase 2: "reasoning-model minimums must never exceed the ceiling").
+    if _is_reasoning_model(model if model is not None else OPENAI_CHAT_MODEL):
+        reasoning_floor = min(MIN_REASONING_MAX_OUTPUT_TOKENS, ceiling)
+        effective = max(effective, reasoning_floor)
+
+    return effective
 
 
 def _looks_like_reasoning_budget_exhaustion(data: Dict[str, Any]) -> bool:
@@ -2704,6 +2751,15 @@ async def chat_completion(
             _deep_mode = _is_deep_request(subagent_category, classification)
             _chat_model = DEEP_MODEL if _deep_mode else BALANCED_MODEL
 
+        # Recompute against the model actually routed for this request — the
+        # earlier value (used only for the pre-routing rate-limit estimate) was
+        # based on the configured default model, which the reasoning floor
+        # would otherwise wrongly apply to (or withhold from) a tier-routed
+        # model that differs from the default.
+        effective_max_output_tokens = _effective_chat_max_output_tokens(
+            request.max_tokens, model=_chat_model
+        )
+
         logger.info(
             f"[MODEL] tier={message_tier} "
             f"category={subagent_category} "
@@ -3008,7 +3064,7 @@ async def chat_completion(
                             yield _sse_event({"content": suffix})
 
                     actual_tokens = sum(_usage_total_tokens(entry) for entry in usage_entries)
-                    if actual_tokens > 0:
+                    if actual_tokens > 0 and not token_limit_exempt:
                         rate_limiter.record_token_usage(raw_request, user_id=verified_user_id, tokens_used=actual_tokens)
                     if budget_reservation is not None:
                         # Streaming uses the Chat Completions API, whose usage
@@ -3094,10 +3150,12 @@ async def chat_completion(
             and _is_reasoning_model(_chat_model)
             and _looks_like_reasoning_budget_exhaustion(data)
         ):
-            retry_max_output_tokens = max(
-                payload["max_output_tokens"],
-                RETRY_REASONING_MAX_OUTPUT_TOKENS,
-                OPENAI_MAX_TOKENS,
+            # Give the reasoning retry more headroom (up to the retry minimum)
+            # but never breach the server ceiling — the configured maximum stays
+            # authoritative even on the recovery path (Phase 2).
+            retry_max_output_tokens = min(
+                max(payload["max_output_tokens"], RETRY_REASONING_MAX_OUTPUT_TOKENS),
+                max(1, OPENAI_MAX_TOKENS),
             )
             retry_payload = {
                 **payload,
