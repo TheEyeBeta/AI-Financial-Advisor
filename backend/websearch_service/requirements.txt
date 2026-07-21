@@ -199,9 +199,9 @@ deprecation==2.1.0 \
     # via
     #   postgrest
     #   storage3
-fastapi==0.139.0 \
-    --hash=sha256:99ab7b2d92223c76d6cf10757ab3f89d45b38267fc20b2a136cf02f6beac3145 \
-    --hash=sha256:cf15e1e9e667ddb0ad63811e60bd11390d1aac838ca4a7a23f421807b2308189
+fastapi==0.139.2 \
+    --hash=sha256:333145a6891e9b5b3cfceb69baf817e8240cde4d4588ae5a10bf56ffacb6255e \
+    --hash=sha256:b9ad015a835173d59865e2f5d8296fbc2b317bf56a2ba1a5bfbdd03de2fd4b1c
     # via
     #   -r requirements.in
     #   sentry-sdk
@@ -1088,9 +1088,9 @@ redis==7.4.1 \
     --hash=sha256:1a1df5067062cf7cbe677994e391f8ee0840f499d370f1a71266e0dd3aa9308e \
     --hash=sha256:1fa4647af1c5e93a2c685aa248ee44cce092691146d41390518dabe9a99839b0
     # via -r requirements.in
-sentry-sdk[fastapi]==2.64.0 \
-    --hash=sha256:68be2c29e14ae310f8a39e1a79916b6d85c6cb41dcce789d14ff05fe293e4c55 \
-    --hash=sha256:715ea91ca860a819e8d8a50a7bde3a80d0df3b4ed7b6660a20fb9a2d084188f1
+sentry-sdk[fastapi]==2.66.0 \
+    --hash=sha256:096136c214c602be2b323524d30755dc5b30ec5a218a206207f33b12c05c6f11 \
+    --hash=sha256:9727d35aa83c56cd53294676fe65b96296a334c9ce107fa2142bd70f47acb265
     # via -r requirements.in
 sqlalchemy==2.0.51 \
     --hash=sha256:0378d055e9e8cd6ce4d8dff683bdd3d7d413533c4ee51d67a2b1e0f9eacc0f23 \
