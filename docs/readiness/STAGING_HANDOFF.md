@@ -1,3 +1,10 @@
+> **Historical document.** This records the staging-deployment handoff for
+> commit `0cc7c87` (PR #258, merged as `76633b8`). The Alembic head noted
+> throughout (`0036_core_audit_events`) was current *for that commit* —
+> `main` is now at `0037_goal_progress_reconcile`. Do not use the migration
+> head or CI evidence below to validate a later deployment; re-run the
+> validation commands in this file against the actual commit being deployed.
+
 # Clean-CI Evidence & Staging Handoff — Batch 3 close-out
 
 **Tested revision (commit to deploy):** `0cc7c877785d8ff5abc370c392f0c4b72b08f24f`

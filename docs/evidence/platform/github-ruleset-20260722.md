@@ -48,14 +48,43 @@ tests; it now also covers the frontend build + compose validation.
 
 ## Verification
 
-```
-$ gh api repos/TheEyeBeta/AI-Financial-Advisor/rulesets/19108544
-```
-Response confirms `enforcement: active`, `updated_at: 2026-07-22T03:41:45.078+01:00`,
-and all 12 contexts listed under `required_status_checks` (see above).
+API read confirmed `enforcement: active`, `updated_at: 2026-07-22T03:41:45.078+01:00`,
+and all 12 contexts listed under `required_status_checks` (see above) via:
 
-**Not done, and not live-probed in this session:** opening a real PR to
-watch all 12 checks report and gate merge — the API response is the
-verification; a live PR probe (as `github-ruleset-20260717.md` did for
-push/force-push/delete) is a reasonable follow-up but was not required to
-confirm the config was written correctly.
+```bash
+gh api repos/TheEyeBeta/AI-Financial-Advisor/rulesets/19108544
+```
+
+**Live PR probe (2026-07-22, later same day):** opened PR #262 (commit
+`a449435645aa3d0ea5c19bf2afc64c6ab5fd5bbf`) and watched all 12 required
+checks actually report:
+
+```text
+pass  AI-provider test-network guard active
+pass  Backend Tests
+pass  Docker Build Test
+pass  Environment-schema validation (synthetic vars)
+pass  Evidence-schema validation (tamper-evident digests)
+pass  Frontend Quality & Build
+pass  Node dependency audit
+pass  Python dependency audit
+pass  Python static security scan
+pass  Secret scanning (gitleaks)
+pass  quality
+pass  test
+```
+
+`gh pr view 262 --json mergeable,mergeStateStatus` reported
+`{"mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED"}` — blocked solely on
+the required 1 approving review (`reviewDecision: REVIEW_REQUIRED`, zero
+reviews), not on any status check. This confirms the 12-check requirement
+is enforced, not just configured.
+
+Note: PR #262 was initially opened against `staging`, which is 27 commits
+behind `main` in this repo — that produced a misleading diff and caused
+`e2e.yml`'s `test` job to never trigger (its trigger is
+`branches: [main, develop]`, excluding `staging`). Retargeting the PR to
+`main` and reopening it (to fire a fresh `pull_request` event) resolved
+both; see the PR discussion for detail. This is an unrelated, pre-existing
+repo-wiring gap (not something this ruleset change caused) worth fixing
+before relying on `staging`-targeted PRs to gate merges going forward.

@@ -78,10 +78,11 @@ async function request<T>(
     ...fetchOptions
   } = options;
 
-  // Resolved lazily (not at module load) so the single fail-fast resolver in
-  // lib/env.ts — not a locally hardcoded fallback — decides the backend URL.
-  const base = baseUrl ?? getPythonApiUrl();
-  const url = path.startsWith('http') ? path : `${base}${path}`;
+  // Resolved lazily (not at module load), and only for relative paths, so
+  // the single fail-fast resolver in lib/env.ts — not a locally hardcoded
+  // fallback — decides the backend URL without being called (and possibly
+  // throwing in production when unconfigured) for already-absolute URLs.
+  const url = path.startsWith('http') ? path : `${baseUrl ?? getPythonApiUrl()}${path}`;
 
   // Build headers
   const headers = new Headers(extraHeaders);

@@ -258,5 +258,12 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Validate docker-compose config
+        # docker-compose.yml interpolates ${VITE_SUPABASE_URL}/${VITE_SUPABASE_ANON_KEY}
+        # from the shell env; `compose config` doesn't fail on an unset
+        # variable (silently substitutes empty), so these must be set here
+        # for the check to actually validate the env-variable contract.
+        env:
+          VITE_SUPABASE_URL: https://test.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-key
         run: docker compose -f deployment/docker-compose.yml config
 

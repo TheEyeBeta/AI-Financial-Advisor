@@ -92,7 +92,9 @@ class TestGoalProgressSchemaMatchesApplicationQuery:
         row = db.execute(
             """
             SELECT 1 FROM pg_constraint
-            WHERE conrelid = 'meridian.goal_progress'::regclass AND contype = 'u'
+            WHERE conrelid = 'meridian.goal_progress'::regclass
+              AND contype = 'u'
+              AND conname = 'goal_progress_goal_id_period_key'
             """
         ).fetchone()
         assert row is not None

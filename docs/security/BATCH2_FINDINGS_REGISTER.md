@@ -62,7 +62,7 @@ action (not an implementation blocker).
   before fetching JWKS key material), so an HMAC-family token can never be checked
   against JWKS key material and vice versa even if a caller mis-routes it. `alg=none`
   and any algorithm outside both allowlists are rejected with 401.
-- **Verification test:** `test_auth_functions.py::TestJwtAlgorithmAllowlist` (16 tests) —
+- **Verification test:** `test_auth_functions.py::TestJwtAlgorithmAllowlist` (14 tests) —
   valid HS/RS/ES tokens, `alg=none`, unsupported algorithm, HS-token-to-asymmetric-path,
   asymmetric-token-to-symmetric-path, invalid signature, wrong issuer, expired token,
   missing required claims, allowlist widening via env, and `FATAL` on misconfigured

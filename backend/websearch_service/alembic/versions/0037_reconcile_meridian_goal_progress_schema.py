@@ -102,6 +102,7 @@ def upgrade() -> None:
                 SELECT 1 FROM pg_constraint
                 WHERE conrelid = 'meridian.goal_progress'::regclass
                   AND contype = 'u'
+                  AND conname = 'goal_progress_goal_id_period_key'
             ) THEN
                 ALTER TABLE meridian.goal_progress
                     ADD CONSTRAINT goal_progress_goal_id_period_key UNIQUE (goal_id, period);

@@ -1,3 +1,11 @@
+> **Historical document.** This describes PR #258 (`readiness/batch-1-3-execution`,
+> merged as `76633b8`), not any later PR. Migration head, SEC-B2-04 status, and
+> test counts below reflect that PR's state at the time, not current `main`.
+> Kept as a handoff/evidence record per the readiness programme's convention
+> of preserving point-in-time execution snapshots — see
+> `docs/security/BATCH2_FINDINGS_REGISTER.md` and
+> `docs/readiness/10-of-10-beta-readiness.md` for current status.
+
 # Readiness (Batch 1–3): AI cost-control fix, test isolation, env validation, observability, invite concurrency, recovery, evidence + CI gates
 
 **Branch:** `readiness/batch-1-3-execution` → **base:** `main` (or `staging`)

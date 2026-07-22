@@ -12,14 +12,17 @@ Ran `pip-audit` (no `-r`, audits the actually-installed environment) inside
 `ai-financial-advisor-backend:test`, built from `backend/websearch_service/Dockerfile`
 via `docker build --no-cache`.
 
-**Before fix:** 6 known CVEs, all in one package — `pip==25.0.1` (system pip,
-resolved because the Dockerfile's `RUN pip install --upgrade pip` hit a stale
-BuildKit cache layer instead of re-resolving against PyPI):
-PYSEC-2026-196 (CVE-2026-8643), PYSEC-2026-1795 (CVE-2025-8869),
-PYSEC-2026-1796 (CVE-2026-1703), PYSEC-2026-2875 (CVE-2026-3219),
-PYSEC-2026-2876 (CVE-2026-6357). All 77 actual runtime dependencies
-(fastapi, sqlalchemy, supabase, pyjwt, cryptography, starlette, uvicorn,
-uvloop, etc.) showed zero vulnerabilities.
+**Before fix:** `pip-audit`'s own summary line reported "Found 6 known
+vulnerabilities in 1 package" — `pip==25.0.1` (system pip, resolved because
+the Dockerfile's `RUN pip install --upgrade pip` hit a stale BuildKit cache
+layer instead of re-resolving against PyPI). Its JSON vuln list contained 6
+entries but only 5 *distinct* advisories — `pip-audit` listed
+`PYSEC-2026-196` (CVE-2026-8643) twice, once under each of two GHSA
+cross-references. The 5 distinct advisories: PYSEC-2026-196 (CVE-2026-8643),
+PYSEC-2026-1795 (CVE-2025-8869), PYSEC-2026-1796 (CVE-2026-1703),
+PYSEC-2026-2875 (CVE-2026-3219), PYSEC-2026-2876 (CVE-2026-6357). All 77
+actual runtime dependencies (fastapi, sqlalchemy, supabase, pyjwt,
+cryptography, starlette, uvicorn, uvloop, etc.) showed zero vulnerabilities.
 
 **Fix:** `backend/websearch_service/Dockerfile` now pins
 `pip install --no-cache-dir pip==26.1.2` (was a floating `--upgrade pip`,
@@ -67,14 +70,16 @@ resolutions moved within those ranges.
 
 ## 3. Frontend — npm audit (dev-only tooling) and a real cross-platform lockfile bug found along the way
 
-`npm audit` (full, including devDependencies) still reports 4 findings, none
-of which ship in the built application:
+`npm audit` (full, including devDependencies) reports 4 vulnerable packages
+(`metadata.vulnerabilities`: 1 moderate, 3 high, 4 total — verified via
+`npm audit --json`), none of which ship in the built application:
 
 | Package | Severity | Pulled in by | Why it doesn't ship |
 | --- | --- | --- | --- |
 | `js-yaml@4.2.0` | high (GHSA-52cp-r559-cp3m, quadratic CPU via YAML merge-key chains) | `@redocly/openapi-core@1.34.17` ← `openapi-typescript@7.13.0` | Build-time-only CLI tool (`npm run generate:api-types`) that parses this repo's own committed `docs/openapi.json`, never user/attacker input. `openapi-typescript@7.13.0` is its latest release and is still pinned to `@redocly/openapi-core@^1.x`; `@redocly/openapi-core@2.x` fixes this but isn't available as an `openapi-typescript` dependency yet — no non-breaking fix exists upstream today. Accepted; will resolve automatically on the next `openapi-typescript` major that adopts redocly 2.x. |
 | `@redocly/openapi-core@1.34.17` | high | `openapi-typescript@7.13.0` | Same as above (the package the js-yaml chain hangs off of) |
-| `esbuild@<=0.24.2` (via `vite`) | moderate (GHSA-67mh-4wv8-2f99, dev server accepts cross-origin requests) | `vite` (dev dependency) | Only affects `npm run dev`'s local dev server; not present in `npm run build` output or any deployed artifact. Fix requires `vite@8` (breaking, per `npm audit fix --force`) — deferred as a deliberate, tested upgrade, not a same-session dependency bump. |
+| `esbuild@<=0.24.2` | moderate (GHSA-67mh-4wv8-2f99, dev server accepts cross-origin requests) | `vite` (dev dependency) | Only affects `npm run dev`'s local dev server; not present in `npm run build` output or any deployed artifact. |
+| `vite@<=6.4.2` | high (depends on the vulnerable `esbuild` above) | direct devDependency | Same reasoning as `esbuild` — dev-server-only exposure. Fix requires `vite@8` (breaking, per `npm audit fix --force`) — deferred as a deliberate, tested upgrade, not a same-session dependency bump. |
 
 **Real bug found and fixed while doing this triage:** the `npm audit fix` run
 above was first executed on a Windows host, which produced a
@@ -96,8 +101,8 @@ corrected lockfile and are unaffected.
 
 | Check | Before | After |
 | --- | --- | --- |
-| Backend pip-audit (system pip, actual runtime deps) | 6 CVEs (pip 25.0.1) | 0 (pip 26.1.2, verified) |
-| Backend pip-audit residual (ensurepip stdlib bundle) | — | 6 CVEs, zero runtime exposure, base-image follow-up |
+| Backend pip-audit (system pip, actual runtime deps) | 5 distinct advisories (pip 25.0.1) | 0 (pip 26.1.2, verified) |
+| Backend pip-audit residual (ensurepip stdlib bundle) | — | 5 distinct advisories, zero runtime exposure, base-image follow-up |
 | Frontend npm audit, production deps | 11 moderate | **0** |
-| Frontend npm audit, dev-only tooling | not previously reported | 4 (1 moderate, 3 high), all build-time-only, no shipped exposure |
+| Frontend npm audit, dev-only tooling | not previously reported | 4 packages (1 moderate, 3 high), all build-time-only, no shipped exposure |
 | Frontend Docker build (Linux) | broken (undiscovered until this audit) | fixed and verified |

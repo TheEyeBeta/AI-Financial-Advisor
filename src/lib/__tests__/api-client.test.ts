@@ -95,4 +95,20 @@ describe('apiClient base URL resolution', () => {
     const [calledUrl] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(calledUrl).toBe('https://override.example.com/api/ping');
   });
+
+  it('does not call the resolver at all for an already-absolute URL', async () => {
+    mockGetPythonApiUrl.mockImplementation(() => {
+      throw new Error('should not be called for an absolute path');
+    });
+    (global.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+    );
+
+    const { apiClient } = await import('../api-client');
+    await apiClient.get('https://external.example.com/api/thing');
+
+    expect(mockGetPythonApiUrl).not.toHaveBeenCalled();
+    const [calledUrl] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(calledUrl).toBe('https://external.example.com/api/thing');
+  });
 });

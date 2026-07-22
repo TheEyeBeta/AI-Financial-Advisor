@@ -204,16 +204,22 @@ title:
 | `quality` (`Lint & Type Check`) | `lint.yml` | `Lint & Type Check` |
 | `test` (`E2E Tests`) | `e2e.yml` | `E2E Tests` |
 | `node-audit` (`Node dependency audit`), `python-audit` (`Python dependency audit`), `python-bandit` (`Python static security scan`), `secret-scan` (`Secret scanning (gitleaks)`) | `security.yml` | `Security Checks` |
+| `env-schema` (`Environment-schema validation (synthetic vars)`) | `readiness-controls.yml` (unconditional `pull_request`, no path filter) | `Readiness Controls` |
+| `evidence-schema` (`Evidence-schema validation (tamper-evident digests)`) | `readiness-controls.yml` | `Readiness Controls` |
+| `network-guard` (`AI-provider test-network guard active`) | `readiness-controls.yml` | `Readiness Controls` |
 
 These are the checks currently required by the active ruleset (verified
-2026-07-17, §3.8). `docker-build` runs unconditionally (no path filter, see
-§3.5) so it cannot strand a PR by silently skipping — the earlier
-path-filtered second Docker workflow that could have caused that was removed.
+2026-07-17, §3.8; extended 2026-07-22). `docker-build` runs unconditionally
+(no path filter, see §3.5) so it cannot strand a PR by silently skipping —
+the earlier path-filtered second Docker workflow that could have caused
+that was removed.
 
-**Added 2026-07-22:** `readiness-controls.yml`'s three jobs (env-schema,
-evidence-schema, network-guard — all already ran on every `pull_request`
-with no path filter) are now in the ruleset's required-check list, bringing
-the total to 12. Evidence: `docs/evidence/platform/github-ruleset-20260722.md`.
+**Added 2026-07-22:** the three `readiness-controls.yml` rows above (had
+already run on every `pull_request` with no path filter) are now in the
+ruleset's required-check list, bringing the total to 12. Verified both via
+the ruleset API and by opening a real PR (#262) and watching all 12 report
+and gate merge (`mergeStateStatus: BLOCKED` on missing review only, not on
+any check). Evidence: `docs/evidence/platform/github-ruleset-20260722.md`.
 
 **Not addable as a PR gate:** `release-verification.yml` only runs via
 `workflow_dispatch` or `workflow_run` after a staging deploy — it verifies
