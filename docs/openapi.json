@@ -402,7 +402,7 @@
           "news"
         ],
         "summary": "Get News",
-        "description": "Return market news from DataAPI when configured, newest first.\n\nReturns 400 for invalid cursors, 503 when the provider is not configured\n(clients should use Supabase `news_articles`), 504 on provider timeout,\nand 502 on provider failure. Empty feeds are a successful empty list.",
+        "description": "Return market news from DataAPI when configured, newest first.\n\nReturns 400 for invalid cursors, 503 when the provider is not configured\n(clients should use Supabase `market.news`, the canonical table \u2014 see\nsql/schema.sql; `market.news_articles` is a legacy source table only),\n504 on provider timeout,\nand 502 on provider failure. Empty feeds are a successful empty list.",
         "operationId": "get_news_api_news_get",
         "parameters": [
           {

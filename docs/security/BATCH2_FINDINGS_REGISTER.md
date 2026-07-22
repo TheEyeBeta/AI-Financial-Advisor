@@ -45,18 +45,29 @@ action (not an implementation blocker).
 - **Residual risk:** In-memory/fail-open flags remain a permitted single-worker-beta
   opt-in; flip `STARTUP_FATAL_CODES` to hard-fail once Redis is provisioned.
 
-### SEC-B2-04 — JWT algorithm sourced from token header  ·  **LOW**  ·  OPEN (hardening)
+### SEC-B2-04 — JWT algorithm sourced from token header  ·  **LOW**  ·  RESOLVED
 - **Category:** Algorithm confusion (defence in depth).
-- **Component:** `app/services/auth.py::_jwt_algorithm` → `_verify_jwt_with_secret(algorithms=[declared_alg])`.
-- **Exploit scenario:** The verifier trusts the token's declared `alg`. Not exploitable
-  today (symmetric HS256 secret vs. asymmetric ES256/JWKS are routed to different key
-  material, so RS/HS confusion has no shared key; PyJWT rejects `none`), but trusting
-  attacker-controlled `alg` is an anti-pattern.
-- **Recommended resolution:** Pin an allowlist per verification path
-  (`{"HS256"}` for the shared-secret path, `{"ES256","RS256"}` for the JWKS path)
-  and reject any other declared algorithm before decode.
-- **Verification test (to add):** `test_auth_functions.py` — reject `alg=none` / unexpected alg.
-- **Residual risk:** Low; tracked as a hardening item.
+- **Component:** `app/services/auth.py::_jwt_algorithm` → `_verify_jwt_with_secret` / `_verify_jwt_with_supabase_jwks`.
+- **Exploit scenario:** The verifier trusted the token's declared `alg` to select a
+  category (HMAC vs. asymmetric) but had no explicit allowlist, and the low-level
+  verification functions did not independently check that the algorithm they were
+  asked to use matched their key material.
+- **Resolution:** Explicit allowlists (`SUPABASE_JWT_HS_ALGORITHMS`, default `HS256`;
+  `SUPABASE_JWT_ASYMMETRIC_ALGORITHMS`, default `ES256,RS256`), each validated against
+  a fixed known-algorithm superset (misconfiguration raises `FATAL` rather than
+  silently widening). Enforced twice: at dispatch (`_verify_supabase_jwt` routes only
+  on the configured allowlists) and inside each verification function itself
+  (`_verify_jwt_with_secret` rejects non-HS-allowlisted algorithms before touching the
+  secret; `_verify_jwt_with_supabase_jwks` rejects non-asymmetric-allowlisted algorithms
+  before fetching JWKS key material), so an HMAC-family token can never be checked
+  against JWKS key material and vice versa even if a caller mis-routes it. `alg=none`
+  and any algorithm outside both allowlists are rejected with 401.
+- **Verification test:** `test_auth_functions.py::TestJwtAlgorithmAllowlist` (14 tests) —
+  valid HS/RS/ES tokens, `alg=none`, unsupported algorithm, HS-token-to-asymmetric-path,
+  asymmetric-token-to-symmetric-path, invalid signature, wrong issuer, expired token,
+  missing required claims, allowlist widening via env, and `FATAL` on misconfigured
+  allowlist env var.
+- **Residual risk:** None; closed.
 
 ### SEC-B2-05 — Secrets could leak inside free-text log values  ·  **LOW**  ·  RESOLVED
 - **Category:** Sensitive logging.
@@ -94,7 +105,8 @@ action (not an implementation blocker).
 ## Severity summary
 
 Critical: 0 · High: 0 open (1 resolved) · Medium: 0 open (2 resolved) ·
-Low: 1 open (SEC-B2-04 hardening) · Info: 1 resolved.
+Low: 0 open (1 resolved — SEC-B2-04) · Info: 1 resolved.
 
-Security may reach 9/10 once SEC-B2-04 is closed and the explicit cross-user IDOR
-regression + a fresh `security.yml`/`dast.yml` scan on this commit are attached.
+SEC-B2-04 is closed (this commit). Security may reach 9/10 once the explicit
+cross-user IDOR regression + a fresh `security.yml`/`dast.yml` scan on this
+commit are attached.

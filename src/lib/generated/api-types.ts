@@ -224,7 +224,9 @@ export interface paths {
          * @description Return market news from DataAPI when configured, newest first.
          *
          *     Returns 400 for invalid cursors, 503 when the provider is not configured
-         *     (clients should use Supabase `news_articles`), 504 on provider timeout,
+         *     (clients should use Supabase `market.news`, the canonical table — see
+         *     sql/schema.sql; `market.news_articles` is a legacy source table only),
+         *     504 on provider timeout,
          *     and 502 on provider failure. Empty feeds are a successful empty list.
          */
         get: operations["get_news_api_news_get"];

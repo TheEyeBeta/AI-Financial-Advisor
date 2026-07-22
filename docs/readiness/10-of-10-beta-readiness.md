@@ -1,6 +1,6 @@
 # 10/10 Beta Readiness — master checklist and evidence register
 
-**Owner:** TheEyeBeta · **Updated:** 2026-07-17 · **Target:** controlled, invite-only beta of up to 150 users.
+**Owner:** TheEyeBeta · **Updated:** 2026-07-22 · **Target:** controlled, invite-only beta of up to 150 users.
 
 **Reading rules.** "10/10" means: all material beta risks are fixed, tested,
 monitored, recoverable or explicitly disabled; every critical journey has
@@ -27,8 +27,8 @@ Where a row says NOT VERIFIED, that is the claim.
 | Frontend release SHA stamped into served HTML | AUTOMATED TEST PASSED (build-verified) | `vite.config.ts::releaseShaMetaTag`; verified in `dist/index.html` during this session's build |
 | Release-verification smoke (frontend+backend SHA == expected) | IMPLEMENTED | `scripts/verify-release.mjs`; workflow `.github/workflows/release-verification.yml` |
 | Deploy targets actually expose their SHA (Vercel system env, Railway var) | EXTERNAL ACCESS REQUIRED | `RELEASE_POLICY.md` §5 rows 3–4 |
-| Failed mandatory check blocks merge/promotion, logs preserved | IMPLEMENTED (repo side) + EXTERNAL ACCESS REQUIRED (ruleset) | `RELEASE_POLICY.md` §4–5; ruleset checklist `CI_GUIDELINES.md` §3.8 |
-| Branch ruleset applied on `main`/`staging` (PR required, 1 approval, dismiss stale, resolved threads, up-to-date, mandatory checks, no force-push/deletion, no admin bypass) | EXTERNAL ACCESS REQUIRED | exact instructions: `CI_GUIDELINES.md` §3.8 — unverifiable from the repo |
+| Failed mandatory check blocks merge/promotion, logs preserved | IMPLEMENTED | `RELEASE_POLICY.md` §4–5; ruleset verified active — `docs/evidence/platform/github-ruleset-20260717.md` |
+| Branch ruleset applied on `main`/`staging` (PR required, 1 approval, dismiss stale, resolved threads, up-to-date, mandatory checks, no force-push/deletion, no admin bypass) | AUTOMATED TEST PASSED (live probes + live PR) | Ruleset `Production branch protection` (ID `19108544`) active on `main`+`staging`; direct push/force-push/delete all rejected (`GH013`) — `docs/evidence/platform/github-ruleset-20260717.md`. 2026-07-22: added the three `readiness-controls.yml` checks to the required list (12 total, API-verified) — `docs/evidence/platform/github-ruleset-20260722.md` — then confirmed live via PR #262: all 12 required checks reported and the PR's `mergeStateStatus` was `BLOCKED` only on the missing review, not on any check. `release-verification.yml` cannot be a PR gate (post-deploy only, see `CI_GUIDELINES.md` §3.8). |
 | Keyboard E2E failure root-caused and fixed | AUTOMATED TEST PASSED | Root cause: Radix restores focus only to a `DialogTrigger`; all app dialogs are controlled without one → focus dropped to `<body>` on close, app-wide (WCAG 2.4.3). Fix: `src/components/ui/dialog.tsx`. Regression: `src/components/ui/__tests__/dialog.test.tsx` (1 test) + `e2e/a11y.spec.ts` asserting all 8 required behaviours (reachable, visible focus, Enter **and** Space, focus entry, containment, Escape, restoration). Local runs: chromium + mobile-chromium PASS; firefox not installable in this sandbox — `NOT VERIFIED locally`, runs in CI `e2e.yml` on push |
 | Doc drift: deleted `deploy.yml` still referenced | IMPLEMENTED (fixed) | `CI_GUIDELINES.md` §1/§3.7 updated to native-integration reality |
 
@@ -62,7 +62,7 @@ Where a row says NOT VERIFIED, that is the claim.
 | Key-rotation runbook (Supabase SRK/JWT, OpenAI, Google, Redis/Valkey, Sentry, platform+GitHub tokens) | IMPLEMENTED; rotations MANUAL VERIFICATION REQUIRED (never rehearsed) | [`docs/security/KEY_ROTATION.md`](../security/KEY_ROTATION.md) |
 | Independent-review handoff package (architecture, flows, RLS, admin, WS, limitations, accounts, RoE, reporting) | IMPLEMENTED | [`docs/security/SECURITY_REVIEW_PACKAGE.md`](../security/SECURITY_REVIEW_PACKAGE.md) |
 | External penetration test | EXTERNAL ACCESS REQUIRED | not commissioned; package ready |
-| No known critical/high security issue open | IMPLEMENTED (as of this audit) | top residual risks ranked in `THREAT_MODEL.md` §4 — none assessed critical/high *for a 150-user capped beta*; the global AI spend/concurrency cap (G-1) closed 2026-07-18, see `docs/ai/AI_CONTROLS.md` §1 — the unapplied-ruleset item remains the one to watch |
+| No known critical/high security issue open | IMPLEMENTED (as of this audit) | top residual risks ranked in `THREAT_MODEL.md` §4 — none assessed critical/high *for a 150-user capped beta*; the global AI spend/concurrency cap (G-1) closed 2026-07-18, see `docs/ai/AI_CONTROLS.md` §1; SEC-B2-04 (JWT algorithm allowlist) closed 2026-07-22, see `docs/security/BATCH2_FINDINGS_REGISTER.md` |
 
 ## Phase 7 — AI reliability, cost and safety
 
@@ -131,7 +131,7 @@ Where a row says NOT VERIFIED, that is the claim.
 
 ## Consolidated: external actions still required (humans with dashboard access)
 
-1. Apply the GitHub branch rulesets (`CI_GUIDELINES.md` §3.8) — the single highest-leverage open item.
+1. ~~Apply the GitHub branch rulesets~~ **DONE** — verified active 2026-07-17, `docs/evidence/platform/github-ruleset-20260717.md`. Add the release-verification check to the required list once that job runs on PRs.
 2. Verify Vercel system-env exposure + Railway SHA/APP_VERSION vars, then run `release-verification.yml` once against staging.
 3. Configure/verify OpenAI (and Perplexity) budget alarms — defense-in-depth alongside the internal global spend cap (`docs/ai/AI_CONTROLS.md` §1, G-1 closed), since provider-side alerts are advisory/soft and the internal guard is the enforced hard stop.
 4. Confirm the Supabase signup toggle + account-linking setting; rehearse pause/unpause once.
@@ -149,12 +149,12 @@ Where a row says NOT VERIFIED, that is the claim.
 
 ## Blockers preventing an unqualified 10/10 claim
 
-- **B-1** Branch ruleset unapplied → "production cannot receive a red release" is documented, not yet technically enforced. (External, ~15 minutes.)
+- **B-1** ~~Branch ruleset unapplied~~ **CLOSED 2026-07-17**, required-check list extended 2026-07-22 — ruleset verified active on `main`+`staging` with live push/force-push/delete probes rejected; see `docs/evidence/platform/github-ruleset-20260717.md` and `docs/evidence/platform/github-ruleset-20260722.md`.
 - **B-2** IRIS retry-after-failure design gap (duplicate-message risk on manual retype) — `BLOCKED` on a design decision; acceptable for beta only because failed sends are visibly surfaced.
 - **B-3** ~~No global AI spend ceiling~~ **CLOSED** — the global AI budget guard (`app/services/ai_budget_guard.py`) enforces daily/monthly USD ceilings plus global/provider/model concurrency caps, tested (`docs/ai/AI_CONTROLS.md` §1, G-1 closed 2026-07-18). Enforcement depends on Valkey availability (fails closed on outage, see `docs/runbooks/redis-unavailable.md`); provider budget alarms remain a recommended defense-in-depth secondary control, not the primary one.
 - **B-4** Zero rehearsals (restore, rollback, rotation, runbooks) — procedures exist; evidence of execution does not. Cohort gates require the first ones.
 
-With B-1 closed and the Cohort-0/1 entry conditions executed as gated above,
+B-1 is now closed. With the Cohort-0/1 entry conditions executed as gated above,
 the beta meets the working definition of 10/10 for a 150-user, invite-only,
 paper-trading product. Claims beyond that (real-money features, open signup,
 scale) are explicitly out of scope of this document.

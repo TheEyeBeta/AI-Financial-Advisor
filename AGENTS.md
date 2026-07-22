@@ -8,7 +8,7 @@ You are working in **AI-Financial-Advisor**: a Vite + React + TypeScript fronten
 - **Backend:** `backend/websearch_service/` — FastAPI, AI proxy (`app/routes/ai_proxy.py`), search, trade engine routes, scheduled jobs in `app/main.py`.
 - **Client ↔ API:** Browser calls backend via `VITE_PYTHON_API_URL` / `VITE_WEBSEARCH_API_URL` (see `src/lib/env`, `src/services/api.ts` and related modules).
 - **Database:** Six logical schemas used from the app: `core`, `ai`, `trading`, `market`, `academy`, `meridian` (see `src/lib/supabase.ts`). **Authoritative schema history:** `backend/websearch_service/alembic/`. **`sql/` is reference and manual verification only** — see `sql/README.md`.
-- **Deploy:** Frontend → Vercel; backend → Railway or Render; DB/Auth → Supabase. Details: `deployment/DEPLOYMENT.md`.
+- **Deploy:** Frontend → Vercel; backend → Railway; DB/Auth → Supabase. Details: `deployment/DEPLOYMENT.md`. (`render.yaml` was removed — stale since initial commit, never wired into CI, and its documented env vars omitted `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, which the backend requires at startup.)
 - **Generated API types:** `docs/openapi.json` + `src/lib/generated/api-types.ts` (CI enforces drift).
 
 ## 2. Dependency and change-direction rules

@@ -4,6 +4,31 @@ This Mermaid `erDiagram` covers the six runtime schemas used by the app: `core`,
 
 Mermaid ER diagrams do not support rendered subgraphs, so schema grouping is shown with schema-prefixed entity names and section labels. `auth.users` is included as an external reference because several foreign keys terminate there.
 
+## `core.users.id` vs `auth.users.id` — foreign-key convention
+
+Two different UUIDs identify a user, and which one a table's `user_id` FK
+targets depends on the schema:
+
+- **`core`, `ai`, `trading`, `market`, `academy` schemas** — `user_id` foreign
+  keys reference **`core.users(id)`**, the internal surrogate primary key
+  (e.g. `ai.chats.user_id`, `trading.trades.user_id`, `core.achievements.user_id`).
+- **`meridian` schema** — `user_id`/`goal_id`-chain foreign keys reference
+  **`auth.users(id)`** directly (the Supabase auth UUID), not `core.users(id)`
+  (e.g. `meridian.user_goals.user_id`, `meridian.financial_plans.user_id`).
+  This matches RLS policies in this schema, which compare against
+  `auth.uid()` — itself an `auth.users.id` value.
+
+`core.users` bridges the two: `core.users.id` is its own surrogate PK, and
+`core.users.auth_id` is a unique FK to `auth.users(id)`.
+
+**Practical rule for backend code:** when fetching a user's row from
+`core.users`, select both `id` and `auth_id`. Use `id` when joining to
+`core`/`ai`/`trading`/`market`/`academy` tables, and use `auth_id` (never
+`id`) when querying `meridian` tables — see the callout in
+`app/services/intelligence_engine.py::_fetch_active_users`, which followed
+this convention correctly but the convention itself was undocumented outside
+that one docstring until now.
+
 ```mermaid
 erDiagram
   %% External reference: auth

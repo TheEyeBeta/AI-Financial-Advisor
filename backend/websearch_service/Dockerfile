@@ -18,7 +18,14 @@ COPY requirements.txt .
 
 # Install Python dependencies. Hashes in requirements.txt make pip verify
 # every artifact (hash-checking mode is implied by a hashed lockfile).
-RUN pip install --no-cache-dir --upgrade pip && \
+#
+# pip itself is pinned to an exact version (not a floating --upgrade) so a
+# Docker layer-cache hit can never silently keep shipping an old, CVE-bearing
+# pip into the image — that's exactly what happened here: pip-audit run
+# against a built image found 6 known CVEs (PYSEC-2026-196/1795/1796/2875/2876)
+# in a cached pip==25.0.1 layer even though this RUN said "--upgrade pip".
+# Bump this pin when pip-audit reports a newer fixed version.
+RUN pip install --no-cache-dir pip==26.1.2 && \
     pip install --no-cache-dir --require-hashes -r requirements.txt
 
 # Production stage

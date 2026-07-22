@@ -11,8 +11,8 @@ This guide covers professional deployment strategies for the AI Financial Adviso
 │                                                               │
 │  ┌──────────────┐         ┌──────────────┐                  │
 │  │   Frontend   │         │   Backend    │                  │
-│  │   (Vercel)   │────────▶│  (Railway/   │                  │
-│  │              │  HTTPS  │   Render)    │                  │
+│  │   (Vercel)   │────────▶│  (Railway)   │                  │
+│  │              │  HTTPS  │              │                  │
 │  └──────────────┘         └──────────────┘                  │
 │         │                        │                            │
 │         │                        │                            │
@@ -29,7 +29,7 @@ This guide covers professional deployment strategies for the AI Financial Adviso
 
 - GitHub account with repository access
 - Vercel account (for frontend)
-- Railway/Render account (for backend)
+- Railway account (for backend)
 - Supabase project
 - OpenAI API key
 - Tavily API key (optional, for web search)
@@ -123,29 +123,7 @@ Use the Vercel dashboard to redeploy a previous commit or manually promote a dep
 3. **Deploy**
    Push to the configured branch and let Railway's native GitHub integration deploy the backend.
 
-### Option 2: Render
-
-1. **Create Web Service**
-   - Go to [Render Dashboard](https://dashboard.render.com)
-   - Click "New +" → "Web Service"
-   - Connect your GitHub repository
-
-2. **Configure Service**
-   - **Name**: `ai-financial-advisor-backend`
-   - **Root Directory**: `backend/websearch_service`
-   - **Environment**: `Docker`
-   - **Dockerfile Path**: `backend/websearch_service/Dockerfile`
-   - **Port**: `8000`
-
-3. **Environment Variables**
-   ```
-   OPENAI_API_KEY=sk-...
-   TAVILY_API_KEY=tvly-...
-   APP_VERSION=0.1.0
-   ENVIRONMENT=production
-   ```
-
-### Option 3: Docker Deployment
+### Option 2: Docker Deployment
 
 #### Using Docker Compose
 
@@ -167,7 +145,7 @@ docker-compose logs -f backend
 
 See `k8s/` directory for Kubernetes manifests (create if needed).
 
-### Option 4: AWS/GCP/Azure
+### Option 3: AWS/GCP/Azure
 
 See cloud-specific deployment guides in `docs/deployment/` directory.
 
@@ -331,10 +309,6 @@ Vercel automatically scales based on traffic. No configuration needed.
 - Auto-scaling based on CPU/memory
 - Configure in Railway dashboard → Settings → Scaling
 
-#### Render
-- Set instance type and count in service settings
-- Auto-scaling available on paid plans
-
 #### Docker Swarm/Kubernetes
 - Configure replicas in deployment manifests
 - Use horizontal pod autoscaling
@@ -372,9 +346,6 @@ Use the Vercel dashboard: go to Deployments, select the previous deployment, and
 
 #### Railway
 Use the Railway dashboard: open the backend service deployments, select a previous successful deployment, and redeploy or roll back it.
-
-#### Render
-- Go to Deployments → Select previous deployment → Rollback
 
 #### Docker
 ```bash

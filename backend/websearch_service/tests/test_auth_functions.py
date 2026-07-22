@@ -709,3 +709,242 @@ class TestRequireWebsocketAuth:
         with pytest.raises(HTTPException) as exc_info:
             run_async(require_websocket_auth(ws))
         assert exc_info.value.status_code == 401
+
+
+# ── SEC-B2-04: JWT algorithm allowlist / algorithm-confusion hardening ───────
+#
+# Each verification path must only accept algorithms from its own explicit
+# allowlist (SUPABASE_JWT_HS_ALGORITHMS / SUPABASE_JWT_ASYMMETRIC_ALGORITHMS),
+# both at dispatch time and inside the path itself (defense in depth), so an
+# HMAC-signed token can never be verified with JWKS key material or vice
+# versa. See docs/security/BATCH2_FINDINGS_REGISTER.md.
+
+def _rsa_keypair():
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return private_pem, public_pem
+
+
+def _ec_keypair():
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives import serialization
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    public_pem = private_key.public_key().public_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PublicFormat.SubjectPublicKeyInfo,
+    )
+    return private_pem, public_pem
+
+
+def _asymmetric_jwt(private_pem: bytes, algorithm: str, **extra) -> str:
+    now = int(time.time())
+    payload = {
+        "role": extra.pop("role", "authenticated"),
+        "sub": extra.pop("sub", "asym-user"),
+        "iat": now,
+        "exp": extra.pop("exp", now + 3600),
+        "iss": extra.pop("iss", supabase_test_issuer()),
+        **extra,
+    }
+    return pyjwt.encode(payload, private_pem, algorithm=algorithm)
+
+
+def _mock_jwks_for(public_pem: bytes):
+    signing_key = MagicMock()
+    signing_key.key = public_pem
+    client = MagicMock()
+    client.get_signing_key_from_jwt.return_value = signing_key
+    return client
+
+
+class TestJwtAlgorithmAllowlist:
+    # 1. Valid HS token
+    def test_valid_hs_token_accepted(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        token = _jwt(role="authenticated", sub="hs-user")
+        payload = _verify_supabase_jwt(
+            token, required_claims=("sub", "exp", "iat", "role"), allow_rest_fallback=True,
+        )
+        assert payload["sub"] == "hs-user"
+
+    # 2. Valid RS/ES token
+    def test_valid_rs256_token_accepted(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        private_pem, public_pem = _rsa_keypair()
+        token = _asymmetric_jwt(private_pem, "RS256", sub="rs-user")
+        with patch("app.services.auth._jwks_client", return_value=_mock_jwks_for(public_pem)):
+            payload = _verify_supabase_jwt(
+                token, required_claims=("sub", "exp", "iat"), allow_rest_fallback=False,
+            )
+        assert payload["sub"] == "rs-user"
+
+    def test_valid_es256_token_accepted(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        private_pem, public_pem = _ec_keypair()
+        token = _asymmetric_jwt(private_pem, "ES256", sub="es-user")
+        with patch("app.services.auth._jwks_client", return_value=_mock_jwks_for(public_pem)):
+            payload = _verify_supabase_jwt(
+                token, required_claims=("sub", "exp", "iat"), allow_rest_fallback=False,
+            )
+        assert payload["sub"] == "es-user"
+
+    # 3. alg=none
+    def test_alg_none_rejected(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        import base64
+        import json
+
+        def b64url(data: bytes) -> str:
+            return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+        header = b64url(json.dumps({"alg": "none", "typ": "JWT"}).encode())
+        now = int(time.time())
+        payload = b64url(json.dumps({
+            "sub": "attacker", "role": "authenticated", "iat": now, "exp": now + 3600,
+        }).encode())
+        forged_token = f"{header}.{payload}."
+
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_supabase_jwt(
+                forged_token, required_claims=("sub",), allow_rest_fallback=True,
+            )
+        assert exc_info.value.status_code == 401
+
+    # 4. Unsupported algorithm
+    def test_unsupported_algorithm_rejected(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        with patch("app.services.auth._jwt_algorithm", return_value="HS512"):
+            with pytest.raises(HTTPException) as exc_info:
+                _verify_supabase_jwt(
+                    "fake.token.here", required_claims=("sub",), allow_rest_fallback=True,
+                )
+        assert exc_info.value.status_code == 401
+
+    # 5. HS token presented to the asymmetric (JWKS) verification path
+    def test_hs_token_rejected_by_asymmetric_path(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        hs_token = _jwt(role="authenticated", sub="hs-user")
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_jwt_with_supabase_jwks(hs_token, "HS256", required_claims=("sub",))
+        assert exc_info.value.status_code == 401
+
+    # 6. Asymmetric token presented to the symmetric (shared-secret) path
+    def test_asymmetric_token_rejected_by_symmetric_path(self, monkeypatch):
+        private_pem, _ = _rsa_keypair()
+        rs_token = _asymmetric_jwt(private_pem, "RS256", sub="rs-user")
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_jwt_with_secret(
+                rs_token, TEST_SECRET, "RS256", required_claims=("sub",),
+            )
+        assert exc_info.value.status_code == 401
+
+    # 7. Invalid signature
+    def test_invalid_signature_rejected(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        token = _jwt(role="authenticated", sub="user-1")
+        tampered = token[:-4] + ("A" if token[-4] != "A" else "B") + token[-3:]
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_supabase_jwt(
+                tampered, required_claims=("sub", "exp", "iat"), allow_rest_fallback=False,
+            )
+        assert exc_info.value.status_code == 401
+
+    # 8. Wrong issuer
+    def test_wrong_issuer_rejected(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
+        token = _jwt(role="authenticated", sub="user-1", iss="https://evil.example.com/auth/v1")
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_supabase_jwt(
+                token, required_claims=("sub", "exp", "iat"), allow_rest_fallback=False,
+            )
+        assert exc_info.value.status_code == 401
+
+    # 9. Expired token
+    def test_expired_token_rejected(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        now = int(time.time())
+        token = _jwt(role="authenticated", sub="user-1", iat=now - 7200, exp=now - 3600)
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_supabase_jwt(
+                token, required_claims=("sub", "exp", "iat"), allow_rest_fallback=False,
+            )
+        assert exc_info.value.status_code == 401
+
+    # 10. Missing required claims
+    def test_missing_required_claim_rejected(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        now = int(time.time())
+        payload = {
+            "sub": "user-1",
+            "iat": now,
+            "iss": supabase_test_issuer(),
+            # "exp" and "role" deliberately omitted
+        }
+        token = pyjwt.encode(payload, TEST_SECRET, algorithm="HS256")
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_supabase_jwt(
+                token, required_claims=("sub", "exp", "iat", "role"), allow_rest_fallback=False,
+            )
+        assert exc_info.value.status_code == 401
+
+    # ── Configuration hardening ──────────────────────────────────────────────
+
+    def test_hs_allowlist_rejects_unconfigured_default_family_member(self, monkeypatch):
+        """HS384 is a known HMAC-family algorithm but not in the default allowlist."""
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        token = pyjwt.encode(
+            {
+                "role": "authenticated", "sub": "user-1",
+                "iat": int(time.time()), "exp": int(time.time()) + 3600,
+                "iss": supabase_test_issuer(),
+            },
+            TEST_SECRET, algorithm="HS384",
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            _verify_supabase_jwt(
+                token, required_claims=("sub", "exp", "iat", "role"), allow_rest_fallback=False,
+            )
+        assert exc_info.value.status_code == 401
+
+    def test_widening_hs_allowlist_via_env_allows_hs384(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        monkeypatch.setenv("SUPABASE_JWT_HS_ALGORITHMS", "HS256,HS384")
+        token = pyjwt.encode(
+            {
+                "role": "authenticated", "sub": "user-1",
+                "iat": int(time.time()), "exp": int(time.time()) + 3600,
+                "iss": supabase_test_issuer(),
+            },
+            TEST_SECRET, algorithm="HS384",
+        )
+        payload = _verify_supabase_jwt(
+            token, required_claims=("sub", "exp", "iat", "role"), allow_rest_fallback=False,
+        )
+        assert payload["sub"] == "user-1"
+
+    def test_misconfigured_allowlist_env_raises_fatal(self, monkeypatch):
+        monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_SECRET)
+        monkeypatch.setenv("SUPABASE_JWT_HS_ALGORITHMS", "none")
+        token = _jwt(role="authenticated", sub="user-1")
+        with pytest.raises(RuntimeError, match="FATAL"):
+            _verify_supabase_jwt(
+                token, required_claims=("sub",), allow_rest_fallback=False,
+            )
