@@ -136,7 +136,7 @@ Once connected to your GitHub repo, Vercel will automatically build and deploy o
 - **Styling**: Tailwind CSS + shadcn/ui
 - **Database & Auth**: Supabase
 - **AI**: OpenAI API (server-side proxy)
-- **Deployment**: Vercel (frontend) + Railway/Render (backend)
+- **Deployment**: Vercel (frontend) + Railway (backend)
 - **CI/CD**: GitHub Actions
 - **Containerization**: Docker
 

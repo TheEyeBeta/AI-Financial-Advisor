@@ -20,9 +20,34 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from postgrest.exceptions import APIError
+
 from .supabase_client import supabase_client
 
 logger = logging.getLogger(__name__)
+
+# Postgres/PostgREST error codes that indicate the deployed schema does not
+# match what this module queries (missing column/table/schema-cache entry),
+# as opposed to a transient network or availability error. These must never
+# be silently swallowed as a generic warning — they mean code and database
+# have drifted and every subsequent cycle will keep failing the same way.
+_SCHEMA_ERROR_CODES = frozenset({
+    "42703",    # undefined_column
+    "42P01",    # undefined_table
+    "3F000",    # invalid_schema_name
+    "PGRST204", # PostgREST: column not found in schema cache
+    "PGRST205", # PostgREST: table not found in schema cache
+})
+
+
+class GoalProgressSchemaError(RuntimeError):
+    """Raised when meridian.goal_progress does not match the expected schema.
+
+    Distinct from a bare Exception so callers can log this at ERROR with full
+    diagnostic context and record it as a structured cycle error, rather than
+    silently degrading to "no goal progress data" indistinguishable from the
+    ordinary case of a user simply having no goals.
+    """
 
 # ── Run lock (single-process guard against overlapping 6-hour cycles) ─────────
 # NOTE: This is a simple in-process flag. If the service is scaled to multiple
@@ -76,17 +101,36 @@ def _fetch_goals_by_user(user_ids: list[str]) -> dict[str, list[dict]]:
 
 
 def _fetch_goal_progress(goal_ids: list[str]) -> dict[str, list[dict]]:
-    """Batch fetch goal_progress rows, keyed by goal_id."""
+    """Batch fetch goal_progress rows, keyed by goal_id.
+
+    Raises GoalProgressSchemaError (never silently) if the query fails due to
+    a schema mismatch (missing column/table) rather than a transient error —
+    see _SCHEMA_ERROR_CODES.
+    """
     if not goal_ids:
         return {}
+    try:
+        res = (
+            _tbl("meridian", "goal_progress")
+            .select("goal_id, period, actual_amount, target_amount, on_track")
+            .in_("goal_id", goal_ids)
+            .order("period", desc=True)
+            .execute()
+        )
+    except APIError as exc:
+        if exc.code in _SCHEMA_ERROR_CODES:
+            logger.error(
+                "Intelligence cycle: meridian.goal_progress schema mismatch "
+                "(code=%s message=%s hint=%s) — verify the Alembic head is "
+                "applied to this database.",
+                exc.code, exc.message, exc.hint,
+            )
+            raise GoalProgressSchemaError(
+                f"meridian.goal_progress schema mismatch: code={exc.code}"
+            ) from exc
+        raise
+
     result: dict[str, list[dict]] = {}
-    res = (
-        _tbl("meridian", "goal_progress")
-        .select("goal_id, period, actual_amount, target_amount, on_track")
-        .in_("goal_id", goal_ids)
-        .order("period", desc=True)
-        .execute()
-    )
     for row in (res.data or []):
         gid = row.get("goal_id")
         if gid is not None:
@@ -388,6 +432,10 @@ def _run_intelligence_cycle_sync() -> dict[str, Any]:
     # ── B. Batch fetch all context data ──────────────────────────────────────
     # Each fetch is wrapped individually so a single table error does not abort
     # the whole cycle — users are processed with whatever data is available.
+    # Structural (schema-mismatch) failures are still recorded in `errors`
+    # below rather than only logged as a warning indistinguishable from "no
+    # data" — see GoalProgressSchemaError.
+    errors: list[dict[str, str]] = []
 
     goals_by_user: dict[str, list] = {uid: [] for uid in user_ids}
     try:
@@ -404,6 +452,12 @@ def _run_intelligence_cycle_sync() -> dict[str, Any]:
     goal_progress_by_goal_id: dict[str, list] = {}
     try:
         goal_progress_by_goal_id = _fetch_goal_progress(all_goal_ids)
+    except GoalProgressSchemaError as exc:
+        # Structured, non-silent: ERROR-level (already logged with full
+        # detail inside _fetch_goal_progress) plus a recorded cycle error, so
+        # this is visible in the returned summary and alertable — not
+        # indistinguishable from users simply having no goal-progress rows.
+        errors.append({"stage": "goal_progress_fetch", "error": str(exc)})
     except Exception as exc:
         logger.warning("Intelligence cycle: skipping goal_progress — fetch failed: %s", type(exc).__name__)
 
@@ -448,7 +502,8 @@ def _run_intelligence_cycle_sync() -> dict[str, Any]:
         logger.warning("Intelligence cycle: skipping stock signals — fetch failed: %s", type(exc).__name__)
 
     # ── C + D. Evaluate conditions and write digests ──────────────────────────
-    errors: list[dict[str, str]] = []
+    # `errors` was initialised in section B so schema-mismatch failures
+    # recorded there survive into the returned summary below.
     digests_generated = 0
     now_iso = now.isoformat()
 

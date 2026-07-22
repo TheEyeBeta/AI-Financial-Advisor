@@ -13,6 +13,11 @@ Design:
   project's JWKS endpoint.
 - Optional: user-token auth can fall back to Supabase REST validation when a
   local symmetric secret is unavailable.
+- SEC-B2-04: each verification path only accepts algorithms from its own
+  explicit allowlist (SUPABASE_JWT_HS_ALGORITHMS / SUPABASE_JWT_ASYMMETRIC_ALGORITHMS,
+  default HS256 / ES256,RS256). The allowlist is enforced both at dispatch
+  (which path to use) and inside each path itself, so an HMAC-family token
+  can never be verified via JWKS key material and vice versa.
 """
 from __future__ import annotations
 
@@ -38,8 +43,22 @@ ENVIRONMENT_ENV = "ENVIRONMENT"
 PRODUCTION_ENV = "production"
 # Real UUID for dev-bypass so Meridian cache reads work locally (never used in production).
 DEV_BYPASS_USER_ID = "43245b18-2feb-49a4-9958-44fa5c17881e"
+# Superset of algorithms this codebase knows how to route (symmetric vs
+# asymmetric verification path). These are NOT the accepted allowlist by
+# themselves — see SUPABASE_JWT_HS_ALGORITHMS_ENV / _ASYMMETRIC_ below
+# (SEC-B2-04). "none" is deliberately absent from both sets.
 HMAC_JWT_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
 ASYMMETRIC_JWT_ALGORITHMS = frozenset({"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "EDDSA"})
+
+# SEC-B2-04: explicit, narrow algorithm allowlists, independent of the
+# broader "known algorithm families" sets above. Each verification path only
+# ever accepts algorithms configured here, closing the algorithm-confusion
+# hardening gap (a declared alg picks the verification path, but the path
+# itself now also refuses to run with an algorithm outside its allowlist).
+SUPABASE_JWT_HS_ALGORITHMS_ENV = "SUPABASE_JWT_HS_ALGORITHMS"
+SUPABASE_JWT_ASYMMETRIC_ALGORITHMS_ENV = "SUPABASE_JWT_ASYMMETRIC_ALGORITHMS"
+_DEFAULT_HS_ALGORITHMS = "HS256"
+_DEFAULT_ASYMMETRIC_ALGORITHMS = "ES256,RS256"
 
 
 def _environment() -> str:
@@ -110,6 +129,44 @@ def _auth_required() -> bool:
 
 def _get_jwt_secret() -> Optional[str]:
     return os.getenv(SUPABASE_JWT_SECRET_ENV) or None
+
+
+def _parse_algorithm_allowlist(
+    env_name: str, default: str, allowed_superset: frozenset[str]
+) -> frozenset[str]:
+    """Parse a comma-separated algorithm allowlist env var.
+
+    Configured values must be a subset of ``allowed_superset`` (the families
+    this module knows how to verify) — this prevents an operator from
+    accidentally configuring ``none`` or an algorithm with no verification
+    path at all. Raises at call time (not import time) so misconfiguration
+    surfaces as a clear 500/FATAL rather than a silent bypass.
+    """
+    raw = _trimmed_env(env_name) or default
+    configured = frozenset(a.strip().upper() for a in raw.split(",") if a.strip())
+    if not configured:
+        raise RuntimeError(f"FATAL: {env_name} must not be empty.")
+    invalid = configured - allowed_superset
+    if invalid:
+        raise RuntimeError(
+            f"FATAL: {env_name} contains unsupported algorithm(s) {sorted(invalid)}. "
+            f"Allowed values: {sorted(allowed_superset)}."
+        )
+    return configured
+
+
+def _allowed_hs_algorithms() -> frozenset[str]:
+    return _parse_algorithm_allowlist(
+        SUPABASE_JWT_HS_ALGORITHMS_ENV, _DEFAULT_HS_ALGORITHMS, HMAC_JWT_ALGORITHMS
+    )
+
+
+def _allowed_asymmetric_algorithms() -> frozenset[str]:
+    return _parse_algorithm_allowlist(
+        SUPABASE_JWT_ASYMMETRIC_ALGORITHMS_ENV,
+        _DEFAULT_ASYMMETRIC_ALGORITHMS,
+        ASYMMETRIC_JWT_ALGORITHMS,
+    )
 
 
 # ── Token extraction ───────────────────────────────────────────────────────────
@@ -216,6 +273,18 @@ def _verify_jwt_with_secret(
     Verify a symmetric Supabase JWT locally using the project JWT secret.
     Raises HTTPException(401) on any failure.
     """
+    if algorithm.upper() not in _allowed_hs_algorithms():
+        # SEC-B2-04: refuse even if a caller (or a future refactor) routes an
+        # asymmetric-family or unconfigured algorithm into the symmetric
+        # path — never let the HMAC secret be used to "verify" a signature
+        # produced under a different algorithm.
+        logger.warning(
+            "Rejected JWT: alg=%r is not in the configured HMAC allowlist", algorithm
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+        )
     try:
         import jwt as pyjwt  # PyJWT
         payload = pyjwt.decode(
@@ -263,6 +332,17 @@ def _verify_jwt_with_supabase_jwks(
     """
     Verify an asymmetric Supabase JWT against the project's JWKS endpoint.
     """
+    if algorithm.upper() not in _allowed_asymmetric_algorithms():
+        # SEC-B2-04: refuse even if a caller routes an HMAC or unconfigured
+        # algorithm into the JWKS path — a JWKS public key must never be
+        # used as an HMAC secret (classic RS/ES→HS confusion attack).
+        logger.warning(
+            "Rejected JWT: alg=%r is not in the configured asymmetric allowlist", algorithm
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+        )
     try:
         import jwt as pyjwt  # PyJWT
     except ImportError:
@@ -371,8 +451,10 @@ def _verify_supabase_jwt(
     """
     algorithm = _jwt_algorithm(token)
     normalized_algorithm = algorithm.upper()
+    hs_allowed = _allowed_hs_algorithms()
+    asymmetric_allowed = _allowed_asymmetric_algorithms()
 
-    if normalized_algorithm in HMAC_JWT_ALGORITHMS:
+    if normalized_algorithm in hs_allowed:
         jwt_secret = _get_jwt_secret()
         if jwt_secret:
             return _verify_jwt_with_secret(
@@ -393,7 +475,7 @@ def _verify_supabase_jwt(
             detail="SUPABASE_JWT_SECRET is not configured on the backend. Cannot verify symmetric JWTs.",
         )
 
-    if normalized_algorithm in ASYMMETRIC_JWT_ALGORITHMS:
+    if normalized_algorithm in asymmetric_allowed:
         try:
             return _verify_jwt_with_supabase_jwks(
                 token,
@@ -410,7 +492,10 @@ def _verify_supabase_jwt(
                 return _verify_jwt_via_supabase_rest(token)
             raise
 
-    logger.warning("Unsupported JWT algorithm: %s", algorithm)
+    logger.warning(
+        "Rejected JWT: alg=%r not in configured allowlist (hs=%s asymmetric=%s)",
+        algorithm, sorted(hs_allowed), sorted(asymmetric_allowed),
+    )
     raise HTTPException(
         status_code=401,
         detail="Invalid or expired authentication token.",

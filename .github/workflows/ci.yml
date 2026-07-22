@@ -240,3 +240,23 @@ jobs:
           docker stop backend-smoke || true
           exit 1
 
+      # ── Frontend image + compose config (folded in from the former
+      #    docker-build.yml — that workflow only ran on path-filtered PR
+      #    triggers, so it could silently skip and was never a reliable
+      #    required check; this job runs on every push/PR). ─────────────────
+      - name: Build frontend Docker image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          file: ./deployment/Dockerfile.frontend
+          push: false
+          tags: ai-financial-advisor-frontend:test
+          build-args: |
+            VITE_SUPABASE_URL=https://test.supabase.co
+            VITE_SUPABASE_ANON_KEY=test-key
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Validate docker-compose config
+        run: docker compose -f deployment/docker-compose.yml config
+
