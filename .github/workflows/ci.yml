@@ -216,6 +216,23 @@ jobs:
           fi
           grep -q "FATAL" /tmp/cfg-fail.log
 
+      - name: Smoke test — image resolves Alembic head from an arbitrary working directory
+        # Readiness reports schema_revision.status "unknown" whenever the build
+        # can't read its own Alembic head (#208). That head resolution must not
+        # depend on the process's cwd matching the repo checkout layout — the
+        # deployed image only ships backend/websearch_service, and Railway does
+        # not guarantee any particular launch directory. Run from /tmp (neither
+        # /app nor the repo root) to prove it's launch-directory-independent.
+        run: |
+          docker run --rm -w /tmp ai-financial-advisor-backend:test python -c "
+          import sys
+          sys.path.insert(0, '/app')
+          from app.health_checks import expected_schema_revision
+          head = expected_schema_revision()
+          print('resolved head:', head)
+          assert head == '0037_goal_progress_reconcile', f'unexpected head: {head!r}'
+          "
+
       - name: Smoke test — container serves /health/live with valid config
         run: |
           docker run -d --rm --name backend-smoke -p 18000:8000 \
