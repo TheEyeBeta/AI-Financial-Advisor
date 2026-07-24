@@ -104,11 +104,11 @@ async def test_schema_revision_check_failure_never_leaks_connection_details():
     the DSN, host, or credentials (Gate 1: no secrets in health output)."""
     from app import health_checks
 
-    secret_dsn = "postgresql://svc_user:sup3r-secret-pw@db.internal.example:5432/prod"
+    connection_details = "postgresql://svc_user:test-only-marker@db.internal.example:5432/prod"
 
     class _Client:
         def schema(self, *_a):
-            raise ConnectionError(f"could not connect to {secret_dsn}")
+            raise ConnectionError(f"could not connect to {connection_details}")
 
     with patch("app.services.supabase_client.supabase_client", _Client()):
         result = await health_checks._check_schema_revision(timeout=2)
@@ -116,7 +116,7 @@ async def test_schema_revision_check_failure_never_leaks_connection_details():
     assert result["status"] == "unknown"
     assert result["detail"] == "ConnectionError"
     serialized = str(result)
-    assert "secret" not in serialized
+    assert "test-only-marker" not in serialized
     assert "svc_user" not in serialized
     assert "db.internal.example" not in serialized
 
