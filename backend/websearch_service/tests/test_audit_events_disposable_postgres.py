@@ -9,9 +9,10 @@ Supabase project credentials are configured, which is unrelated to this
 file's disposable local Postgres.
 
 Opt-in only: set ``AUDIT_INTEGRATION_DATABASE_URL`` to a disposable Postgres
-instance that already has migrations applied through ``0036_core_audit_events``
-(``alembic -c alembic.ini upgrade head`` from this directory, with
-``ALEMBIC_DATABASE_URL`` pointed at the same database). Skipped otherwise —
+instance that already has migrations applied through at least
+``0039_audit_digest_schema_fix`` (``alembic -c alembic.ini upgrade head``
+from this directory, with ``ALEMBIC_DATABASE_URL`` pointed at the same
+database). Skipped otherwise —
 this must never run against a shared or production database.
 
 Tests are self-contained (unique ``action`` values, filtered by id) rather

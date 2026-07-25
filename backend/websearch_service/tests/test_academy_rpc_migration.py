@@ -279,7 +279,12 @@ class TestUpgradeFromPreviousHead:
         assert first_upgrade.returncode == 0, first_upgrade.stderr
 
         current = self._run_alembic("current")
-        assert "0038_academy_rpc_authz" in current.stdout
+        # Head moved forward when 0039_audit_digest_schema_fix was added —
+        # this test's job is to prove upgrade-from-0037 lands cleanly, not to
+        # pin the exact head, so it tracks the alembic history's own current
+        # head (see the identical fix in test_goal_progress_migration.py).
+        heads = self._run_alembic("heads")
+        assert heads.stdout.split()[0] in current.stdout
 
         # Idempotency: re-running upgrade head from head must be a safe no-op
         # — no duplicate function overloads, no duplicate/changed grants.
