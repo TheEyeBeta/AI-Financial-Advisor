@@ -268,6 +268,7 @@ class TestUpgradeFromPreviousHead:
             env={**os.environ, "ALEMBIC_DATABASE_URL": _RAW_URL},
             capture_output=True,
             text=True,
+            timeout=120,
         )
 
     def test_upgrade_from_previous_head_and_idempotent_reapply(self, db):
