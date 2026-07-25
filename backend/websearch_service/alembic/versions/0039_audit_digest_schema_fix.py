@@ -19,10 +19,14 @@ to wherever pgcrypto is actually installed, resolved dynamically via
 `pg_extension`/`pg_namespace` rather than hard-coded — so this migration
 upgrades cleanly whether pgcrypto lives in `extensions` (Supabase's default)
 or `public` (plain local Postgres). The function's `search_path` is
-tightened to `core, pg_temp` only; it must not rely on an ambient/widened
-search_path to find `digest()` ever again — pg_catalog (encode, to_char) is
-always implicitly searched regardless of search_path, so nothing else in the
-function body needs a schema in search_path.
+tightened to `''` (empty): it must not rely on an ambient/widened
+search_path to find `digest()` ever again, and every other reference in the
+body is already schema-qualified (`core.audit_events_chain_head`) or a
+pg_catalog builtin (`encode`, `to_char`, `coalesce`), which is always
+implicitly searched regardless of search_path — so nothing in the function
+body needs a schema in search_path at all. An empty search_path is the
+standard hardening for SECURITY DEFINER functions (closes the
+search_path-hijack class of attack outright, not just for digest()).
 
 Everything else from 0036 is left untouched: the table, its indexes, the
 chain-head table, the reject-mutation triggers, RLS policies, and grants are
@@ -103,12 +107,13 @@ def upgrade() -> None:
         RETURNS trigger
         LANGUAGE plpgsql
         SECURITY DEFINER
-        -- Hardened on purpose: only the schemas this function actually needs.
-        -- pgcrypto's digest() is called fully schema-qualified below instead
-        -- of relying on it being reachable via search_path (see 0039
+        -- Hardened on purpose: every reference below is already
+        -- schema-qualified or a pg_catalog builtin (always implicitly
+        -- searched), so nothing needs a schema in search_path — empty is
+        -- the standard hardening for SECURITY DEFINER functions (see 0039
         -- docstring for why the previous `core, public, pg_temp` path broke
         -- on Supabase, where pgcrypto lives in `extensions`).
-        SET search_path = core, pg_temp
+        SET search_path = ''
         AS $$
         DECLARE
             prior_hash TEXT;

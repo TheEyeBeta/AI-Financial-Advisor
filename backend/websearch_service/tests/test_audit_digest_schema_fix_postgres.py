@@ -32,10 +32,11 @@ import pytest
 
 _ADMIN_DSN = os.getenv("AUDIT_SCHEMA_FIX_ADMIN_DSN", "")
 
-pytestmark = pytest.mark.skipif(
-    not _ADMIN_DSN,
-    reason="AUDIT_SCHEMA_FIX_ADMIN_DSN not set — disposable Postgres schema-fix tests are opt-in",
-)
+# Scoped to the `fresh_database` fixture (below), not a module-level
+# pytestmark: the four _resolve_pgcrypto_schema unit tests below need no
+# database and must always run, even when AUDIT_SCHEMA_FIX_ADMIN_DSN is
+# unset — which is the normal case in the required backend test run.
+_SKIP_REASON = "AUDIT_SCHEMA_FIX_ADMIN_DSN not set — disposable Postgres schema-fix tests are opt-in"
 
 BACKEND_DIR = pathlib.Path(__file__).resolve().parents[1]
 _MIGRATION_PATH = (
@@ -107,6 +108,8 @@ def fresh_database():
     """Creates a throwaway database on the admin server, yields its DSN plus
     a superuser DSN scoped to it (for setup like pre-installing pgcrypto),
     and drops it afterwards."""
+    if not _ADMIN_DSN:
+        pytest.skip(_SKIP_REASON)
     psycopg = pytest.importorskip("psycopg")
 
     db_name = f"audit_digest_fix_{uuid.uuid4().hex[:12]}"
@@ -244,6 +247,30 @@ def test_function_definition_is_schema_qualified(fresh_database, pre_install_ext
     assert f"{schema}.digest(" in definition
     # The bare, unqualified call from 0036 must be gone.
     assert "\n                digest(" not in definition
+    # Hardened: empty search_path, not core/public/pg_temp (CodeRabbit
+    # nitpick — every reference is already schema-qualified or pg_catalog).
+    assert "SET search_path TO ''" in definition
+
+
+@pytest.mark.parametrize("pre_install_extensions_schema", [False, True], ids=["public", "extensions"])
+def test_downgrade_restores_pre_0039_definition(fresh_database, pre_install_extensions_schema):
+    """Reversibility, per the migration's own docstring: downgrading from
+    head must restore the exact 0036 definition — unqualified digest(),
+    search_path `core, public, pg_temp` — regardless of where pgcrypto is
+    installed (downgrade() doesn't do schema detection; it's a fixed
+    rollback to the old text)."""
+    db_dsn, alembic_dsn = fresh_database
+    if pre_install_extensions_schema:
+        _install_pgcrypto_in_extensions_schema(db_dsn)
+
+    _run_alembic(alembic_dsn, "upgrade", "head")
+    _run_alembic(alembic_dsn, "downgrade", "0038_academy_rpc_authz")
+
+    definition = _function_definition(db_dsn)
+    assert "SET search_path TO 'core', 'public', 'pg_temp'" in definition
+    assert "digest(" in definition
+    assert "extensions.digest(" not in definition
+    assert "public.digest(" not in definition
 
 
 def test_audit_insert_succeeds_with_pgcrypto_in_extensions(fresh_database):
