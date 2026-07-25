@@ -48,7 +48,7 @@ def test_expected_schema_revision_matches_alembic_head():
     health_checks._expected_revision_cache = None
     revision = health_checks.expected_schema_revision()
     assert revision, "the build must be able to read its own alembic head"
-    assert revision == "0037_goal_progress_reconcile"
+    assert revision == "0038_academy_rpc_authz"
 
 
 def test_expected_schema_revision_is_independent_of_cwd(monkeypatch, tmp_path):
@@ -67,7 +67,7 @@ def test_expected_schema_revision_is_independent_of_cwd(monkeypatch, tmp_path):
         revision = health_checks.expected_schema_revision()
     finally:
         health_checks._expected_revision_cache = None
-    assert revision == "0037_goal_progress_reconcile"
+    assert revision == "0038_academy_rpc_authz"
 
 
 @pytest.mark.asyncio

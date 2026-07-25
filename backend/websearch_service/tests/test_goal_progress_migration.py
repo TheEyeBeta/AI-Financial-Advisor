@@ -183,7 +183,11 @@ class TestUpgradeFromPreviousHead:
         assert first_upgrade.returncode == 0, first_upgrade.stderr
 
         current = self._run_alembic("current")
-        assert "0037_goal_progress_reconcile" in current.stdout
+        # Head moved forward when 0038_academy_rpc_authz was added — this test's
+        # job is to prove upgrade-from-0036 lands cleanly, not to pin the exact
+        # head, so it tracks the alembic history's own current head.
+        heads = self._run_alembic("heads")
+        assert heads.stdout.split()[0] in current.stdout
 
         # Idempotency: re-running upgrade head from head must be a safe no-op.
         second_upgrade = self._run_alembic("upgrade", "head")
