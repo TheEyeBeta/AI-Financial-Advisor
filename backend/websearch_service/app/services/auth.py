@@ -439,6 +439,7 @@ def _verify_supabase_jwt(
     *,
     required_claims: Sequence[str],
     allow_rest_fallback: bool,
+    required_role: Optional[str] = None,
 ) -> dict:
     """
     Verify a Supabase JWT using the correct strategy for its declared algorithm.
@@ -448,7 +449,42 @@ def _verify_supabase_jwt(
     - User tokens may fall back to Supabase REST validation when a symmetric
       secret is not configured locally or when JWKS retrieval is temporarily
       unavailable.
+
+    SEC-B2-05: when ``required_role`` is set, the verified payload's ``role``
+    claim must equal it EXACTLY (no case-folding) or the token is rejected
+    with 401. This is what stops an otherwise-validly-signed anon/service_role/
+    unknown-role token from reaching an endpoint that expects an authenticated
+    user — presence of a ``role`` claim was already enforced via
+    ``required_claims``, but its VALUE was never checked. The REST-fallback
+    path (``_verify_jwt_via_supabase_rest``) doesn't return a ``role`` claim,
+    so when ``required_role`` is set and verification falls back to it, the
+    request is rejected rather than trusted blindly — fail closed on
+    ambiguity rather than silently skip the role check.
     """
+    payload = _dispatch_jwt_verification(
+        token,
+        required_claims=required_claims,
+        allow_rest_fallback=allow_rest_fallback,
+    )
+    if required_role is not None and payload.get("role") != required_role:
+        logger.warning(
+            "Rejected JWT: role=%r does not match required role %r.",
+            payload.get("role"), required_role,
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired authentication token.",
+        )
+    return payload
+
+
+def _dispatch_jwt_verification(
+    token: str,
+    *,
+    required_claims: Sequence[str],
+    allow_rest_fallback: bool,
+) -> dict:
+    """Route JWT verification to the correct strategy for its declared algorithm."""
     algorithm = _jwt_algorithm(token)
     normalized_algorithm = algorithm.upper()
     hs_allowed = _allowed_hs_algorithms()
@@ -546,6 +582,7 @@ async def require_auth(request: Request) -> AuthenticatedUser:
         token,
         required_claims=("sub", "exp", "iat", "role"),
         allow_rest_fallback=True,
+        required_role="authenticated",
     )
     auth_id = payload.get("sub")
     email = payload.get("email")
@@ -628,6 +665,7 @@ async def require_websocket_auth(
             token,
             required_claims=("sub", "exp", "iat", "role"),
             allow_rest_fallback=True,
+            required_role="authenticated",
         )
         auth_id = payload.get("sub")
         if not auth_id:
