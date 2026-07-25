@@ -1,12 +1,12 @@
 {
   "schema_version": "1.0",
-  "run_id": "GATE1-20260724T123036Z",
-  "work_package": "GATE1",
+  "run_id": "WP-GATE1-20260725T012415Z",
+  "work_package": "WP-GATE1",
   "environment": "staging",
   "app_version": "0.1.0",
   "commit_sha": "12551ea3823a080a0b088818da7aff7e1411c44b",
-  "started_at": "2026-07-24T12:30:36Z",
-  "finished_at": "2026-07-24T12:30:36Z",
+  "started_at": "2026-07-25T01:24:15Z",
+  "finished_at": "2026-07-25T01:24:15Z",
   "command": "curl https://ai-financial-advisor-backend-main-staging.up.railway.app/health/ready ; curl .../health/live",
   "scenario": "Final Gate 1 verification - main-staging deployment identity and schema-revision attestation",
   "preconditions": [
@@ -48,8 +48,9 @@
   ],
   "remaining_risks": [
     "search_api readiness component is down (optional dependency, HTTP 432 from provider) - does not affect Gate 1 pass/fail but worth a follow-up ticket",
-    "Frontend (Vercel) release-SHA parity was not independently cryptographically verified in this session - CLI 'vercel inspect' did not surface a commit SHA field; circumstantial evidence (production deployment created seconds after the same main merge, aliased to git-main which auto-deploys on push to main) supports parity but was not directly confirmed"
+    "Frontend (Vercel) release-SHA parity was not independently cryptographically verified in this session - CLI 'vercel inspect' did not surface a commit SHA field; circumstantial evidence (production deployment created seconds after the same main merge, aliased to git-main which auto-deploys on push to main) supports parity but was not directly confirmed",
+    "Same merge commit auto-deployed to production and initially FAILED its healthcheck (schema_revision mismatch: production DB was on 0036, code expected 0037) because production and staging are separate Supabase projects and only staging's DB had been migrated. Railway auto-rolled-back safely (zero downtime). Remediated out-of-band: migration 0037 applied directly to production (project nsngzzbgankkxxxsdacb) and production redeployed successfully (deployment 17a1b426, commit 12551ea) - confirmed /health/ready ok afterward. Process gap flagged: production auto-deploys on every merge to main with no gate requiring the corresponding migration to have run first."
   ],
-  "reviewer_notes": "Root cause of the original schema_revision:unknown failure was two cwd-dependent Alembic path resolutions (migration_helpers.py's eager REPO_ROOT, and alembic.ini's relative script_location/prepend_sys_path), not missing files in the image - fixed via lazy resolution and Alembic's %(here)s token respectively. The release:production misreport traced to the main-staging Railway environment having been created as a duplicate of production on 2026-07-18 and inheriting its ENVIRONMENT variable verbatim; corrected directly via Railway CLI, along with two unsafe in-memory-fallback flags that were also inherited.",
-  "content_sha256": "db181d7fdd942c7efcb6e63bf765103563614509dae67936fbf60aaf2691ea9b"
+  "reviewer_notes": "Root cause of the original schema_revision:unknown failure was two cwd-dependent Alembic path resolutions (migration_helpers.py's eager REPO_ROOT, and alembic.ini's relative script_location/prepend_sys_path), not missing files in the image - fixed via lazy resolution and Alembic's %(here)s token respectively. The release:production misreport traced to the main-staging Railway environment having been created as a duplicate of production on 2026-07-18 and inheriting its ENVIRONMENT variable verbatim; corrected directly via Railway CLI, along with two unsafe in-memory-fallback flags that were also inherited. Filename corrected from GATE1-... to WP-GATE1-... per Codex review on PR #265 so this record is picked up by the tamper-evidence digest verification CI job, which only globs docs/evidence/readiness/WP-*.json.",
+  "content_sha256": "f7981b0eccd3b732819db8c6eb8355eae290d6b33836df4cf41905d3dcd2f920"
 }
