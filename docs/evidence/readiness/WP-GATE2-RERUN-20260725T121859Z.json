@@ -4,9 +4,9 @@
   "work_package": "WP-GATE2-RERUN",
   "environment": "staging",
   "app_version": "0.1.0",
-  "commit_sha": "e89e6c26bc31d28c327ca148c4b84c186c4bfbda",
-  "started_at": "2026-07-25T12:18:59Z",
-  "finished_at": "2026-07-25T12:18:59Z",
+  "commit_sha": "590b8d826a574c0d9171a35b4a87d4dbad97e385",
+  "started_at": "2026-07-25T11:35:00Z",
+  "finished_at": "2026-07-25T12:20:00Z",
   "command": "gh pr merge 266 --merge (by operator, after CI green + approval); alembic -c alembic.ini upgrade head against staging ALEMBIC_DATABASE_URL (operator-supplied, session-scoped, never logged); railway redeploy --service ai-financial-advisor-backend --environment main-staging; curl https://ai-financial-advisor-backend-main-staging.up.railway.app/health/ready; PyJWT-crafted valid-signature role=anon/service_role tokens vs /api/v1/ai/context and /api/admin/system-health; curl -H 'apikey: <anon>' -X POST .../rest/v1/rpc/get_personalized_learning_feed (unauthenticated and cross-user); POST /api/admin/users/{id}/suspend|delete-request as real admin token",
   "scenario": "Gate 2 targeted rerun after closing AUTH-HIGH-01 (require_auth accepted role=anon) and AUTH-HIGH-02 (unauthenticated Academy RPC IDOR), both identified and live-confirmed in WP-GATE2 / WP-GATE2-CREDENTIALED. Fix: PR #266 (readiness/gate2-auth-high-fixes), merged as commit 590b8d826a574c0d9171a35b4a87d4dbad97e385, deployed to main-staging, migration 0038_academy_rpc_authz applied to the staging database.",
   "preconditions": [
@@ -48,9 +48,12 @@
   },
   "failure_details": "Both HIGH findings from WP-GATE2 are now closed and live-verified on staging: AUTH-HIGH-01 (require_auth accepting role=anon) and AUTH-HIGH-02 (unauthenticated Academy RPC IDOR). Gate 2 nonetheless remains FAIL because two of its explicit \u00a712/acceptance-criteria items are still not met: (1) account suspend/delete lifecycle cannot be executed end-to-end on staging due to a newly-discovered, unrelated database defect (pgcrypto digest() unresolvable in the audit-chain trigger's search_path) that was masked by the AUDIT_PSEUDONYM_PEPPER gap until that gap was fixed; (2) Google authentication in staging was not executed at all \u2014 it requires a real interactive browser+Google account OAuth flow that this session has no tooling to perform. Per the task's own instruction ('Do not start Gate 3 unless Gate 2 is PASS'), and given lifecycle + Google-auth are both explicit acceptance criteria, Gate 2 decision is FAIL, though materially narrower in scope than WP-GATE2's original FAIL \u2014 no unresolved HIGH/CRITICAL authorization finding remains.",
   "artifacts": [
-    "docs/evidence/readiness/WP-GATE2-20260725T015806Z.{json,md} (superseded FAIL, referenced not overwritten)",
-    "docs/evidence/readiness/WP-GATE2-CREDENTIALED-20260725T022859Z.{json,md} (superseded FAIL, referenced not overwritten)",
-    "docs/evidence/readiness/ (this record)",
+    "docs/evidence/readiness/WP-GATE2-20260725T015806Z.json (superseded FAIL, referenced not overwritten)",
+    "docs/evidence/readiness/WP-GATE2-20260725T015806Z.md (superseded FAIL, referenced not overwritten)",
+    "docs/evidence/readiness/WP-GATE2-CREDENTIALED-20260725T022859Z.json (superseded FAIL, referenced not overwritten)",
+    "docs/evidence/readiness/WP-GATE2-CREDENTIALED-20260725T022859Z.md (superseded FAIL, referenced not overwritten)",
+    "docs/evidence/readiness/WP-GATE2-RERUN-20260725T121859Z.json (this record)",
+    "docs/evidence/readiness/WP-GATE2-RERUN-20260725T121859Z.md (this record)",
     "PR https://github.com/TheEyeBeta/AI-Financial-Advisor/pull/266",
     "backend/websearch_service/alembic/versions/0038_academy_rpc_auth_uid_hardening.py"
   ],
@@ -60,6 +63,6 @@
     "The revocation-timing question from WP-GATE2-CREDENTIALED (does a pre-issued, unexpired access JWT keep working after a user is suspended?) remains formally unverified live, since suspend itself still cannot complete \u2014 will be answered once the pgcrypto blocker is fixed.",
     "The first deploy attempt's ~40-minute window (11:35-12:14 UTC) where staging briefly reverted to serving the pre-fix vulnerable build (after the merge, before the corrective redeploy) should be noted in any incident/change log for this environment, even though the rollback itself behaved safely (Railway healthcheck correctly refused to promote the broken deploy)."
   ],
-  "reviewer_notes": "The deploy-order gap that caused the first failed attempt is a process lesson: 'merge triggers Railway auto-deploy' does NOT imply 'migrations run automatically' \u2014 this is documented in docs/readiness/STAGING_HANDOFF.md \u00a73.4 ('Database: alembic upgrade head against the staging DB' as a distinct step before backend deploy) but was not followed before merging in this session. Recommend making this a hard pre-merge checklist item for any PR that ships an Alembic migration against main-staging. userA/userB/admin test accounts from WP-GATE2-CREDENTIALED were reused (passwords reset via Admin API, never persisted) rather than recreated; the lifecycle-test throwaway account was hard-deleted via Admin API as cleanup since the graceful in-app delete path could not complete.",
-  "content_sha256": "8c83a9eececef1462669437528425e978cae7fdbc3596fb1e532f853f07b6ed0"
+  "reviewer_notes": "The deploy-order gap that caused the first failed attempt is a process lesson: 'merge triggers Railway auto-deploy' does NOT imply 'migrations run automatically' \u2014 this is documented in docs/readiness/STAGING_HANDOFF.md \u00a73.4 ('Database: alembic upgrade head against the staging DB' as a distinct step before backend deploy) but was not followed before merging in this session. Recommend making this a hard pre-merge checklist item for any PR that ships an Alembic migration against main-staging. userA/userB/admin test accounts from WP-GATE2-CREDENTIALED were reused (passwords reset via Admin API, never persisted) rather than recreated; the lifecycle-test throwaway account was hard-deleted via Admin API as cleanup since the graceful in-app delete path could not complete. CodeRabbit review on PR #267 flagged three accuracy issues, fixed here: (1) commit_sha now explicitly pins the DEPLOYED/tested staging commit (590b8d8...), not this evidence file's own authoring commit, which the auto-generated default would have used and which is a different, unrelated commit; (2) started_at is now the actual beginning of the corrective work window (11:35Z, the first \u2014 failed \u2014 deploy attempt) rather than the instant this record was written, so the execution window isn't internally impossible against the 11:35Z timestamp already cited in preconditions; (3) artifacts now lists this record's exact WP-GATE2-RERUN-20260725T121859Z.json/.md paths instead of a directory placeholder.",
+  "content_sha256": "e591ce028b7747734620caf9a4497293b2dcbf8410e8631a477e490f93622543"
 }
