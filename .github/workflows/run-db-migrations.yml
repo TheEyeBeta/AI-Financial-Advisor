@@ -8,11 +8,14 @@ name: Run DB Migrations
 # established in this repo):
 #   - workflow_dispatch only, with an explicit environment choice — never
 #     inferred from a branch or automatically triggered.
-#   - `environment: ${{ inputs.target_environment }}` binds the job to the
-#     matching GitHub Environment (staging or production): any required
-#     reviewers/wait-timer configured on that Environment (e.g. the
-#     "production" approval gate documented in deployment/DEPLOYMENT.md) is
-#     enforced before the job starts, exactly like promote-to-prod.yml.
+#   - The dispatch input ("staging"/"production") is mapped to the actual
+#     GitHub Environment name below — this repo's staging Environment is
+#     named "main-staging", not "staging", so the mapping keeps the
+#     operator-facing dropdown readable while binding to the real
+#     Environment. Any required reviewers/wait-timer configured on that
+#     Environment (e.g. the "production" approval gate documented in
+#     deployment/DEPLOYMENT.md) is enforced before the job starts, exactly
+#     like promote-to-prod.yml.
 #   - The database URL secret is selected via an explicit conditional
 #     (same pattern as release-verification.yml's URL selection), not a
 #     shared/implicit name — "staging" can only ever resolve
@@ -25,8 +28,8 @@ name: Run DB Migrations
 #     only ever calls `alembic upgrade head`, never applies raw sql/*.sql.
 #
 # Required secrets (configure on the matching GitHub Environment):
-#   staging Environment:    STAGING_DATABASE_URL
-#   production Environment: PRODUCTION_DATABASE_URL
+#   main-staging Environment: STAGING_DATABASE_URL
+#   production Environment:   PRODUCTION_DATABASE_URL
 # Both must be a direct Postgres connection string (not the Supabase REST
 # URL) with migration privileges — see alembic/env.py's
 # ALEMBIC_DATABASE_URL / DATABASE_URL / SUPABASE_DB_URL resolution order.
@@ -51,7 +54,8 @@ jobs:
     name: alembic upgrade head (${{ inputs.target_environment }})
     runs-on: ubuntu-latest
     environment:
-      name: ${{ inputs.target_environment }}
+      # GitHub Environment names: staging is "main-staging" in this repo.
+      name: ${{ inputs.target_environment == 'production' && 'production' || 'main-staging' }}
     permissions:
       contents: read
 

@@ -32,7 +32,7 @@ jobs:
     # ALLOW_SYNTHETIC_SEED below) — misconfiguring the environment itself
     # cannot be bypassed from this workflow file.
     environment:
-      name: staging
+      name: main-staging
     permissions:
       contents: read
 
