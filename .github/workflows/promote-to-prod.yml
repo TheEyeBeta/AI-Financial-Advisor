@@ -10,6 +10,7 @@ concurrency:
 permissions:
   contents: write
   pull-requests: write
+  actions: read
 
 jobs:
   promote:
@@ -23,6 +24,60 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+
+      - name: Require a passing Release Verification run for staging HEAD
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            // Gate: promotion must not proceed unless "Release Verification"
+            // (release-verification.yml) has actually passed for the exact
+            // commit currently on `staging`. Previously the only check here
+            // was "staging has new commits ahead of main" — an operator
+            // could run this workflow and merge the resulting PR even if
+            // staging's release verification had failed or never ran, since
+            // nothing in this workflow queried it. release-verification.yml
+            // already auto-runs after every "Deploy Staging" completion, so
+            // in the normal flow a matching run always exists by the time
+            // someone promotes.
+            const { owner, repo } = context.repo;
+
+            const { data: branch } = await github.rest.repos.getBranch({
+              owner,
+              repo,
+              branch: 'staging',
+            });
+            const stagingSha = branch.commit.sha;
+
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner,
+              repo,
+              workflow_id: 'release-verification.yml',
+              branch: 'staging',
+              status: 'completed',
+              per_page: 20,
+            });
+
+            const matching = runs.workflow_runs.find((run) => run.head_sha === stagingSha);
+
+            if (!matching) {
+              core.setFailed(
+                `No completed Release Verification run found for staging HEAD ${stagingSha}. ` +
+                `Run "Release Verification" against staging (or wait for it to auto-run after ` +
+                `"Deploy Staging") before promoting.`,
+              );
+              return;
+            }
+
+            if (matching.conclusion !== 'success') {
+              core.setFailed(
+                `Release Verification for staging HEAD ${stagingSha} did not pass ` +
+                `(conclusion: ${matching.conclusion}). See ${matching.html_url}. Fix and re-verify ` +
+                `before promoting.`,
+              );
+              return;
+            }
+
+            core.info(`Release Verification passed for staging HEAD ${stagingSha}: ${matching.html_url}`);
 
       - name: Create or update promotion PR
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7

@@ -63,6 +63,8 @@ from typing import Any, Optional
 
 import numpy as np
 
+from . import scheduler_lock
+from .admin_jobs import JOB_TYPE_RANKING
 from .supabase_client import supabase_client
 
 logger = logging.getLogger(__name__)
@@ -721,8 +723,15 @@ async def run_ranking_cycle() -> dict:
         return {"skipped": True}
 
     _cycle_running = True
-    cycle_start = datetime.now(timezone.utc)
     try:
-        return await asyncio.to_thread(_run_ranking_cycle_sync, cycle_start)
+        if not await scheduler_lock.try_acquire(JOB_TYPE_RANKING):
+            logger.info("Ranking cycle: another replica holds the cluster lock — skipping")
+            return {"skipped": True}
+
+        cycle_start = datetime.now(timezone.utc)
+        try:
+            return await asyncio.to_thread(_run_ranking_cycle_sync, cycle_start)
+        finally:
+            await scheduler_lock.release(JOB_TYPE_RANKING)
     finally:
         _cycle_running = False
