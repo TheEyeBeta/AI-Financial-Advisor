@@ -51,6 +51,7 @@ def get_app_settings() -> AppSettings:
         environment=environment,
         app_version=(
             (os.getenv("APP_VERSION") or "").strip()
+            or (os.getenv("GIT_SHA") or "").strip()
             or (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "").strip()
             or "0.1.0"
         ),
