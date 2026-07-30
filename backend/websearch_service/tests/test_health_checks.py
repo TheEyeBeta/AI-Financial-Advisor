@@ -48,7 +48,7 @@ def test_expected_schema_revision_matches_alembic_head():
     health_checks._expected_revision_cache = None
     revision = health_checks.expected_schema_revision()
     assert revision, "the build must be able to read its own alembic head"
-    assert revision == "0044_scheduler_locks"
+    assert revision == "0045_scheduler_lock_renew"
 
 
 def test_expected_schema_revision_is_independent_of_cwd(monkeypatch, tmp_path):
@@ -67,7 +67,7 @@ def test_expected_schema_revision_is_independent_of_cwd(monkeypatch, tmp_path):
         revision = health_checks.expected_schema_revision()
     finally:
         health_checks._expected_revision_cache = None
-    assert revision == "0044_scheduler_locks"
+    assert revision == "0045_scheduler_lock_renew"
 
 
 @pytest.mark.asyncio

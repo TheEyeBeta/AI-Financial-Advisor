@@ -730,7 +730,8 @@ async def run_ranking_cycle() -> dict:
 
         cycle_start = datetime.now(timezone.utc)
         try:
-            return await asyncio.to_thread(_run_ranking_cycle_sync, cycle_start)
+            async with scheduler_lock.heartbeat(JOB_TYPE_RANKING):
+                return await asyncio.to_thread(_run_ranking_cycle_sync, cycle_start)
         finally:
             await scheduler_lock.release(JOB_TYPE_RANKING)
     finally:

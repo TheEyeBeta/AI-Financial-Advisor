@@ -5,7 +5,41 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 import httpx
 from app.routes import ai_proxy
+from app.services.ai_budget_guard import AIBudgetDenied
 from app.services.rate_limit import rate_limiter
+
+
+@pytest.mark.asyncio
+async def test_classify_query_skips_provider_call_when_budget_denied():
+    """The classifier call is itself billed spend ahead of the turn's atomic
+    reserve() (#293 review) — a budget denial must short-circuit before any
+    OpenAI call, not silently make an unaccounted-for call."""
+    denial = AIBudgetDenied("hard_stop", "hard_stop", 60, "budget exhausted")
+
+    with patch.object(ai_proxy.ai_budget_guard, "reserve", side_effect=denial), \
+         patch.object(ai_proxy, "_call_openai_responses", new=AsyncMock()) as mock_call:
+        result = await ai_proxy._classify_query("What should I invest in?")
+
+    mock_call.assert_not_called()
+    assert result["complexity"] == "medium"
+
+
+@pytest.mark.asyncio
+async def test_classify_query_reconciles_and_releases_reservation_on_success():
+    reservation = MagicMock()
+    fake_response = {
+        "usage": {"input_tokens": 120, "output_tokens": 15},
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": '{"complexity": "low"}'}]}],
+    }
+
+    with patch.object(ai_proxy.ai_budget_guard, "reserve", return_value=reservation), \
+         patch.object(ai_proxy.ai_budget_guard, "reconcile") as mock_reconcile, \
+         patch.object(ai_proxy.ai_budget_guard, "release") as mock_release, \
+         patch.object(ai_proxy, "_call_openai_responses", new=AsyncMock(return_value=fake_response)):
+        await ai_proxy._classify_query("What should I invest in?")
+
+    mock_reconcile.assert_called_once_with(reservation, actual_input_tokens=120, actual_output_tokens=15)
+    mock_release.assert_called_once_with(reservation)
 
 
 def test_build_openai_chat_stream_payload_disables_parallel_tool_calls():

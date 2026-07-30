@@ -62,6 +62,7 @@ from .scheduler_config import (
 )
 from .services.auth import validate_auth_configuration
 from .services.admin_job_worker import run_admin_job_worker_loop
+from .services.audit import validate_audit_configuration
 from .services.rate_limit import validate_rate_limit_configuration
 from .services.ai_budget_guard import validate_ai_budget_configuration
 
@@ -161,6 +162,7 @@ def create_app() -> FastAPI:
     settings = get_app_settings()
     validate_app_settings(settings)
     validate_auth_configuration()
+    validate_audit_configuration()
     validate_rate_limit_configuration()
     validate_ai_budget_configuration()
     # Stricter outer gate: fails fast in staging/production on unsafe config the

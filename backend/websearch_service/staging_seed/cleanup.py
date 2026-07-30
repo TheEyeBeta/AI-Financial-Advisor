@@ -39,13 +39,22 @@ def run_cleanup(config: SeedConfig) -> dict[str, int]:
         user_ids = [uid for uid, _ in users]
 
         if user_ids:
-            for schema, table in (("academy", "user_lesson_progress"), ("academy", "profiles")):
+            # Ownership column differs per table (see alembic/versions/
+            # 0040_academy_schema_rls.py): academy.profiles has no user_id
+            # column at all — its id IS the owning core.users.id — while
+            # user_lesson_progress is owned via user_id. A single predicate
+            # referencing both columns unconditionally raises UndefinedColumn
+            # on the profiles iteration and rolls back the whole cleanup.
+            for schema, table, owner_column in (
+                ("academy", "user_lesson_progress", "user_id"),
+                ("academy", "profiles", "id"),
+            ):
                 if not table_exists(conn, schema, table):
                     continue
                 with conn.cursor() as cur:
                     cur.execute(
-                        f'DELETE FROM "{schema}"."{table}" WHERE user_id = ANY(%s) OR id = ANY(%s)',
-                        (user_ids, user_ids),
+                        f'DELETE FROM "{schema}"."{table}" WHERE "{owner_column}" = ANY(%s)',
+                        (user_ids,),
                     )
                     removed["academy_rows"] += cur.rowcount
 

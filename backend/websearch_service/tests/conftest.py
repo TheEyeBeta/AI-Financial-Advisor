@@ -114,6 +114,7 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
     monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "test-anon-key")
+    monkeypatch.setenv("AUDIT_PSEUDONYM_PEPPER", "test-only-audit-pepper-value")
     monkeypatch.delenv("VITE_SUPABASE_URL", raising=False)
     monkeypatch.delenv("VITE_SUPABASE_ANON_KEY", raising=False)
     monkeypatch.delenv("VITE_SUPABASE_SERVICE_ROLE_KEY", raising=False)

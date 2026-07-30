@@ -25,6 +25,7 @@ import httpx
 
 from . import scheduler_lock
 from .admin_jobs import JOB_TYPE_MEMORY_EXTRACTION
+from .ai_budget_guard import AIBudgetDenied, ai_budget_guard
 from .supabase_client import supabase_client
 
 logger = logging.getLogger(__name__)
@@ -287,6 +288,25 @@ async def _call_openai_for_insights(transcript: str) -> list[dict]:
         logger.warning("memory_agent: OPENAI_API_KEY not set — skipping extraction")
         return []
 
+    # Global AI budget guard admission: this is scheduled background work,
+    # not a user-facing request, so essential=False — it must be denied like
+    # any other non-essential call while the circuit breaker is in
+    # hard_stop or Redis is unavailable in fail-closed mode. Previously this
+    # call bypassed the guard entirely (#293 review), so up to 20 calls per
+    # 15-minute cycle never counted against the advertised global limits.
+    estimated_input_tokens = int(len(transcript) / 4 * 1.2) + 150
+    try:
+        reservation = ai_budget_guard.reserve(
+            provider="openai",
+            model=_MEMORY_MODEL,
+            estimated_input_tokens=estimated_input_tokens,
+            estimated_output_tokens=500,
+            essential=False,
+        )
+    except AIBudgetDenied as exc:
+        logger.warning("memory_agent: extraction skipped — AI budget guard denied: %s", exc)
+        return []
+
     payload = {
         "model": _MEMORY_MODEL,
         "messages": [
@@ -313,6 +333,13 @@ async def _call_openai_for_insights(transcript: str) -> list[dict]:
             return []
 
         data = response.json()
+        usage = data.get("usage", {}) or {}
+        ai_budget_guard.reconcile(
+            reservation,
+            actual_input_tokens=usage.get("prompt_tokens", 0) or 0,
+            actual_output_tokens=usage.get("completion_tokens", 0) or 0,
+        )
+
         choices = data.get("choices") or []
         if not choices:
             return []
@@ -353,6 +380,11 @@ async def _call_openai_for_insights(transcript: str) -> list[dict]:
             type(exc).__name__,
         )
         return []
+    finally:
+        # No-op if reconcile() above already ran; ensures the reservation is
+        # always released/refunded on any exit path (timeout, HTTP error,
+        # parse failure, ...) that returns before reconciling.
+        ai_budget_guard.release(reservation)
 
 
 # ── Public async API ───────────────────────────────────────────────────────────
@@ -468,65 +500,66 @@ async def run_memory_extraction_cycle() -> dict[str, Any]:
             }
 
         try:
-            now = datetime.now(timezone.utc)
-            lower_bound = (now - timedelta(hours=24)).isoformat()
-            upper_bound = (now - timedelta(minutes=30)).isoformat()
+            async with scheduler_lock.heartbeat(JOB_TYPE_MEMORY_EXTRACTION):
+                now = datetime.now(timezone.utc)
+                lower_bound = (now - timedelta(hours=24)).isoformat()
+                upper_bound = (now - timedelta(minutes=30)).isoformat()
 
-            # A. Find inactive, unprocessed chats (30 min – 24 h window, limit 20)
-            chats = await asyncio.to_thread(
-                _fetch_unprocessed_chats_sync, lower_bound, upper_bound, 20
-            )
+                # A. Find inactive, unprocessed chats (30 min – 24 h window, limit 20)
+                chats = await asyncio.to_thread(
+                    _fetch_unprocessed_chats_sync, lower_bound, upper_bound, 20
+                )
 
-            if not chats:
-                logger.info("memory_agent: extraction cycle — no unprocessed chats found")
-                return {"chats_processed": 0, "total_insights_extracted": 0, "errors": []}
+                if not chats:
+                    logger.info("memory_agent: extraction cycle — no unprocessed chats found")
+                    return {"chats_processed": 0, "total_insights_extracted": 0, "errors": []}
 
-            logger.info(
-                "memory_agent: extraction cycle — processing %d chat(s)", len(chats)
-            )
+                logger.info(
+                    "memory_agent: extraction cycle — processing %d chat(s)", len(chats)
+                )
 
-            chats_processed = 0
-            total_insights = 0
-            total_failed_upserts = 0
-            errors: list[str] = []
+                chats_processed = 0
+                total_insights = 0
+                total_failed_upserts = 0
+                errors: list[str] = []
 
-            # B. Process each chat; one failure must not stop the cycle
-            for chat in chats:
-                chat_id = chat.get("id", "")
-                user_id = chat.get("user_id", "")
+                # B. Process each chat; one failure must not stop the cycle
+                for chat in chats:
+                    chat_id = chat.get("id", "")
+                    user_id = chat.get("user_id", "")
 
-                if not chat_id or not user_id:
-                    continue
+                    if not chat_id or not user_id:
+                        continue
 
-                try:
-                    result = await extract_insights_from_chat(chat_id, user_id)
-                    chats_processed += 1
-                    total_insights += result.get("insights_extracted", 0)
-                    total_failed_upserts += result.get("failed", 0)
-                except Exception:
-                    errors.append(chat_id)
-                    logger.error(
-                        "memory_agent: extraction cycle — failed for chat_id=%s", chat_id
-                    )
+                    try:
+                        result = await extract_insights_from_chat(chat_id, user_id)
+                        chats_processed += 1
+                        total_insights += result.get("insights_extracted", 0)
+                        total_failed_upserts += result.get("failed", 0)
+                    except Exception:
+                        errors.append(chat_id)
+                        logger.error(
+                            "memory_agent: extraction cycle — failed for chat_id=%s", chat_id
+                        )
 
-                # 1-second sleep between calls to respect OpenAI rate limits
-                await asyncio.sleep(1)
+                    # 1-second sleep between calls to respect OpenAI rate limits
+                    await asyncio.sleep(1)
 
-            logger.info(
-                "memory_agent: extraction cycle complete — chats=%d insights=%d upsert_failures=%d errors=%d",
-                chats_processed,
-                total_insights,
-                total_failed_upserts,
-                len(errors),
-            )
+                logger.info(
+                    "memory_agent: extraction cycle complete — chats=%d insights=%d upsert_failures=%d errors=%d",
+                    chats_processed,
+                    total_insights,
+                    total_failed_upserts,
+                    len(errors),
+                )
 
-            # C. Return summary
-            return {
-                "chats_processed": chats_processed,
-                "total_insights_extracted": total_insights,
-                "total_failed_upserts": total_failed_upserts,
-                "errors": errors,
-            }
+                # C. Return summary
+                return {
+                    "chats_processed": chats_processed,
+                    "total_insights_extracted": total_insights,
+                    "total_failed_upserts": total_failed_upserts,
+                    "errors": errors,
+                }
         finally:
             await scheduler_lock.release(JOB_TYPE_MEMORY_EXTRACTION)
 

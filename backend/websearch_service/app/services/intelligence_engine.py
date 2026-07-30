@@ -603,7 +603,8 @@ async def run_intelligence_cycle() -> dict[str, Any]:
                 "skipped": True,
             }
         try:
-            return await asyncio.to_thread(_run_intelligence_cycle_sync)
+            async with scheduler_lock.heartbeat(JOB_TYPE_INTELLIGENCE):
+                return await asyncio.to_thread(_run_intelligence_cycle_sync)
         finally:
             await scheduler_lock.release(JOB_TYPE_INTELLIGENCE)
     except Exception as exc:

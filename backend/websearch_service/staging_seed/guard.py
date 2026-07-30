@@ -81,10 +81,23 @@ def assert_safe_to_mutate(config: SeedConfig) -> None:
 
     Gates, all of which must pass:
       1. ENVIRONMENT is not "production".
-      2. The Supabase project ref / hostname is not on the production denylist.
-      3. ALLOW_SYNTHETIC_SEED=true was explicitly set.
+      2. A non-empty production denylist is configured.
+      3. The Supabase project ref / hostname is not on the production denylist.
+      4. ALLOW_SYNTHETIC_SEED=true was explicitly set.
     """
     assert_safe_to_inspect(config)
+
+    if not config.production_denylist:
+        # This is the production-refusal guard's own denylist check — an
+        # empty/missing STAGING_SEED_PRODUCTION_DENYLIST must not be treated
+        # as "no hits, proceed": that silently disables gate 3 entirely, and
+        # a workflow that supplies the denylist from an optional secret can
+        # hit this exact state (missing secret) while ENVIRONMENT and
+        # ALLOW_SYNTHETIC_SEED still line up. Fail closed instead.
+        raise SeedGuardError(
+            "Refusing: STAGING_SEED_PRODUCTION_DENYLIST is empty or unset. A "
+            "non-empty denylist is required before any mutating operation."
+        )
 
     if not config.allow_synthetic_seed:
         raise SeedGuardError(

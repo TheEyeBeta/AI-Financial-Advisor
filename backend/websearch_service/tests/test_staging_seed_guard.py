@@ -20,7 +20,10 @@ def make_config(**overrides) -> SeedConfig:
         supabase_url="https://abcdefghijklmnop.supabase.co",
         supabase_service_role_key="fake-service-role-key",
         database_url="postgresql://user:pass@staging-db.example.com:5432/postgres",
-        production_denylist=[],
+        # Non-empty by default so tests that aren't specifically about the
+        # denylist gate exercise the *other* gates — an empty denylist is
+        # itself a refusal reason (see test_refuses_when_denylist_is_empty).
+        production_denylist=["unrelated-placeholder-ref"],
         random_seed=1,
         user_count=200,
     )
@@ -69,6 +72,25 @@ def test_refuses_when_allow_synthetic_seed_flag_is_absent():
     config = make_config(allow_synthetic_seed=False)
     with pytest.raises(SeedGuardError, match="ALLOW_SYNTHETIC_SEED"):
         assert_safe_to_mutate(config)
+
+
+def test_refuses_when_denylist_is_empty():
+    """The production-refusal guard's own denylist gate must fail closed.
+
+    A missing/empty STAGING_SEED_PRODUCTION_DENYLIST (e.g. an unset optional
+    secret) must refuse mutation outright, not silently skip this gate while
+    ENVIRONMENT and ALLOW_SYNTHETIC_SEED still permit the run.
+    """
+    config = make_config(production_denylist=[])
+    with pytest.raises(SeedGuardError, match="STAGING_SEED_PRODUCTION_DENYLIST"):
+        assert_safe_to_mutate(config)
+
+
+def test_inspect_does_not_require_denylist_to_be_non_empty():
+    """Read-only preflight is looser than mutation: an empty denylist alone
+    must not block inspection, only mutation."""
+    config = make_config(production_denylist=[], allow_synthetic_seed=False)
+    assert_safe_to_inspect(config)  # must not raise
 
 
 def test_refuses_when_project_ref_matches_denylist():

@@ -18,6 +18,7 @@ from app.services.audit import (
     _redact,
     audit_log,
     pseudonymize,
+    validate_audit_configuration,
 )
 
 
@@ -171,6 +172,26 @@ def test_pseudonymize_treats_unset_environment_as_non_dev(monkeypatch):
     monkeypatch.delenv("AUDIT_PSEUDONYM_PEPPER", raising=False)
     with pytest.raises(AuditPersistenceError):
         pseudonymize("someone@example.com")
+
+
+def test_validate_audit_configuration_fails_fast_without_pepper_in_production(monkeypatch):
+    """Startup, not the first audit event, must catch a missing pepper."""
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.delenv("AUDIT_PSEUDONYM_PEPPER", raising=False)
+    with pytest.raises(RuntimeError, match="AUDIT_PSEUDONYM_PEPPER"):
+        validate_audit_configuration()
+
+
+def test_validate_audit_configuration_passes_with_pepper_in_production(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    monkeypatch.setenv("AUDIT_PSEUDONYM_PEPPER", "a-real-secret")
+    validate_audit_configuration()
+
+
+def test_validate_audit_configuration_noop_in_dev(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.delenv("AUDIT_PSEUDONYM_PEPPER", raising=False)
+    validate_audit_configuration()
 
 
 @pytest.mark.asyncio

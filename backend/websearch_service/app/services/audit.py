@@ -117,6 +117,24 @@ def _pepper() -> str:
     )
 
 
+def validate_audit_configuration() -> None:
+    """Fail fast at startup, not on the first audit event, when the pepper is absent.
+
+    Without this, a deployment missing AUDIT_PSEUDONYM_PEPPER starts
+    successfully and only fails later: every non-mandatory audit event
+    silently vanishes (caught and logged in :func:`audit_log`) while every
+    mandatory one (destructive admin actions) instead surfaces as a runtime
+    503 on first use. Neither failure mode belongs at request time.
+    """
+    if _is_dev_fallback_environment():
+        return
+    if not (os.getenv(AUDIT_PEPPER_ENV) or "").strip():
+        raise RuntimeError(
+            f"FATAL: {AUDIT_PEPPER_ENV} is required when ENVIRONMENT is not development/test. "
+            "Set it to a long random secret (see backend/websearch_service/.env.example)."
+        )
+
+
 def pseudonymize(value: str | None) -> str | None:
     """One-way HMAC-SHA256 of an identifier (email, auth id, ...).
 
