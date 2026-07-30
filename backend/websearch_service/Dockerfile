@@ -71,5 +71,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD python -c "import os,urllib.request; urllib.request.urlopen(f'http://127.0.0.1:{os.environ.get(\"PORT\", \"8000\")}/health/live', timeout=4)" || exit 1
 
-# Run uvicorn - shell form for proper $PORT expansion
-CMD /bin/sh -c "uvicorn app.main:app --host 0.0.0.0 --port \${PORT:-8000} --workers \${WORKERS:-1} --log-level \${LOG_LEVEL:-info}"
+# Run uvicorn via `exec` so it replaces the shell as PID 1 and receives
+# SIGTERM directly (plain shell-form CMD leaves /bin/sh as PID 1, which
+# does not forward signals, so the container hangs until SIGKILL on stop).
+# JSON-array form here also satisfies buildkit's JSONArgsRecommended check.
+CMD ["/bin/sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers ${WORKERS:-1} --log-level ${LOG_LEVEL:-info}"]
