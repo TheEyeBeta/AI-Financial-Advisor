@@ -8,6 +8,11 @@ name: Run DB Migrations
 # established in this repo):
 #   - workflow_dispatch only, with an explicit environment choice — never
 #     inferred from a branch or automatically triggered.
+#   - Pinned to the `main` ref (job-level `if`): workflow_dispatch lets an
+#     operator pick any branch/tag to run against, but this job must only
+#     ever execute the migrations that are actually on `main` — dispatching
+#     against a feature branch could otherwise apply unreviewed, unmerged
+#     migrations to a real database (CodeRabbit, PR #294).
 #   - The dispatch input ("staging"/"production") is mapped to the actual
 #     GitHub Environment name below — this repo's staging Environment is
 #     named "main-staging", not "staging", so the mapping keeps the
@@ -20,7 +25,10 @@ name: Run DB Migrations
 #     (same pattern as release-verification.yml's URL selection), not a
 #     shared/implicit name — "staging" can only ever resolve
 #     STAGING_DATABASE_URL, "production" can only ever resolve
-#     PRODUCTION_DATABASE_URL.
+#     PRODUCTION_DATABASE_URL — and is validated non-empty before any
+#     Alembic step runs, so a missing/misconfigured secret fails closed
+#     instead of letting Alembic attempt a connection with a blank URL
+#     (CodeRabbit, PR #294).
 #   - concurrency group is per-environment: two migration runs against the
 #     same database can never race, but a staging run and a production run
 #     don't block each other.
@@ -53,9 +61,15 @@ jobs:
   migrate:
     name: alembic upgrade head (${{ inputs.target_environment }})
     runs-on: ubuntu-latest
+    # Only ever run the migrations that are actually on main — see safety
+    # model note above.
+    if: github.ref == 'refs/heads/main'
     environment:
-      # GitHub Environment names: staging is "main-staging" in this repo.
-      name: ${{ inputs.target_environment == 'production' && 'production' || 'main-staging' }}
+      # GitHub Environment names as auto-created by Railway's GitHub
+      # integration: "reliable-ambition / main-staging" and
+      # "reliable-ambition / production" (prefixed with the Railway project
+      # name) — not bare "main-staging" / "production".
+      name: ${{ inputs.target_environment == 'production' && 'reliable-ambition / production' || 'reliable-ambition / main-staging' }}
     permissions:
       contents: read
 
@@ -64,6 +78,19 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           persist-credentials: false
+
+      - name: Resolve and validate database URL
+        # Fails closed: a missing/misconfigured secret must stop the job
+        # before Alembic ever attempts a connection with a blank URL.
+        env:
+          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
+        run: |
+          if [ -z "$ALEMBIC_DATABASE_URL" ]; then
+            echo "No database URL secret configured for target '${{ inputs.target_environment }}' — refusing to run migrations." >&2
+            exit 1
+          fi
+          echo "::add-mask::$ALEMBIC_DATABASE_URL"
+          echo "ALEMBIC_DATABASE_URL=$ALEMBIC_DATABASE_URL" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -76,22 +103,16 @@ jobs:
 
       - name: Record starting revision
         working-directory: backend/websearch_service
-        env:
-          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: |
           echo "Target: ${{ inputs.target_environment }}"
           alembic -c alembic.ini current
 
       - name: alembic upgrade head
         working-directory: backend/websearch_service
-        env:
-          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: alembic -c alembic.ini upgrade head
 
       - name: Confirm resulting revision
         working-directory: backend/websearch_service
-        env:
-          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: alembic -c alembic.ini current
 
       - name: alembic check (informational)
@@ -104,6 +125,4 @@ jobs:
         # runs. This step surfaces its output for visibility without
         # blocking a legitimate upgrade on a pre-existing, unrelated gap.
         continue-on-error: true
-        env:
-          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: alembic -c alembic.ini check

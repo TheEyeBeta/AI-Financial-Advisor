@@ -205,7 +205,7 @@ The staging branch is `staging`.
 
 ### CODEOWNERS and Approval
 
-Add reviewer ownership in `.github/CODEOWNERS` and configure the GitHub `production` environment to require approval from that reviewer before `promote-to-prod.yml` can continue.
+Add reviewer ownership in `.github/CODEOWNERS` and configure the GitHub `reliable-ambition / production` environment (the name Railway's GitHub integration actually created — not a bare `production` environment) to require approval from that reviewer before `promote-to-prod.yml` can continue.
 
 The repository uses:
 
@@ -255,7 +255,7 @@ Use separate values for staging:
 - `STAGING_FRONTEND_URL` points to the Vercel preview or staging frontend URL used by E2E.
 - `STAGING_BACKEND_URL` points to the Railway staging backend URL used for health checks.
 - Supabase staging credentials should live in the staging project and should not be reused from production.
-- `STAGING_DATABASE_URL` / `PRODUCTION_DATABASE_URL` — direct Postgres connection strings (not the Supabase REST URL) with migration privileges, one per GitHub Environment (`main-staging` / `production` — this repo's staging Environment is named `main-staging`, not `staging`). Used by `.github/workflows/run-db-migrations.yml`, the manual `workflow_dispatch` job that runs `alembic upgrade head` against the selected environment, and by `.github/workflows/staging-seed.yml`. Configure these on the matching GitHub Environment (not as bare repo secrets) so the `production` value is only ever exposed to a run that has passed that Environment's required-reviewer gate.
+- `STAGING_DATABASE_URL` / `PRODUCTION_DATABASE_URL` — direct Postgres connection strings (not the Supabase REST URL) with migration privileges, one per GitHub Environment (`reliable-ambition / main-staging` / `reliable-ambition / production` — these are the exact names Railway's GitHub integration auto-created, not bare `main-staging` / `production`). Used by `.github/workflows/run-db-migrations.yml`, the manual `workflow_dispatch` job that runs `alembic upgrade head` against the selected environment, and by `.github/workflows/staging-seed.yml`. Configure these on the matching GitHub Environment (not as bare repo secrets) so the `production` value is only ever exposed to a run that has passed that Environment's required-reviewer gate.
 - `RELEASE_ALLOWED_HOSTS` (GitHub repo → Settings → Secrets and variables →
   Actions → **Variables**, not Secrets — it is not sensitive) must list the
   exact approved staging and production Vercel/Railway hostnames,

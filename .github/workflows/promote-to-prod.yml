@@ -17,7 +17,12 @@ jobs:
     name: Open promotion PR staging → main
     runs-on: ubuntu-latest
     environment:
-      name: production
+      # This must exactly match the GitHub Environment name. Railway's GitHub
+      # integration auto-creates "<railway-project> / production" (not bare
+      # "production") when it links the Railway production environment — a
+      # bare-named environment does not exist and would otherwise be silently
+      # auto-created here with zero protection rules on first run.
+      name: "reliable-ambition / production"
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
