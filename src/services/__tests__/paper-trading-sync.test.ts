@@ -2,16 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { rebuildPaperTradingState } from '../paper-trading-sync';
 import type { TradeJournalEntry } from '@/types/database';
 
-const deleteMock = vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
-const insertMock = vi.fn().mockResolvedValue({ error: null });
+const rpcMock = vi.fn().mockResolvedValue({ error: null });
 
 vi.mock('@/lib/supabase', () => ({
   supabase: {
     schema: () => ({
-      from: () => ({
-        delete: deleteMock,
-        insert: insertMock,
-      }),
+      rpc: rpcMock,
     }),
   },
 }));
@@ -43,8 +39,7 @@ function makeEntry(overrides: Partial<TradeJournalEntry>): TradeJournalEntry {
 describe('rebuildPaperTradingState', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    deleteMock.mockReturnValue({ eq: vi.fn().mockResolvedValue({ error: null }) });
-    insertMock.mockResolvedValue({ error: null });
+    rpcMock.mockResolvedValue({ error: null });
   });
 
   it('does not throw on a normal BUY — regression test for the always-throws bug', async () => {
@@ -55,18 +50,28 @@ describe('rebuildPaperTradingState', () => {
     const entry = makeEntry({ symbol: 'NVDA', type: 'BUY', quantity: 10, price: 50 });
 
     await expect(rebuildPaperTradingState('user-123', [entry])).resolves.toBeDefined();
-    expect(insertMock).toHaveBeenCalled();
+    expect(rpcMock).toHaveBeenCalled();
   });
 
-  it('still persists positions/trades/history after a normal buy', async () => {
+  it('persists positions/trades/history via a single atomic RPC call', async () => {
     const entry = makeEntry({ symbol: 'NVDA', type: 'BUY', quantity: 10, price: 50 });
     const ledger = await rebuildPaperTradingState('user-123', [entry]);
 
     expect(ledger.openPositions).toHaveLength(1);
     expect(ledger.errors).toEqual([]);
     expect(ledger.warnings.length).toBeGreaterThan(0);
-    // Called once each for open_positions, trades, portfolio_history.
-    expect(insertMock).toHaveBeenCalledTimes(3);
+    // The whole rebuild is one atomic RPC call now (migration 0043), not 5
+    // separate delete/insert calls — this is the behavior under test.
+    expect(rpcMock).toHaveBeenCalledTimes(1);
+    expect(rpcMock).toHaveBeenCalledWith(
+      'rebuild_paper_trading_state',
+      expect.objectContaining({
+        p_user_id: 'user-123',
+        p_open_positions: expect.arrayContaining([
+          expect.objectContaining({ symbol: 'NVDA' }),
+        ]),
+      }),
+    );
   });
 
   it('still throws for a genuinely invalid entry (fatal error, not a warning)', async () => {
@@ -75,6 +80,6 @@ describe('rebuildPaperTradingState', () => {
     await expect(rebuildPaperTradingState('user-123', [entry])).rejects.toThrow(
       /invalid/i,
     );
-    expect(insertMock).not.toHaveBeenCalled();
+    expect(rpcMock).not.toHaveBeenCalled();
   });
 });

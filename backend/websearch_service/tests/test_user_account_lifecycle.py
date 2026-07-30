@@ -127,15 +127,21 @@ class _FakeRestoreClient:
 class _FakeSuspendClient(_FakeRestoreClient):
     """Same routing as restore, plus POST (session logout) and admin-count GET."""
 
-    def __init__(self, *, user_row, active_admin_count=2, **kw):
+    def __init__(self, *, user_row, active_admin_count=2, logout_status=200, **kw):
         super().__init__(user_row=user_row, **kw)
         self._active_admin_count = active_admin_count
+        self._logout_status = logout_status
+        self.post_calls: list[str] = []
 
     async def get(self, url, **kw):
         params = kw.get("params", {})
         if params.get("userType") == "eq.Admin":
             return _FakeResp(200, [{"id": f"admin-{i}"} for i in range(self._active_admin_count)])
         return _FakeResp(200, [self._user_row] if self._user_row else [])
+
+    async def post(self, url, **kw):
+        self.post_calls.append(url)
+        return _FakeResp(self._logout_status, {})
 
 
 def _service_caller():
@@ -212,6 +218,44 @@ def test_suspend_reactivates_produces_audit_record():
     assert final_call.kwargs["reason_code"] == "suspend"
     assert final_call.args[1]["reason"] == "terms violation"
     assert "user@example.com" not in repr(audit_mock.call_args_list)
+
+
+def test_suspend_aborts_when_forced_logout_fails():
+    """httpx does not raise on a non-2xx response by default (CodeRabbit,
+    PR #295) — a failed forced logout must stop the suspend before the
+    account status PATCH, not leave the user banned-but-"suspended" with
+    still-valid existing sessions and no failure signal."""
+    row = {
+        "auth_id": "user-1",
+        "email": "user@example.com",
+        "userType": "User",
+        "account_status": "active",
+    }
+    fake = _FakeSuspendClient(user_row=row, logout_status=500)
+    audit_mock = AsyncMock()
+    with patch("app.services.user_account_lifecycle.httpx.AsyncClient", return_value=fake), \
+         patch("app.services.user_account_lifecycle.audit_log", audit_mock):
+        with pytest.raises(UserLifecycleError, match="force logout"):
+            asyncio.run(
+                suspend_user_account(
+                    supabase_url="https://test.supabase.co",
+                    service_role_key="key",
+                    caller=_service_caller(),
+                    target_auth_id="user-1",
+                    reason="terms violation",
+                    confirmation_email="user@example.com",
+                )
+            )
+
+    # The auth ban was already applied, but the account status PATCH must
+    # never have been reached.
+    assert fake.patch_calls == []
+    events = [call.args[0] for call in audit_mock.call_args_list]
+    assert events == ["admin.user_suspend_attempted", "admin.user_suspend_attempted"]
+    failure_call = audit_mock.call_args_list[-1]
+    assert failure_call.kwargs["result"] == "failure"
+    assert failure_call.args[1]["auth_ban_applied"] is True
+    assert failure_call.args[1]["forced_logout_applied"] is False
 
 
 def test_restore_rejects_non_suspended_account():

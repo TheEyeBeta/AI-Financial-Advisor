@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.services import memory_agent
+from app.services.ai_budget_guard import AIBudgetDenied
 from app.services.memory_agent import (
     _call_openai_for_insights,
     _format_transcript,
@@ -49,6 +50,23 @@ async def test_call_openai_returns_empty_without_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     result = await _call_openai_for_insights("transcript")
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_call_openai_skips_and_never_calls_provider_when_budget_denied(monkeypatch):
+    """Scheduled extraction must respect the global AI budget guard (#293
+    review): a denial (e.g. circuit breaker in hard_stop) must short-circuit
+    before any OpenAI call is made, not silently bypass admission control."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    denial = AIBudgetDenied("hard_stop", "hard_stop", 60, "budget exhausted")
+
+    mock_client = AsyncMock()
+    with patch.object(memory_agent.ai_budget_guard, "reserve", side_effect=denial), \
+         patch.object(memory_agent.httpx, "AsyncClient", return_value=mock_client):
+        result = await _call_openai_for_insights("t")
+
+    assert result == []
+    mock_client.post.assert_not_called()
 
 
 @pytest.mark.asyncio

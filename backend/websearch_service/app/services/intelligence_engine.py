@@ -22,6 +22,8 @@ from typing import Any
 
 from postgrest.exceptions import APIError
 
+from . import scheduler_lock
+from .admin_jobs import JOB_TYPE_INTELLIGENCE
 from .supabase_client import supabase_client
 
 logger = logging.getLogger(__name__)
@@ -592,7 +594,19 @@ async def run_intelligence_cycle() -> dict[str, Any]:
 
     _cycle_running = True
     try:
-        return await asyncio.to_thread(_run_intelligence_cycle_sync)
+        if not await scheduler_lock.try_acquire(JOB_TYPE_INTELLIGENCE):
+            logger.info("Intelligence cycle skipped: another replica holds the cluster lock")
+            return {
+                "users_processed": 0,
+                "digests_generated": 0,
+                "errors": [],
+                "skipped": True,
+            }
+        try:
+            async with scheduler_lock.heartbeat(JOB_TYPE_INTELLIGENCE):
+                return await asyncio.to_thread(_run_intelligence_cycle_sync)
+        finally:
+            await scheduler_lock.release(JOB_TYPE_INTELLIGENCE)
     except Exception as exc:
         logger.error(
             "Intelligence cycle raised unhandled exception: %s",

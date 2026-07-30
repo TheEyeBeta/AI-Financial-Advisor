@@ -32,7 +32,10 @@ jobs:
     # ALLOW_SYNTHETIC_SEED below) — misconfiguring the environment itself
     # cannot be bypassed from this workflow file.
     environment:
-      name: staging
+      # Real name as auto-created by Railway's GitHub integration (prefixed
+      # with the Railway project name) — bare "staging"/"main-staging" does
+      # not exist.
+      name: "reliable-ambition / main-staging"
     permissions:
       contents: read
 

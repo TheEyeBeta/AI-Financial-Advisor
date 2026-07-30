@@ -230,32 +230,66 @@ async def suspend_user_account(
             extra={"reason": reason},
         )
 
-        ban_resp = await http.put(
-            f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
-            headers=headers,
-            json={"ban_duration": "876000h"},
-        )
-        if ban_resp.status_code not in (200, 201):
-            raise UserLifecycleError("failed to suspend auth user", status_code=502)
+        auth_ban_applied = False
+        forced_logout_applied = False
+        try:
+            ban_resp = await http.put(
+                f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
+                headers=headers,
+                json={"ban_duration": "876000h"},
+            )
+            if ban_resp.status_code not in (200, 201):
+                raise UserLifecycleError("failed to suspend auth user", status_code=502)
+            auth_ban_applied = True
 
-        await http.post(
-            f"{supabase_url}/auth/v1/admin/users/{target_auth_id}/logout",
-            headers=headers,
-            json={"scope": "global"},
-        )
+            # httpx does not raise on a non-2xx response by default — a
+            # failed forced logout must not pass silently, or the account
+            # ends up banned and marked "suspended" below while the user's
+            # existing sessions remain valid (CodeRabbit, PR #295).
+            logout_resp = await http.post(
+                f"{supabase_url}/auth/v1/admin/users/{target_auth_id}/logout",
+                headers=headers,
+                json={"scope": "global"},
+            )
+            if logout_resp.status_code not in (200, 204):
+                raise UserLifecycleError("failed to force logout target user's sessions", status_code=502)
+            forced_logout_applied = True
 
-        patch_resp = await http.patch(
-            f"{supabase_url}/rest/v1/users",
-            params={"auth_id": f"eq.{target_auth_id}"},
-            headers={**headers, "Accept-Profile": "core", "Prefer": "return=minimal"},
-            json={
-                "account_status": "suspended",
-                "suspended_at": datetime.now(timezone.utc).isoformat(),
-                "suspension_reason": reason[:500],
-            },
-        )
-        if patch_resp.status_code not in (200, 204):
-            raise UserLifecycleError("failed to update application user status", status_code=502)
+            patch_resp = await http.patch(
+                f"{supabase_url}/rest/v1/users",
+                params={"auth_id": f"eq.{target_auth_id}"},
+                headers={**headers, "Accept-Profile": "core", "Prefer": "return=minimal"},
+                json={
+                    "account_status": "suspended",
+                    "suspended_at": datetime.now(timezone.utc).isoformat(),
+                    "suspension_reason": reason[:500],
+                },
+            )
+            if patch_resp.status_code not in (200, 204):
+                raise UserLifecycleError("failed to update application user status", status_code=502)
+        except Exception as exc:
+            # Audit the failure even when only the first of the two systems
+            # (auth ban vs. core.users.account_status) succeeded — otherwise
+            # a partial failure here leaves the account unable to log in
+            # while core.users still reads "active" with no operator signal
+            # beyond the earlier "pending" record. `auth_ban_applied` tells
+            # an operator reading the audit trail exactly which half of the
+            # suspend broke.
+            await _mandatory_lifecycle_audit(
+                "admin.user_suspend_attempted",
+                caller=caller,
+                target_auth_id=target_auth_id,
+                request_id=request_id,
+                result="failure",
+                reason_code="suspend",
+                extra={
+                    "reason": reason,
+                    "error": str(exc),
+                    "auth_ban_applied": auth_ban_applied,
+                    "forced_logout_applied": forced_logout_applied,
+                },
+            )
+            raise
 
     logger.info(
         "User suspended actor=%s target=%s request_id=%s reason=%r",
@@ -323,26 +357,47 @@ async def restore_user_account(
             reason_code="restore",
         )
 
-        unban_resp = await http.put(
-            f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
-            headers=headers,
-            json={"ban_duration": "none"},
-        )
-        if unban_resp.status_code not in (200, 201):
-            raise UserLifecycleError("failed to lift auth suspension", status_code=502)
+        auth_unban_applied = False
+        try:
+            unban_resp = await http.put(
+                f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
+                headers=headers,
+                json={"ban_duration": "none"},
+            )
+            if unban_resp.status_code not in (200, 201):
+                raise UserLifecycleError("failed to lift auth suspension", status_code=502)
+            auth_unban_applied = True
 
-        patch_resp = await http.patch(
-            f"{supabase_url}/rest/v1/users",
-            params={"auth_id": f"eq.{target_auth_id}"},
-            headers={**headers, "Accept-Profile": "core", "Prefer": "return=minimal"},
-            json={
-                "account_status": "active",
-                "suspended_at": None,
-                "suspension_reason": None,
-            },
-        )
-        if patch_resp.status_code not in (200, 204):
-            raise UserLifecycleError("failed to update application user status", status_code=502)
+            patch_resp = await http.patch(
+                f"{supabase_url}/rest/v1/users",
+                params={"auth_id": f"eq.{target_auth_id}"},
+                headers={**headers, "Accept-Profile": "core", "Prefer": "return=minimal"},
+                json={
+                    "account_status": "active",
+                    "suspended_at": None,
+                    "suspension_reason": None,
+                },
+            )
+            if patch_resp.status_code not in (200, 204):
+                raise UserLifecycleError("failed to update application user status", status_code=502)
+        except Exception as exc:
+            # Same reasoning as suspend_user_account: a partial failure here
+            # (auth unbanned but core.users still reads "suspended", or vice
+            # versa) must be durably visible to an operator, not just the
+            # earlier "pending" record.
+            await _mandatory_lifecycle_audit(
+                "admin.user_restore_attempted",
+                caller=caller,
+                target_auth_id=target_auth_id,
+                request_id=request_id,
+                result="failure",
+                reason_code="restore",
+                extra={
+                    "error": str(exc),
+                    "auth_unban_applied": auth_unban_applied,
+                },
+            )
+            raise
 
     logger.info(
         "User restored actor=%s target=%s request_id=%s",

@@ -2233,8 +2233,35 @@ async def _classify_query(user_message: str) -> Dict[str, Any]:
             {"role": "user", "content": user_message[:2000]},
         ],
     }
+
+    # This classifier call is itself billed OpenAI spend made ahead of the
+    # turn's atomic reserve() at generation time (#293 review): without its
+    # own reservation, classifier traffic was invisible to the guard's
+    # accounting and could push actual spend past the reported total even
+    # while check_admission() still reported room under the limit.
+    # Non-essential: low-effort/cheap, so it must be deniable like any other
+    # non-critical call during hard_stop, unlike the exempt main generation call.
+    classifier_reservation: Optional[BudgetReservation] = None
+    try:
+        classifier_reservation = ai_budget_guard.reserve(
+            provider="openai",
+            model=OPENAI_CLASSIFIER_MODEL,
+            estimated_input_tokens=estimate_tokens(user_message[:2000], system_overhead=200),
+            estimated_output_tokens=50,
+            essential=False,
+        )
+    except AIBudgetDenied:
+        logger.warning("Classification skipped — AI budget guard denied admission")
+        return default_classification
+
     try:
         data = await _call_openai_responses(payload)
+        usage = data.get("usage", {}) or {}
+        ai_budget_guard.reconcile(
+            classifier_reservation,
+            actual_input_tokens=usage.get("input_tokens", 0) or 0,
+            actual_output_tokens=usage.get("output_tokens", 0) or 0,
+        )
         text = _extract_text_unified(data)
         classification = _extract_json_from_response(text)
         if classification.get("complexity") not in ("low", "medium", "high"):
@@ -2249,6 +2276,8 @@ async def _classify_query(user_message: str) -> Dict[str, Any]:
     except Exception as exc:
         logger.warning("Classification failed, using default: %s", exc)
         return default_classification
+    finally:
+        ai_budget_guard.release(classifier_reservation)
 
 
 # ── Route handlers ─────────────────────────────────────────────────────────────
