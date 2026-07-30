@@ -231,6 +231,7 @@ async def suspend_user_account(
         )
 
         auth_ban_applied = False
+        forced_logout_applied = False
         try:
             ban_resp = await http.put(
                 f"{supabase_url}/auth/v1/admin/users/{target_auth_id}",
@@ -241,11 +242,18 @@ async def suspend_user_account(
                 raise UserLifecycleError("failed to suspend auth user", status_code=502)
             auth_ban_applied = True
 
-            await http.post(
+            # httpx does not raise on a non-2xx response by default — a
+            # failed forced logout must not pass silently, or the account
+            # ends up banned and marked "suspended" below while the user's
+            # existing sessions remain valid (CodeRabbit, PR #295).
+            logout_resp = await http.post(
                 f"{supabase_url}/auth/v1/admin/users/{target_auth_id}/logout",
                 headers=headers,
                 json={"scope": "global"},
             )
+            if logout_resp.status_code not in (200, 204):
+                raise UserLifecycleError("failed to force logout target user's sessions", status_code=502)
+            forced_logout_applied = True
 
             patch_resp = await http.patch(
                 f"{supabase_url}/rest/v1/users",
@@ -278,6 +286,7 @@ async def suspend_user_account(
                     "reason": reason,
                     "error": str(exc),
                     "auth_ban_applied": auth_ban_applied,
+                    "forced_logout_applied": forced_logout_applied,
                 },
             )
             raise

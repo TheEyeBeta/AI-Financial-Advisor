@@ -11,7 +11,7 @@ much as the use cases — they're what stop a bad recommendation.
 2. [Modular Monolith](#2-modular-monolith)
 3. [Microservices](#3-microservices)
 4. [Domain-Driven Design](#4-domain-driven-design-ddd)
-5. [Hexagonal / Ports & Adapters](#5-hexagonal--ports--adapters)
+5. [Hexagonal / Ports & Adapters](#5-hexagonal--ports--adapters--clean--onion-architecture)
 6. [CQRS](#6-cqrs-commandquery-responsibility-segregation)
 7. [Event Sourcing](#7-event-sourcing)
 8. [Event-Driven vs Request-Response](#8-event-driven-architecture-eda-vs-request-response)

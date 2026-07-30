@@ -79,9 +79,15 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve and validate database URL
+      - name: Validate database URL is configured
         # Fails closed: a missing/misconfigured secret must stop the job
-        # before Alembic ever attempts a connection with a blank URL.
+        # before Alembic ever attempts a connection with a blank URL. Only
+        # validates presence here — deliberately does not persist the DSN to
+        # $GITHUB_ENV, which would expose it to every later step (pip
+        # install, etc.) rather than just the Alembic steps that need it,
+        # and a bare KEY=value append breaks if the secret ever contains a
+        # newline (CodeRabbit, PR #295). Each Alembic step below re-selects
+        # the secret directly in its own env: block instead.
         env:
           ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: |
@@ -89,8 +95,6 @@ jobs:
             echo "No database URL secret configured for target '${{ inputs.target_environment }}' — refusing to run migrations." >&2
             exit 1
           fi
-          echo "::add-mask::$ALEMBIC_DATABASE_URL"
-          echo "ALEMBIC_DATABASE_URL=$ALEMBIC_DATABASE_URL" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -103,16 +107,22 @@ jobs:
 
       - name: Record starting revision
         working-directory: backend/websearch_service
+        env:
+          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: |
           echo "Target: ${{ inputs.target_environment }}"
           alembic -c alembic.ini current
 
       - name: alembic upgrade head
         working-directory: backend/websearch_service
+        env:
+          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: alembic -c alembic.ini upgrade head
 
       - name: Confirm resulting revision
         working-directory: backend/websearch_service
+        env:
+          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: alembic -c alembic.ini current
 
       - name: alembic check (informational)
@@ -125,4 +135,6 @@ jobs:
         # runs. This step surfaces its output for visibility without
         # blocking a legitimate upgrade on a pre-existing, unrelated gap.
         continue-on-error: true
+        env:
+          ALEMBIC_DATABASE_URL: ${{ inputs.target_environment == 'production' && secrets.PRODUCTION_DATABASE_URL || secrets.STAGING_DATABASE_URL }}
         run: alembic -c alembic.ini check

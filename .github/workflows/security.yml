@@ -43,15 +43,15 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install pip-audit and pip-tools
-        # pip<26: pip-tools 7.6.0 (latest as of 2026-07) imports pip's
-        # private internals (e.g. pip._internal.utils.compat.stdlib_pkgs,
-        # RequirementCommand.make_requirement_preparer's signature) which
-        # pip 26.x changed, breaking pip-compile with
-        # "missing 1 required keyword-only argument: 'allow_editables'".
-        # Verified locally: pip 26.2 + pip-tools 7.6.0 fails; pip 25.2 +
-        # pip-tools 7.6.0 compiles cleanly. Drop this cap once pip-tools
-        # ships a release compatible with pip 26+.
-        run: python -m pip install --upgrade "pip<26" pip-audit pip-tools
+        # pip<26.2: pip-tools 7.6.0 added pip 26.1 compatibility (fixing a
+        # DirectUrl shape change), but pip 26.2 changed pip's private
+        # internals again (RequirementCommand.make_requirement_preparer's
+        # signature), breaking pip-compile with "missing 1 required
+        # keyword-only argument: 'allow_editables'". Verified locally: pip
+        # 26.2 + pip-tools 7.6.0 fails; pip 26.1.2 and pip 25.2, both with
+        # pip-tools 7.6.0, compile cleanly. Raise this cap once pip-tools
+        # ships a release compatible with pip 26.2+.
+        run: python -m pip install --upgrade "pip<26.2" pip-audit pip-tools
       - name: Verify Python locks are current (#206)
         # Recompiling must be a no-op; fails when requirements.in changed
         # without regenerating the committed hashed locks.
