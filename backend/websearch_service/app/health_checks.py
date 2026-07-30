@@ -79,10 +79,20 @@ def release_info() -> dict[str, Any]:
         or (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "").strip()
         or None
     )
+    # Same fallback as git_sha: APP_VERSION is a manually-set Railway variable
+    # (or Dockerfile build-arg default) that goes stale on every deploy unless
+    # someone updates it by hand. Falling back to RAILWAY_GIT_COMMIT_SHA keeps
+    # this repo's SHA-as-version scheme (docs/readiness/RELEASE_POLICY.md §3)
+    # accurate automatically, with no manual/CI step required.
+    app_version = (
+        (os.getenv("APP_VERSION") or "").strip()
+        or (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "").strip()
+        or None
+    )
     build_timestamp = (os.getenv("BUILD_TIMESTAMP") or "").strip() or None
     return {
         "git_sha": git_sha,
-        "app_version": (os.getenv("APP_VERSION") or "").strip() or None,
+        "app_version": app_version,
         "build_timestamp": build_timestamp,
         "expected_schema_revision": expected_schema_revision(),
         "environment": (os.getenv("ENVIRONMENT") or "development").strip().lower()
