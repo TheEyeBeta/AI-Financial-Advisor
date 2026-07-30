@@ -178,7 +178,9 @@ export function ChatInterface({ messages, isThinking = false }: ChatInterfacePro
 
               <div
                 className={cn(
-                  "max-w-[85%] rounded-[24px] px-4 py-3 [overflow-wrap:break-word] [word-break:break-word]",
+                  // overflow-wrap:anywhere (unlike break-word) also collapses
+                  // min-content width, so long URLs can't stretch the layout.
+                  "max-w-[85%] rounded-[24px] px-4 py-3 [overflow-wrap:anywhere]",
                   isUser
                     ? "bg-primary text-primary-foreground"
                     : "bg-muted/45 text-foreground",

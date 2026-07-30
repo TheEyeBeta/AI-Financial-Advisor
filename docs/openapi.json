@@ -402,7 +402,7 @@
           "news"
         ],
         "summary": "Get News",
-        "description": "Return market news from DataAPI when configured, newest first.\n\nReturns 400 for invalid cursors, 503 when the provider is not configured\n(clients should use Supabase `news_articles`), 504 on provider timeout,\nand 502 on provider failure. Empty feeds are a successful empty list.",
+        "description": "Return market news from DataAPI when configured, newest first.\n\nReturns 400 for invalid cursors, 503 when the provider is not configured\n(clients should use Supabase `market.news`, the canonical table \u2014 see\nsql/schema.sql; `market.news_articles` is a legacy source table only),\n504 on provider timeout,\nand 502 on provider failure. Empty feeds are a successful empty list.",
         "operationId": "get_news_api_news_get",
         "parameters": [
           {
@@ -2996,10 +2996,146 @@
           }
         }
       }
+    },
+    "/api/admin/ai-budget/status": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Ai Budget Status",
+        "description": "Read-only global AI spend/capacity status.\n\nReturns aggregate totals and circuit-breaker state only \u2014 never prompt\ncontent, per-user identifiers, or anything else audit-sensitive.",
+        "operationId": "ai_budget_status_api_admin_ai_budget_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Ai Budget Status Api Admin Ai Budget Status Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai-budget/override": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Ai Budget Set Override",
+        "description": "Admin-authorized, time-bounded manual override of the AI budget\ncircuit breaker's hard-stop/restricted gating. Disabled by default\n(no override key exists until an admin sets one) and always expires \u2014\nthere is no \"leave it on\" path.",
+        "operationId": "ai_budget_set_override_api_admin_ai_budget_override_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AIBudgetOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Ai Budget Set Override Api Admin Ai Budget Override Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Ai Budget Clear Override",
+        "operationId": "ai_budget_clear_override_api_admin_ai_budget_override_delete",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Ai Budget Clear Override Api Admin Ai Budget Override Delete"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/admin/ai-budget/reconcile-costs": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Ai Budget Reconcile Costs",
+        "description": "Scheduled/on-demand reconciliation against the OpenAI Costs API.\n\nRead-only against our own budget state \u2014 this never adjusts the local\nspend counters or the circuit breaker. A failure (missing credentials,\nnetwork error, API error) is reported here but never raised as an\nerror response and never disables the local hard stop; see\n``ai_cost_reconciliation.py`` for the non-fatal-by-design contract.\n\nSchedule: hourly, via an external scheduler (Railway cron / GitHub\nActions) calling this endpoint with a service-role JWT \u2014 same pattern\nas ``/api/meridian/refresh-all``.",
+        "operationId": "ai_budget_reconcile_costs_api_admin_ai_budget_reconcile_costs_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Ai Budget Reconcile Costs Api Admin Ai Budget Reconcile Costs Post"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AIBudgetOverrideRequest": {
+        "properties": {
+          "duration_minutes": {
+            "type": "integer",
+            "maximum": 1440.0,
+            "minimum": 1.0,
+            "title": "Duration Minutes",
+            "description": "Override duration in minutes (max 24h)."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 3,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "duration_minutes",
+          "reason"
+        ],
+        "title": "AIBudgetOverrideRequest"
+      },
       "AIContextResponse": {
         "properties": {
           "generated_at": {

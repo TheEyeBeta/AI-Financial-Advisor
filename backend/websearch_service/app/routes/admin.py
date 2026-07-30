@@ -30,6 +30,8 @@ from ..services.auth import (
     get_backend_supabase_url,
     verify_service_role,
 )
+from ..services.ai_budget_guard import AIBudgetDenied, ai_budget_guard
+from ..services.ai_cost_reconciliation import reconcile_openai_costs
 from ..services.dataapi_client import get_dataapi_client
 from ..services.admin_jobs import (
     AdminJobError,
@@ -46,6 +48,7 @@ from ..services.admin_jobs import (
     retry_failed_job,
 )
 from ..middleware.correlation import get_correlation_id
+from ..services.audit import audit_log
 from ..services.orphan_user_cleanup import (
     OrphanCleanupError,
     create_dry_run_snapshot,
@@ -574,7 +577,7 @@ def _idempotency_key(request: Request) -> str:
     return key
 
 
-def _enqueue_trigger_response(
+async def _enqueue_trigger_response(
     *,
     request: Request,
     admin: str,
@@ -594,6 +597,17 @@ def _enqueue_trigger_response(
     except AdminJobError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    await audit_log(
+        "admin.job_enqueued",
+        {"job_type": job_type, "duplicate": not created},
+        actor_type="admin",
+        actor_id=admin,
+        target_type="admin_job",
+        target_id=job.get("id"),
+        reason_code=job_type,
+        request_id=job.get("correlation_id"),
+    )
+
     return {
         "status": job.get("status"),
         "job_id": job.get("id"),
@@ -606,13 +620,13 @@ def _enqueue_trigger_response(
 @router.post("/api/admin/trigger-ranking")
 async def trigger_ranking(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a ranking cycle for the durable admin job worker."""
-    return _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_RANKING)
+    return await _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_RANKING)
 
 
 @router.post("/api/admin/trigger-memory-scan")
 async def trigger_memory_scan(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a full history memory scan for the durable admin job worker."""
-    response = _enqueue_trigger_response(
+    response = await _enqueue_trigger_response(
         request=request,
         admin=admin,
         job_type=JOB_TYPE_MEMORY_SCAN,
@@ -625,13 +639,13 @@ async def trigger_memory_scan(request: Request, admin: str = Depends(_require_ad
 @router.post("/api/admin/trigger-intelligence")
 async def trigger_intelligence(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue an intelligence cycle for the durable admin job worker."""
-    return _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_INTELLIGENCE)
+    return await _enqueue_trigger_response(request=request, admin=admin, job_type=JOB_TYPE_INTELLIGENCE)
 
 
 @router.post("/api/admin/trigger-memory-extraction")
 async def trigger_memory_extraction(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a live memory extraction cycle for the durable admin job worker."""
-    return _enqueue_trigger_response(
+    return await _enqueue_trigger_response(
         request=request,
         admin=admin,
         job_type=JOB_TYPE_MEMORY_EXTRACTION,
@@ -641,7 +655,7 @@ async def trigger_memory_extraction(request: Request, admin: str = Depends(_requ
 @router.post("/api/admin/trigger-meridian-refresh")
 async def trigger_meridian_refresh(request: Request, admin: str = Depends(_require_admin)) -> dict[str, Any]:
     """Queue a Meridian context refresh for the durable admin job worker."""
-    return _enqueue_trigger_response(
+    return await _enqueue_trigger_response(
         request=request,
         admin=admin,
         job_type=JOB_TYPE_MERIDIAN_REFRESH,
@@ -889,6 +903,129 @@ async def chat_dashboard(admin: str = Depends(_require_admin)) -> dict[str, Any]
             for msg in recent_messages
         ],
     }
+
+
+class AIBudgetOverrideRequest(BaseModel):
+    duration_minutes: int = Field(..., ge=1, le=1440, description="Override duration in minutes (max 24h).")
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
+@router.get("/api/admin/ai-budget/status")
+async def ai_budget_status(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Read-only global AI spend/capacity status.
+
+    Returns aggregate totals and circuit-breaker state only — never prompt
+    content, per-user identifiers, or anything else audit-sensitive.
+    """
+    return ai_budget_guard.get_status()
+
+
+@router.post("/api/admin/ai-budget/override")
+async def ai_budget_set_override(
+    payload: AIBudgetOverrideRequest,
+    admin: str = Depends(_require_admin),
+) -> dict[str, Any]:
+    """Admin-authorized, time-bounded manual override of the AI budget
+    circuit breaker's hard-stop/restricted gating. Disabled by default
+    (no override key exists until an admin sets one) and always expires —
+    there is no "leave it on" path.
+    """
+    expires_at = ai_budget_guard.compute_override_expiry(payload.duration_minutes * 60)
+    expires_iso = datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
+    audit_payload = {
+        "admin": admin,
+        "duration_minutes": payload.duration_minutes,
+        "reason": payload.reason,
+        "expires_at": expires_iso,
+    }
+
+    # Audit the ATTEMPT before acting (this widens AI spend risk, so the
+    # attempt must be durably recorded even if the write below fails), then
+    # audit the CONFIRMED outcome after — never claim "success" for a
+    # mutation that has not actually been confirmed against the backend.
+    await audit_log(
+        "ai_budget_manual_override_set",
+        audit_payload,
+        actor_type="admin",
+        actor_id=admin,
+        result="pending",
+        mandatory=True,
+    )
+
+    try:
+        ai_budget_guard.set_manual_override(expires_at=expires_at, admin_id=admin, reason=payload.reason)
+    except AIBudgetDenied as exc:
+        await audit_log(
+            "ai_budget_manual_override_set",
+            {**audit_payload, "error": exc.detail},
+            actor_type="admin",
+            actor_id=admin,
+            result="failure",
+            mandatory=False,
+        )
+        raise HTTPException(status_code=exc.http_status, detail=exc.detail) from exc
+
+    await audit_log(
+        "ai_budget_manual_override_set",
+        audit_payload,
+        actor_type="admin",
+        actor_id=admin,
+        result="success",
+        mandatory=True,
+    )
+    return {"success": True, "expires_at": expires_iso}
+
+
+@router.delete("/api/admin/ai-budget/override")
+async def ai_budget_clear_override(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    await audit_log(
+        "ai_budget_manual_override_cleared",
+        {"admin": admin},
+        actor_type="admin",
+        actor_id=admin,
+        result="pending",
+        mandatory=True,
+    )
+
+    try:
+        ai_budget_guard.clear_manual_override()
+    except AIBudgetDenied as exc:
+        await audit_log(
+            "ai_budget_manual_override_cleared",
+            {"admin": admin, "error": exc.detail},
+            actor_type="admin",
+            actor_id=admin,
+            result="failure",
+            mandatory=False,
+        )
+        raise HTTPException(status_code=exc.http_status, detail=exc.detail) from exc
+
+    await audit_log(
+        "ai_budget_manual_override_cleared",
+        {"admin": admin},
+        actor_type="admin",
+        actor_id=admin,
+        result="success",
+        mandatory=True,
+    )
+    return {"success": True}
+
+
+@router.post("/api/admin/ai-budget/reconcile-costs")
+async def ai_budget_reconcile_costs(admin: str = Depends(_require_admin)) -> dict[str, Any]:
+    """Scheduled/on-demand reconciliation against the OpenAI Costs API.
+
+    Read-only against our own budget state — this never adjusts the local
+    spend counters or the circuit breaker. A failure (missing credentials,
+    network error, API error) is reported here but never raised as an
+    error response and never disables the local hard stop; see
+    ``ai_cost_reconciliation.py`` for the non-fatal-by-design contract.
+
+    Schedule: hourly, via an external scheduler (Railway cron / GitHub
+    Actions) calling this endpoint with a service-role JWT — same pattern
+    as ``/api/meridian/refresh-all``.
+    """
+    return await reconcile_openai_costs()
 
 
 async def _gather_chat_dashboard(today: str) -> tuple[int, int, int, list[dict[str, Any]]]:

@@ -263,20 +263,90 @@ def test_is_reasoning_model_detects_reasoning_prefixes(monkeypatch):
     assert _is_reasoning_model("gpt-4o-mini") is False
 
 
-def test_effective_chat_max_output_tokens_floors_to_min_for_reasoning(monkeypatch):
+def test_effective_reasoning_floor_is_clamped_to_ceiling(monkeypatch):
+    # Phase 2 regression: the reasoning-model minimum must NEVER exceed the
+    # configured server ceiling. Ceiling 1000 < reasoning floor 5000 → 1000 wins.
     monkeypatch.setattr(ai_proxy, "REASONING_MODEL_PREFIXES", ("gpt-5",))
     monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-5-mini")
     monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 1000)
     monkeypatch.setattr(ai_proxy, "MIN_REASONING_MAX_OUTPUT_TOKENS", 5000)
-    assert _effective_chat_max_output_tokens(2000) == 5000
+    assert _effective_chat_max_output_tokens(2000) == 1000
 
 
-def test_effective_chat_max_output_tokens_non_reasoning_uses_requested(monkeypatch):
+def test_effective_reasoning_floor_applies_below_ceiling(monkeypatch):
+    # When the reasoning floor sits below the ceiling it raises small requests
+    # up to the floor (so hidden reasoning tokens don't starve the answer).
+    monkeypatch.setattr(ai_proxy, "REASONING_MODEL_PREFIXES", ("gpt-5",))
+    monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-5-mini")
+    monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 8000)
+    monkeypatch.setattr(ai_proxy, "MIN_REASONING_MAX_OUTPUT_TOKENS", 1200)
+    assert _effective_chat_max_output_tokens(400) == 1200   # floor applies, < ceiling
+    assert _effective_chat_max_output_tokens(4000) == 4000  # above floor, below ceiling
+    assert _effective_chat_max_output_tokens(50000) == 8000  # capped at ceiling
+
+
+def test_effective_chat_max_output_tokens_ceiling_is_not_a_floor(monkeypatch):
+    # Phase 2 core regression: the configured server maximum is a CEILING, not a
+    # floor. A small request must stay small; a large request is capped.
+    monkeypatch.setattr(ai_proxy, "REASONING_MODEL_PREFIXES", ("gpt-5",))
+    monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-4o-mini")  # non-reasoning
+    monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 8000)
+    # The canonical acceptance case: 400 requested, 8000 ceiling -> 400.
+    assert _effective_chat_max_output_tokens(400) == 400
+    assert _effective_chat_max_output_tokens(500) == 500
+    assert _effective_chat_max_output_tokens(8000) == 8000     # exactly the ceiling
+    assert _effective_chat_max_output_tokens(16000) == 8000    # oversized -> capped
+
+
+def test_effective_chat_max_output_tokens_uses_routed_model_not_default(monkeypatch):
+    # The reasoning floor must follow the model actually routed for the
+    # request, not the configured default — otherwise a reasoning default with
+    # a non-reasoning routed model (or vice versa) applies the wrong floor.
+    monkeypatch.setattr(ai_proxy, "REASONING_MODEL_PREFIXES", ("gpt-5",))
+    monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-5")       # reasoning default
+    monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 8000)
+    monkeypatch.setattr(ai_proxy, "MIN_REASONING_MAX_OUTPUT_TOKENS", 1200)
+
+    # No model override: falls back to the (reasoning) default -> floor applies.
+    assert _effective_chat_max_output_tokens(400) == 1200
+    # Routed to a non-reasoning model: floor must NOT apply.
+    assert _effective_chat_max_output_tokens(400, model="gpt-4o") == 400
+
+    monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-4o")      # non-reasoning default
+    # Routed to a reasoning model: floor must apply even though the default doesn't.
+    assert _effective_chat_max_output_tokens(400, model="gpt-5-mini") == 1200
+
+
+@pytest.mark.parametrize(
+    "requested,expected",
+    [
+        (None, 2000),   # missing -> safe default (< ceiling)
+        (0, 2000),      # zero -> safe default
+        (-1, 2000),     # negative -> safe default
+        (-99999, 2000), # large negative -> safe default
+        (1, 1),         # minimum valid stays minimal
+        (2000, 2000),   # default passthrough
+        (8000, 8000),   # ceiling boundary
+        (8001, 8000),   # just over ceiling -> capped
+    ],
+)
+def test_effective_chat_max_output_tokens_boundaries(monkeypatch, requested, expected):
+    monkeypatch.setattr(ai_proxy, "REASONING_MODEL_PREFIXES", ("gpt-5",))
+    monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-4o-mini")  # non-reasoning
+    monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 8000)
+    monkeypatch.setattr(ai_proxy, "DEFAULT_CHAT_MAX_OUTPUT_TOKENS", 2000)
+    assert _effective_chat_max_output_tokens(requested) == expected
+
+
+def test_effective_default_is_itself_clamped_to_low_ceiling(monkeypatch):
+    # If the ceiling is below the safe default, a missing request still cannot
+    # exceed the ceiling.
     monkeypatch.setattr(ai_proxy, "REASONING_MODEL_PREFIXES", ("gpt-5",))
     monkeypatch.setattr(ai_proxy, "OPENAI_CHAT_MODEL", "gpt-4o-mini")
-    monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 1000)
-    assert _effective_chat_max_output_tokens(500) == 1000
-    assert _effective_chat_max_output_tokens(2000) == 2000
+    monkeypatch.setattr(ai_proxy, "OPENAI_MAX_TOKENS", 300)
+    monkeypatch.setattr(ai_proxy, "DEFAULT_CHAT_MAX_OUTPUT_TOKENS", 2000)
+    assert _effective_chat_max_output_tokens(None) == 300
+    assert _effective_chat_max_output_tokens(1000) == 300
 
 
 # ─── _looks_like_reasoning_budget_exhaustion ───────────────────────────────

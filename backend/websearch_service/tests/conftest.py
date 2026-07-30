@@ -26,7 +26,7 @@ os.environ.setdefault("APP_VERSION", "test-version")
 import jwt as pyjwt
 import pytest
 from fastapi.testclient import TestClient
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 
 def run_async(coro):
     """Run a coroutine in a fresh event loop (Python 3.12+ safe)."""
@@ -41,6 +41,17 @@ os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
 # Patch create_client so no real network connection is attempted at import time.
 with patch("supabase.create_client", return_value=MagicMock()):
     from app.main import create_app
+
+# ─── AI-provider network guard (Phase 3) ──────────────────────────────────
+# Fail fast if any test tries to reach a real AI provider (openai/perplexity/
+# anthropic). Blocks only AI-provider hostnames so integration tests against a
+# test Supabase / local Redis are unaffected. Escape hatch for the sanctioned
+# capped live validation: set ALLOW_REAL_AI_PROVIDER_NETWORK=1.
+try:  # package import mode (tests/ has __init__.py)
+    from tests.ai_network_guard import install_ai_network_guard
+except ImportError:  # pragma: no cover - rootdir import-mode fallback
+    from ai_network_guard import install_ai_network_guard
+install_ai_network_guard()
 
 
 def supabase_test_issuer() -> str:
@@ -87,7 +98,8 @@ def client() -> TestClient:
 async def async_client() -> AsyncGenerator[AsyncClient, None]:
     """Create an async test client for the FastAPI app."""
     app = create_app()
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
@@ -102,6 +114,7 @@ def mock_env_vars(monkeypatch):
     monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
     monkeypatch.setenv("SUPABASE_URL", "https://test.supabase.co")
     monkeypatch.setenv("SUPABASE_ANON_KEY", "test-anon-key")
+    monkeypatch.setenv("AUDIT_PSEUDONYM_PEPPER", "test-only-audit-pepper-value")
     monkeypatch.delenv("VITE_SUPABASE_URL", raising=False)
     monkeypatch.delenv("VITE_SUPABASE_ANON_KEY", raising=False)
     monkeypatch.delenv("VITE_SUPABASE_SERVICE_ROLE_KEY", raising=False)

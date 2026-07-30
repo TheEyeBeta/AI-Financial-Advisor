@@ -9,7 +9,7 @@
 ## Immediate containment
 1. The system self-contains first: per-user/IP request+token limits, concurrent cap, auto-block (1 h) — confirm they're actually engaging (429s + block events in logs) rather than assuming.
 2. Authenticated abuser: **suspend the account** (audited lifecycle endpoint) — user-keyed limits make account suspension the clean lever.
-3. Unauthenticated/IP-rotating: verify Redis-backed shared limits are active (`redis-unavailable.md` if not — process-local limits are evadable across replicas).
+3. Unauthenticated/IP-rotating: verify Valkey-backed (Redis-protocol-compatible) shared limits are active (`redis-unavailable.md` if not — process-local limits are evadable across replicas).
 4. Signup-wave abuse: pause invitations/registrations per `../readiness/STAGED_LAUNCH.md` admission controls.
 
 ## Diagnostics
@@ -23,7 +23,7 @@ Railway logs, Supabase Auth logs, Sentry, provider usage dashboards.
 ## Recovery
 - Tighten specific endpoint limits via config PR if the abuse fit inside current ceilings (never loosen under pressure).
 - Persistent distributed abuse: platform-level controls (Vercel/Railway WAF options) — EXTERNAL, owner action.
-- Unblock collateral users by lifting specific blocks (block store is TTL'd; targeted removal via Redis if urgent).
+- Unblock collateral users by lifting specific blocks (block store is TTL'd; targeted removal via Valkey if urgent).
 
 ## Rollback
 Not applicable.

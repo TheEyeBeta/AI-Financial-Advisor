@@ -190,7 +190,7 @@ async def _fetch_news_window() -> Tuple[List[NewsFeedItem], bool]:
         raise HTTPException(
             status_code=503,
             detail={
-                "message": "News provider is not configured; use Supabase news_articles",
+                "message": "News provider is not configured; use Supabase market.news",
                 "availability_status": "not_configured",
                 "reason_code": "dataapi_not_configured",
             },
@@ -249,7 +249,9 @@ async def get_news(
     Return market news from DataAPI when configured, newest first.
 
     Returns 400 for invalid cursors, 503 when the provider is not configured
-    (clients should use Supabase `news_articles`), 504 on provider timeout,
+    (clients should use Supabase `market.news`, the canonical table — see
+    sql/schema.sql; `market.news_articles` is a legacy source table only),
+    504 on provider timeout,
     and 502 on provider failure. Empty feeds are a successful empty list.
     """
     verified_user_id = auth_user.auth_id if auth_user else None

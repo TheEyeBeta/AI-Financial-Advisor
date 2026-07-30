@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-SUITE-20260721T115857Z",
+  "work_package": "WP-B2-SUITE",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "python -m pytest -o addopts='' -q (backend/websearch_service)",
+  "scenario": "Full backend suite after Batch 2",
+  "preconditions": [],
+  "assertions": [
+    "0 failed",
+    "+77 tests vs Batch 1 (1170->1247)",
+    "no regressions"
+  ],
+  "result": "pass",
+  "metrics": {
+    "passed": 1247,
+    "skipped": 41,
+    "failed": 0,
+    "duration_s": 34.6
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/tests/"
+  ],
+  "remaining_risks": [],
+  "reviewer_notes": "",
+  "content_sha256": "fdb6992516c5e8b01a1f486dc431cf4503ad38bd0ac7eb4d2d15cf1320ac4149"
+}

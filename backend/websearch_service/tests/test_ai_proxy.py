@@ -5,7 +5,41 @@ from unittest.mock import AsyncMock, patch, MagicMock
 from fastapi.testclient import TestClient
 import httpx
 from app.routes import ai_proxy
+from app.services.ai_budget_guard import AIBudgetDenied
 from app.services.rate_limit import rate_limiter
+
+
+@pytest.mark.asyncio
+async def test_classify_query_skips_provider_call_when_budget_denied():
+    """The classifier call is itself billed spend ahead of the turn's atomic
+    reserve() (#293 review) — a budget denial must short-circuit before any
+    OpenAI call, not silently make an unaccounted-for call."""
+    denial = AIBudgetDenied("hard_stop", "hard_stop", 60, "budget exhausted")
+
+    with patch.object(ai_proxy.ai_budget_guard, "reserve", side_effect=denial), \
+         patch.object(ai_proxy, "_call_openai_responses", new=AsyncMock()) as mock_call:
+        result = await ai_proxy._classify_query("What should I invest in?")
+
+    mock_call.assert_not_called()
+    assert result["complexity"] == "medium"
+
+
+@pytest.mark.asyncio
+async def test_classify_query_reconciles_and_releases_reservation_on_success():
+    reservation = MagicMock()
+    fake_response = {
+        "usage": {"input_tokens": 120, "output_tokens": 15},
+        "output": [{"type": "message", "content": [{"type": "output_text", "text": '{"complexity": "low"}'}]}],
+    }
+
+    with patch.object(ai_proxy.ai_budget_guard, "reserve", return_value=reservation), \
+         patch.object(ai_proxy.ai_budget_guard, "reconcile") as mock_reconcile, \
+         patch.object(ai_proxy.ai_budget_guard, "release") as mock_release, \
+         patch.object(ai_proxy, "_call_openai_responses", new=AsyncMock(return_value=fake_response)):
+        await ai_proxy._classify_query("What should I invest in?")
+
+    mock_reconcile.assert_called_once_with(reservation, actual_input_tokens=120, actual_output_tokens=15)
+    mock_release.assert_called_once_with(reservation)
 
 
 def test_build_openai_chat_stream_payload_disables_parallel_tool_calls():
@@ -341,7 +375,13 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
 
     with patch("app.routes.ai_proxy.classify_tier", return_value="FAST"), \
          patch("app.routes.ai_proxy.classify_intent", new=AsyncMock(return_value="general")), \
+         patch("app.routes.ai_proxy.BALANCED_MODEL", "gpt-5"), \
          patch("httpx.AsyncClient", return_value=mock_client):
+        # FAST tier resolves _chat_model to BALANCED_MODEL; the reasoning-
+        # budget-exhaustion retry only applies to reasoning models, so this
+        # test forces BALANCED_MODEL to one — the budget guard reserves and
+        # reconciles against whichever model is actually called (_chat_model),
+        # matching the payload.
         response = client.post("/api/chat", json={"message": "Hello", "max_tokens": 700})
         assert response.status_code == 200
         assert response.json()["response"] == "Recovered answer after retry."
@@ -350,9 +390,15 @@ async def test_chat_endpoint_retries_after_reasoning_token_exhaustion(client: Te
         # [0] complexity classifier, [1] first chat, [2] retry
         first_chat_payload = call_args[1].kwargs["json"]
         retry_chat_payload = call_args[2].kwargs["json"]
-        assert first_chat_payload["max_output_tokens"] == 8000
+        # Phase 2: the configured OPENAI_MAX_TOKENS (8000) is a CEILING, not a
+        # floor. A 700-token request on a reasoning model is bounded up only to
+        # the reasoning floor (MIN_REASONING_MAX_OUTPUT_TOKENS=1200), never
+        # inflated to the 8000 ceiling.
+        assert first_chat_payload["max_output_tokens"] == 1200
         assert retry_chat_payload["reasoning"]["effort"] == "low"
-        assert retry_chat_payload["max_output_tokens"] == 8000
+        # The retry gains headroom up to RETRY_REASONING_MAX_OUTPUT_TOKENS=1800
+        # but still stays under the 8000 server ceiling.
+        assert retry_chat_payload["max_output_tokens"] == 1800
 
 
 def test_chat_endpoint_rate_limit(client: TestClient):

@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B3-FRONTEND-20260721T164238Z",
+  "work_package": "WP-B3-FRONTEND",
+  "environment": "clean-linux-ubuntu2204-node22",
+  "app_version": "readiness-batch3",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T16:42:38Z",
+  "finished_at": "2026-07-21T16:42:38Z",
+  "command": "npx tsc --noEmit  (PASS); npx vitest/vite (native-binding failure)",
+  "scenario": "Frontend clean-Linux verification (type-check EXECUTED; bundler BLOCKED)",
+  "preconditions": [],
+  "assertions": [
+    "tsc --noEmit exit 0 (whole app type-checks on Linux)",
+    "vitest BLOCKED: node_modules/vitest/.../@rolldown has only linux-ppc64/s390x bindings, no linux-x64-gnu",
+    "full npm ci exceeds the 45s non-backgroundable sandbox limit"
+  ],
+  "result": "partial",
+  "metrics": {
+    "tsc_exit": 0,
+    "node": "v22.22.3",
+    "npm": "10.9.8"
+  },
+  "failure_details": "Committed node_modules carries Windows + partial-arch native binaries (win32-x64, rolldown linux-ppc64/s390x). vitest/vite/eslint/playwright require a Linux npm ci -> EXECUTED IN CLEAN CI via ci.yml frontend job + e2e.yml on Linux runners.",
+  "artifacts": [],
+  "remaining_risks": [
+    "Frontend unit/build/e2e/a11y execution is CI-gated (Linux runners), not runnable in this sandbox"
+  ],
+  "reviewer_notes": "",
+  "content_sha256": "7350b9c23580576612b14a0edc99a6fef6ca5053545c8e85684cc73db9ddf703"
+}

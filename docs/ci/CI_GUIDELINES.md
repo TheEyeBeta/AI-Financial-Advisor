@@ -13,15 +13,14 @@ treat that as a bug — open a PR to reconcile, do not silently lower a gate.
 
 | Workflow file                       | Trigger                          | What it gates                                                                                  |
 | ----------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `ci.yml`                            | push/PR to `main`/`develop`/`staging` | Frontend lint + type + tests + build, OpenAPI drift, backend tests + Alembic, Docker build smoke |
+| `ci.yml`                            | push/PR to `main`/`develop`/`staging` | Frontend lint + type + tests + build, OpenAPI drift, backend tests + Alembic, Docker build smoke (backend + frontend images, `docker compose config` validation) |
 | `lint.yml`                          | push/PR (any branch)             | ESLint zero-warnings, `tsc --noEmit`, lint-disable budget                                      |
 | `e2e.yml`                           | push/PR to `main`/`develop`      | Playwright Chromium smoke suite against a mocked Vite dev server                               |
 | `security.yml`                      | push/PR (any branch)             | `npm audit` (prod), `pip-audit` (backend), `bandit` static security scan                       |
-| `docker-build.yml`                  | PR touching backend/Dockerfile   | Docker image builds (backend + frontend) and `docker compose config` validation                |
 | `integration-tests.yml`             | push to `main`/`staging`         | Backend integration tests against the test Supabase project                                    |
 | `deploy-staging.yml`                | push/PR to `staging`             | Railway staging deploy + full Playwright suite against the live staging URL                    |
 | *(native)* Vercel + Railway GitHub integrations | merge to `main`             | Production deploys (Actions-based `deploy.yml` removed in `5c08277`; see §3.7)                 |
-| `release-verification.yml`          | manual (post-deploy)             | Deployed frontend/backend SHA matches the expected release (`scripts/verify-release.mjs`)      |
+| `release-verification.yml`          | manual + automatic (`workflow_run` after `deploy-staging.yml` succeeds on `staging`) | Deployed frontend AND backend both match the expected release, exact 40-char SHA, host-allowlisted, evidence artifact uploaded (`scripts/verify-release.mjs`, `scripts/lib/release-verify-core.mjs`) |
 | `promote-to-prod.yml`               | manual                           | Opens a `staging → main` promotion PR                                                          |
 | `dast.yml`                          | weekly cron + manual             | OWASP ZAP baseline scan against staging                                                        |
 | `load-tests.yml`                    | manual                           | k6 chat / search / paper-trading load tests                                                    |
@@ -54,6 +53,11 @@ pytest tests/ -v          # pytest.ini supplies coverage + threshold
 export ALEMBIC_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/advisor_ci
 alembic -c alembic.ini upgrade head
 alembic -c alembic.ini check
+
+# Release verification script (only required if scripts/verify-release.mjs
+# or scripts/lib/release-verify-core.mjs changed) — mirrors
+# release-verification.yml's "Unit test the verifier" step
+npm run test:release-verify
 ```
 
 Convenience: `npm run validate` runs lint + type-check + test (without
@@ -124,13 +128,21 @@ Three jobs:
    `# nosec BXXX` on the offending line with a one-line justification.
    Do **not** add bandit-wide skips.
 
-### 3.5 Docker (`docker-build.yml`, `ci.yml#docker-build`)
+### 3.5 Docker (`ci.yml#docker-build`)
 
-- Runs only when `backend/**` or any `deployment/Dockerfile*` changes.
-- The frontend image needs `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-  build args — placeholders are fine for the smoke build.
-- `docker compose -f deployment/docker-compose.yml config` must succeed; this
-  catches YAML and env-variable typos before deploy.
+- One job, always runs (no path filter) on every push/PR to
+  `main`/`develop`/`staging` — needs `[frontend, backend]`. A former second
+  workflow (`docker-build.yml`) duplicated the backend image build with a
+  path-filtered trigger (`backend/**`, `deployment/Dockerfile*`); it was
+  folded into this job and removed so there is exactly one Docker-build
+  check, and it can no longer silently skip on PRs that don't touch those
+  paths (see §3.8's former path-filter caveat, now moot).
+- Builds the backend image, runs the production-config-fails-fast and
+  `/health/live` smoke tests (#210), then builds the frontend image
+  (`VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` build-arg placeholders are
+  fine for the smoke build) and validates
+  `docker compose -f deployment/docker-compose.yml config` — this catches
+  YAML and env-variable typos before deploy.
 
 ### 3.6 E2E (`e2e.yml`, `deploy-staging.yml#e2e`)
 
@@ -155,12 +167,18 @@ Three jobs:
 - `deploy-staging.yml` needs `STAGING_FRONTEND_URL`,
   `STAGING_BACKEND_URL`, and `RAILWAY_STAGING_SERVICE`.
 
-### 3.8 Branch protection (GitHub settings — human step)
+### 3.8 Branch protection (GitHub settings)
 
-No tool in this environment can apply a GitHub ruleset via API — this is a
-**manual step** a human with admin access performs at Settings → Rules →
-Rulesets → New branch ruleset, target `main`. The checklist below must be
-applied there; nothing in this repo enforces it until it is.
+**Applied and verified 2026-07-17**, required-check list extended
+2026-07-22 — ruleset `Production branch protection` (ID `19108544`) is
+active on `main` and `staging`; live probes confirmed direct push,
+force-push, and delete are all rejected (`GH013`). Evidence:
+`docs/evidence/platform/github-ruleset-20260717.md` and
+`docs/evidence/platform/github-ruleset-20260722.md`. Rulesets can be read
+and updated via `gh api repos/{owner}/{repo}/rulesets/{id}` (used for the
+2026-07-22 update) given a token with `repo` scope — no GitHub UI
+interaction is strictly required, but any change should still get the same
+scrutiny as this file's checklist.
 
 **Ruleset settings:**
 
@@ -180,20 +198,34 @@ title:
 
 | Required check name | Workflow file | Workflow `name:` |
 | ------------------- | -------- | -------- |
-| `frontend` | `ci.yml` | `CI/CD Pipeline` |
-| `backend` | `ci.yml` | `CI/CD Pipeline` |
-| `docker-build` | `ci.yml` (path-filtered) | `CI/CD Pipeline` |
+| `frontend` (`Frontend Quality & Build`) | `ci.yml` | `CI/CD Pipeline` |
+| `backend` (`Backend Tests`) | `ci.yml` | `CI/CD Pipeline` |
+| `docker-build` (`Docker Build Test`) | `ci.yml` (unconditional — no path filter) | `CI/CD Pipeline` |
 | `quality` (`Lint & Type Check`) | `lint.yml` | `Lint & Type Check` |
 | `test` (`E2E Tests`) | `e2e.yml` | `E2E Tests` |
-| `node-audit`, `python-audit`, `python-bandit`, `secret-scan` | `security.yml` | `Security Checks` |
+| `node-audit` (`Node dependency audit`), `python-audit` (`Python dependency audit`), `python-bandit` (`Python static security scan`), `secret-scan` (`Secret scanning (gitleaks)`) | `security.yml` | `Security Checks` |
+| `env-schema` (`Environment-schema validation (synthetic vars)`) | `readiness-controls.yml` (unconditional `pull_request`, no path filter) | `Readiness Controls` |
+| `evidence-schema` (`Evidence-schema validation (tamper-evident digests)`) | `readiness-controls.yml` | `Readiness Controls` |
+| `network-guard` (`AI-provider test-network guard active`) | `readiness-controls.yml` | `Readiness Controls` |
 
-`docker-build` in `ci.yml` and the whole of `docker-build.yml` only run when
-`backend/**` or a `deployment/Dockerfile*` changes (path-filtered) — GitHub
-required checks block merge on a check that never runs unless the ruleset
-also has "Require branches to be up to date" satisfied by a skipped-not-failed
-check; verify this behaves as expected before relying on it, since a
-path-filtered required check can otherwise strand PRs that don't touch those
-paths.
+These are the checks currently required by the active ruleset (verified
+2026-07-17, §3.8; extended 2026-07-22). `docker-build` runs unconditionally
+(no path filter, see §3.5) so it cannot strand a PR by silently skipping —
+the earlier path-filtered second Docker workflow that could have caused
+that was removed.
+
+**Added 2026-07-22:** the three `readiness-controls.yml` rows above (had
+already run on every `pull_request` with no path filter) are now in the
+ruleset's required-check list, bringing the total to 12. Verified both via
+the ruleset API and by opening a real PR (#262) and watching all 12 report
+and gate merge (`mergeStateStatus: BLOCKED` on missing review only, not on
+any check). Evidence: `docs/evidence/platform/github-ruleset-20260722.md`.
+
+**Not addable as a PR gate:** `release-verification.yml` only runs via
+`workflow_dispatch` or `workflow_run` after a staging deploy — it verifies
+an already-deployed environment, which does not exist at PR time, so it
+belongs in the promotion flow (`docs/readiness/RELEASE_POLICY.md`), not the
+branch ruleset.
 
 **`Vercel` / `Railway` checks:** these are **not** produced by any workflow
 in this repo. They only appear as required-check options if the Vercel and

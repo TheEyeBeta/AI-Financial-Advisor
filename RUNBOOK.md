@@ -98,7 +98,7 @@ Check backend Sentry dashboard for the event.
 |---|---|
 | Backend request logs | Terminal running uvicorn (structured: method, path, status, duration) |
 | Backend exceptions | Terminal + Sentry dashboard |
-| Backend audit log | `logs/audit.jsonl` (if `AI_AUDIT_LOG_PATH` is set) |
+| Backend audit log | `core.audit_events` in production/staging (durable, see `docs/security/AUDIT_TRAIL.md`); `logs/audit.jsonl` in local dev only |
 | Frontend errors | Browser DevTools console + Sentry dashboard |
 | Playwright traces | `test-results/` directory (open with `npx playwright show-trace <file>`) |
 | Playwright screenshots | `test-results/` directory (on failure) |

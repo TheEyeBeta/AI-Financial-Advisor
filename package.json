@@ -19,6 +19,7 @@
     "test:coverage": "vitest run --coverage",
     "test:ci": "vitest run --reporter=verbose 2>&1 | tee /dev/stderr | (! grep -q 'was not wrapped in act')",
     "test:bundle-budget": "node scripts/check-bundle-budget.mjs",
+    "test:release-verify": "node --test scripts/__tests__/verify-release.test.mjs",
     "test:e2e": "playwright test",
     "test:e2e:debug": "playwright test --debug",
     "test:e2e:report": "playwright show-report",

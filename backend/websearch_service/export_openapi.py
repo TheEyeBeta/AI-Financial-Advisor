@@ -23,6 +23,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # route metadata — it never makes a real Supabase call.
 os.environ.setdefault("SUPABASE_URL", "https://openapi-export.placeholder.supabase.co")
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", "openapi-export-placeholder")
+# create_app() startup validation (validate_audit_configuration et al.) is
+# scoped to "not development/test", not just "not production" — an unset
+# ENVIRONMENT here is neither, so it fails closed same as a real deployment
+# would. This script never serves traffic or writes audit events; it only
+# reads static route metadata, so "test" is accurate, not a loophole.
+os.environ.setdefault("ENVIRONMENT", "test")
 
 from app.main import app  # noqa: E402
 

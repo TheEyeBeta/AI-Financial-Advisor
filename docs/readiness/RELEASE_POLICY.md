@@ -77,11 +77,73 @@ ruleset in the same change, and say so in the PR description.
 | Backend | `/health` and `/health/ready` return a `release` object: `git_sha` (`GIT_SHA` env, falling back to Railway-native `RAILWAY_GIT_COMMIT_SHA`), `app_version` (`APP_VERSION`), `build_timestamp` (`BUILD_TIMESTAMP`), `expected_schema_revision` (Alembic head shipped in the image), `environment` | `app/health_checks.py::release_info`, tests in `tests/test_health_checks.py` |
 | Frontend | `<meta name="release-sha">` stamped into `index.html` at build time from `VITE_RELEASE_SHA` or `VITE_VERCEL_GIT_COMMIT_SHA`; also used as the Sentry `release` (`src/lib/telemetry.ts::getReleaseSha`) | `vite.config.ts` (`releaseShaMetaTag` plugin) |
 | Database | `public.alembic_version` compared to the build's expected revision at readiness; mismatch ⇒ instance reports not-ready | `app/health_checks.py::_check_schema_revision` |
-| Verification | `node scripts/verify-release.mjs --expected-sha <sha> --frontend <url> --backend <url>` — fails non-zero on any mismatch or when the deployment exposes no SHA | `scripts/verify-release.mjs`, `release-verification.yml` |
+| Verification | `node scripts/verify-release.mjs --expected-sha <full-40-char-sha> --frontend <url> --backend <url> --allowed-hosts <host1,host2>` — fails non-zero on any mismatch, on a short/partial SHA, on a host outside the allowlist, or when the deployment exposes no SHA | `scripts/verify-release.mjs`, `scripts/lib/release-verify-core.mjs`, `release-verification.yml` |
 
 **Smoke rule:** a release is not "live" until `verify-release` has passed
 against the deployed URLs with the promoted SHA. "The deploy dashboard says
 success" is not evidence the right build is serving traffic.
+
+### 3.1 Verification is fail-closed by construction
+
+`verify-release.mjs` (backed by `scripts/lib/release-verify-core.mjs`, unit
+tested in `scripts/__tests__/verify-release.test.mjs`) enforces, and cannot
+be made to skip:
+
+- **Both components required.** A run given only a frontend URL or only a
+  backend URL fails immediately with an explicit error — it never reports a
+  pass having checked one artifact. This check lives solely in
+  `scripts/verify-release.mjs`/`release-verify-core.mjs`; `release-verification.yml`
+  does not duplicate it in bash, so there is nothing in the workflow to drift
+  out of sync — it just passes `FRONTEND_URL`/`BACKEND_URL` through verbatim,
+  even when empty, and lets the script's fail-closed evidence-producing path
+  handle it.
+- **Full SHA only, lowercase.** `--expected-sha` must match `^[0-9a-f]{40}$`
+  exactly. There is no short/prefix-match mode and no case-insensitive
+  fallback (the previous `--allow-short` flag has been removed from the
+  script, the workflow, and this document — Vercel and Railway are both
+  configured to expose the full SHA, so there is no legitimate reason to
+  accept a truncated or uppercase one).
+- **Strict URL parsing.** Every target URL is parsed with the platform `URL`
+  class and rejected if it is not `https:`, has no hostname, embeds
+  credentials (`user:pass@host`), or contains a fragment (`#...`). A
+  rejected URL's credentials/query/fragment are never echoed into error
+  messages, logs, or the evidence file — only the sanitized
+  scheme+host+path is ever displayed.
+- **Explicit host allowlist.** Each URL's hostname must appear in the
+  `--allowed-hosts` list (workflow: `vars.RELEASE_ALLOWED_HOSTS`, a
+  comma-separated list of approved staging/production Vercel and Railway
+  hostnames). There is no default allowlist and no substring/heuristic check
+  (e.g. matching on the literal word "production") — an unconfigured
+  allowlist fails the run rather than silently accepting any host.
+- **No off-host or off-HTTPS redirects.** If the fetch is redirected to a
+  different hostname than the one that was validated against the allowlist,
+  or downgraded from HTTPS to HTTP on the same host, the check fails — a
+  redirect cannot be used to serve a different deployment's answer, or a
+  plaintext one, for an approved URL.
+- **Bounded fetches.** Each frontend/backend fetch carries a 10-second
+  timeout (`DEFAULT_FETCH_TIMEOUT_MS` in `release-verify-core.mjs`); an
+  unresponsive target fails the check with clear evidence instead of hanging
+  the release gate.
+- **All four backend release fields required.** `release.git_sha`,
+  `release.app_version`, `release.expected_schema_revision`, and
+  `release.environment` must all be present in `/health`; any missing field
+  fails the backend check.
+- **`app_version` must equal the expected SHA unless mapped.** By default the
+  backend's `app_version` must equal `--expected-sha` exactly (SHA-as-version
+  is the default scheme in this repo). A project that wants semantic version
+  strings instead may pass `--version-map <path-to-json>`, a
+  `{ "<full-sha>": "<app_version>" }` mapping checked into the repo and
+  reviewed like any other release artifact — there is no way to relax this
+  check without such a committed, reviewable mapping.
+- **Machine-readable evidence, always.** Every run writes
+  `release-verification-evidence.json` (`expected_sha`, per-component `sha`,
+  `app_version`, `expected_schema_revision`, `environment`, URLs with
+  credentials/query strings/fragments stripped, `timestamp`, and `verdict`)
+  regardless of pass/fail — including a bad invocation (missing flags, an
+  unparsable `--version-map`), which writes the same evidence shape with an
+  `errors` list instead of skipping the file. `release-verification.yml`
+  uploads it as a build artifact (`always()`, so a
+  failing run's evidence is preserved too) for the release record.
 
 ## 4. Failed-check handling
 
@@ -106,10 +168,39 @@ success" is not evidence the right build is serving traffic.
 | Vercel: expose system env vars (provides `VITE_VERCEL_GIT_COMMIT_SHA`) | Vercel project → Settings → Environment Variables → "Automatically expose System Environment Variables" | `EXTERNAL ACCESS REQUIRED` |
 | Railway: confirm `RAILWAY_GIT_COMMIT_SHA` is present (or set `GIT_SHA`/`APP_VERSION`/`BUILD_TIMESTAMP`) on staging + production services | Railway service → Variables | `EXTERNAL ACCESS REQUIRED` |
 | Vercel/Railway "wait for CI" deploy gating on `main`, if available on current plans | platform dashboards | `EXTERNAL ACCESS REQUIRED` |
+| `RELEASE_ALLOWED_HOSTS` repository variable — comma-separated list of the exact approved staging/production Vercel and Railway hostnames (no wildcards) | GitHub repo → Settings → Secrets and variables → Actions → Variables → New repository variable | `EXTERNAL ACCESS REQUIRED` — `release-verification.yml` fails closed until this is set |
 
 Until each row above is confirmed by a human with dashboard access, treat the
 corresponding guarantee as **documented but not enforced**, and say so in any
 readiness claim.
+
+## 7. Automatic post-deployment verification
+
+`release-verification.yml` also runs automatically on `workflow_run` after
+`deploy-staging.yml` ("Deploy Staging") completes successfully on the
+`staging` branch (not on PR preview runs, and not on forks — both are
+excluded by the job's `if:` condition). This closes the gap where a human
+forgets to click "Run workflow" after a staging deploy.
+
+Design constraints this respects, deliberately:
+
+- **No deployment loop.** This workflow only reads deployed state over HTTPS;
+  it never deploys anything and cannot re-trigger "Deploy Staging", so there
+  is no cycle to runaway.
+- **No PR-supplied targets.** The automatic run ignores every field on the
+  triggering `workflow_run` event except `head_sha` (used as `expected_sha`)
+  and uses only this workflow's own `STAGING_FRONTEND_URL` /
+  `STAGING_BACKEND_URL` secrets for the URLs — the same secrets the manual
+  default path already uses. A PR cannot smuggle an arbitrary verification
+  target or secret through this trigger.
+- **Production is not auto-verified.** There is no equivalent `workflow_run`
+  hook for production because there is no Actions-based production deploy
+  workflow to hook (§1). Production verification stays a required manual
+  step in `RELEASE_CHECKLIST.md`: run `release-verification.yml` via
+  `workflow_dispatch` with the production URLs supplied explicitly as
+  `frontend_url` / `backend_url` inputs (there is no production-URL secret
+  today; adding one is an `EXTERNAL ACCESS REQUIRED` step for a future
+  change, not assumed here).
 
 ## 6. Keyboard E2E gate (Phase 1 finding, fixed)
 

@@ -46,7 +46,7 @@ Run quarterly and before major releases.
 
 ### BT-1: Logging and telemetry
 - Ensure security-relevant events are captured as structured logs (auth failures, rate-limit events, elevated errors).
-- Preserve and rotate `logs/audit.jsonl` with retention policy.
+- Privileged/destructive operations durably audited in `core.audit_events` (append-only, hash-chained, no update/delete grant); retention handled by export design, never in-place deletion — see `docs/security/AUDIT_TRAIL.md`. `logs/audit.jsonl` remains a local-dev-only fallback.
 - Add dashboards/alerts for:
   - auth failures spike,
   - sudden `429` spikes,

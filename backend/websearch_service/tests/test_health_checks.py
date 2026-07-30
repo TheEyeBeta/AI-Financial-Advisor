@@ -48,7 +48,26 @@ def test_expected_schema_revision_matches_alembic_head():
     health_checks._expected_revision_cache = None
     revision = health_checks.expected_schema_revision()
     assert revision, "the build must be able to read its own alembic head"
-    assert revision.startswith("00")
+    assert revision == "0045_scheduler_lock_renew"
+
+
+def test_expected_schema_revision_is_independent_of_cwd(monkeypatch, tmp_path):
+    """Head resolution must not depend on the process launch directory (#208).
+
+    alembic.ini's script_location/prepend_sys_path resolve via the %(here)s
+    token (the ini file's own directory), not the process cwd — the deployed
+    image has no repo checkout to coincidentally match against, and Railway
+    does not guarantee any particular working directory at launch.
+    """
+    from app import health_checks
+
+    health_checks._expected_revision_cache = None
+    monkeypatch.chdir(tmp_path)
+    try:
+        revision = health_checks.expected_schema_revision()
+    finally:
+        health_checks._expected_revision_cache = None
+    assert revision == "0045_scheduler_lock_renew"
 
 
 @pytest.mark.asyncio
@@ -76,6 +95,30 @@ async def test_readiness_survives_unknown_schema_revision():
     # Unknown must not take the service down, but must mark it degraded.
     assert report["components"]["schema_revision"]["status"] == "unknown"
     assert report["degraded"] is True
+
+
+@pytest.mark.asyncio
+async def test_schema_revision_check_failure_never_leaks_connection_details():
+    """A DB/connection failure while checking schema revision must surface only
+    the exception *type*, never its message — which for a DB client can embed
+    the DSN, host, or credentials (Gate 1: no secrets in health output)."""
+    from app import health_checks
+
+    connection_details = "postgresql://svc_user:test-only-marker@db.internal.example:5432/prod"
+
+    class _Client:
+        def schema(self, *_a):
+            raise ConnectionError(f"could not connect to {connection_details}")
+
+    with patch("app.services.supabase_client.supabase_client", _Client()):
+        result = await health_checks._check_schema_revision(timeout=2)
+
+    assert result["status"] == "unknown"
+    assert result["detail"] == "ConnectionError"
+    serialized = str(result)
+    assert "test-only-marker" not in serialized
+    assert "svc_user" not in serialized
+    assert "db.internal.example" not in serialized
 
 
 @pytest.mark.asyncio
@@ -126,6 +169,16 @@ def test_release_info_reports_env_identity(monkeypatch):
     assert info["environment"] == "staging"
     # The expected schema revision must match the shipped alembic head.
     assert info["expected_schema_revision"] == health_checks.expected_schema_revision()
+
+
+def test_release_info_reports_production_identity(monkeypatch):
+    """ENVIRONMENT=production must report release.environment=production —
+    and, symmetrically with the staging test above, never the reverse: a
+    staging deploy must never surface as production (Gate 1)."""
+    from app import health_checks
+
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    assert health_checks.release_info()["environment"] == "production"
 
 
 def test_release_info_falls_back_to_railway_sha_and_nulls(monkeypatch):

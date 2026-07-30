@@ -31,7 +31,7 @@ document wins.
 | Frontend env | `.env` from `.env.example` | Vercel project env vars |
 | Backend env | `backend/websearch_service/.env.example` | Railway env vars — startup **fails fast** if required vars are missing/placeholder (`app/config.py`) |
 | Required in prod | — | `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `OPENAI_API_KEY`, `CORS_ORIGINS`, `TRUSTED_HOSTS`, `ENVIRONMENT=production` |
-| Optional / feature-gated | Tavily, Perplexity, DataAPI creds, Redis, Sentry DSNs, PostHog | same; Redis strongly recommended (shared rate limits + WebSocket tickets) |
+| Optional / feature-gated | Tavily, Perplexity, DataAPI creds, Redis/Valkey, Sentry DSNs, PostHog | same; Valkey (Redis-compatible, `REDIS_URL`) strongly recommended (shared rate limits + WebSocket tickets) — see `deployment/DEPLOYMENT.md` |
 
 ## Worker / scheduler topology
 
@@ -40,16 +40,25 @@ document wins.
   where `SCHEDULER_ENABLED=true` — exactly one replica (or the dedicated
   `run_scheduler.py` process). The admin job worker runs in the scheduler
   process.
-- With >1 web worker/replica and no Redis, rate limiting and WebSocket
-  tickets fall back to process-local state — configure `REDIS_URL` in
-  production.
+- With >1 web worker/replica, rate limiting and WebSocket tickets require a
+  shared store, and the service will fail to start without one
+  (`validate_rate_limit_configuration()` raises `FATAL` rather than
+  degrading) — configure `REDIS_URL` (pointed at a Valkey instance; see
+  `deployment/DEPLOYMENT.md`) in production.
 
 ## Health, monitoring, telemetry
 
 - `/health/live` — liveness (no external calls). `/health/ready` — readiness:
   config validation, Supabase ping, **schema revision match** (deployed
   Alembic head vs `public.alembic_version`; mismatch = not ready), rate-limit
-  backend, startup completion; search-provider status is informational.
+  backend, **global AI budget guard backend** (`ai_budget_guard` component;
+  see `docs/ai/AI_CONTROLS.md` §1), startup completion; search-provider
+  status is informational.
+- Global AI spend/capacity: `GET /api/admin/ai-budget/status` (admin/service-role
+  JWT) — circuit-breaker state, daily/monthly spend vs budget, request/token
+  counters, concurrency. Admin-authorized time-bounded override:
+  `POST`/`DELETE /api/admin/ai-budget/override` (audited, disabled by default).
+  See `docs/runbooks/cost-spike.md` and `docs/runbooks/redis-unavailable.md`.
 - Frontend Sentry: privacy-hardened (no default PII, redaction, sampling
   policy) — `docs/security/TELEMETRY_PRIVACY.md`. Backend Sentry via
   `SENTRY_DSN`, release tagged from `APP_VERSION`.
@@ -86,7 +95,7 @@ claimed in docs that CI does not enforce.
 - **Implemented:** email+password and Google auth, onboarding, IRIS chat with
   idempotent transactional turns, paper trading via trade journal, Academy,
   news (cursor-paginated), admin panel with durable jobs, readiness probes,
-  rate limiting (Redis or single-worker local mode).
+  rate limiting (Valkey/Redis-compatible, or single-worker local mode).
 - **Partial:** live Trade Engine data (depends on external DataAPI
   availability — UI shows explicit degraded/unavailable states);
   authed-page performance/a11y automation (signed-out surfaces automated;
@@ -126,8 +135,11 @@ claimed in docs that CI does not enforce.
 - Live market data depends on one upstream provider; degraded states are
   explicit but there is no secondary live provider.
 - In-process news cache (per worker) — acceptable at beta scale.
-- No billing/quota beyond rate limits; per-user AI quota is a launch
-  threshold tracked in #216.
+- Per-user AI quota (rate limiter) plus a **global** cross-tenant AI
+  request/token/concurrency limiter and an internal USD spend circuit
+  breaker (`docs/ai/AI_CONTROLS.md` §1); no UI dashboard yet beyond the
+  read-only admin status endpoint — a frontend admin page for it is a
+  follow-up, not yet built.
 
 ## Reliability program status (SLOs, dashboards, load tests, DR)
 
@@ -147,7 +159,7 @@ no claims here are backed by a live run unless a results doc is linked.
 - **Load testing:** scaffolding exists in `tests/load/` (k6 scripts for chat,
   paper trading, search). No run against a dedicated staging environment has
   been executed or recorded; no `LOAD_TEST_RESULTS.md` exists. Running Test
-  profiles A–E requires a dedicated staging Railway/Supabase/Redis stack —
+  profiles A–E requires a dedicated staging Railway/Supabase/Valkey stack —
   out of scope for an agent session without those credentials.
 - **Recovery drill:** `docs/DB_RECOVERY.md` documents a *rehearsed-on-disposable-Postgres*
   forward-recovery procedure (fresh install, idempotent re-run, downgrade/upgrade

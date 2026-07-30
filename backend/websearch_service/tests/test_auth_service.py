@@ -329,6 +329,117 @@ def test_require_auth_accepts_valid_hs256_token(monkeypatch):
     assert resp.json() == {"auth_id": "user-42", "email": "u@test.local"}
 
 
+# ─── SEC-B2-05 — require_auth must reject any non-'authenticated' role ─────
+# https://github.com/TheEyeBeta/AI-Financial-Advisor — Gate 2 AUTH-HIGH-01:
+# a validly-signed role='anon' token was live-confirmed to pass require_auth.
+
+def _role_token(role) -> str:
+    payload = {
+        "sub": "user-1",
+        "iat": int(time.time()),
+        "exp": int(time.time()) + 60,
+        "iss": supabase_test_issuer(),
+    }
+    if role is not None:
+        payload["role"] = role
+    return pyjwt.encode(payload, TEST_JWT_SECRET, algorithm="HS256")
+
+
+@pytest.mark.parametrize(
+    "bad_role",
+    ["anon", "service_role", "", "Authenticated", "AUTHENTICATED", "admin", "unknown"],
+)
+def test_require_auth_rejects_non_authenticated_role(monkeypatch, bad_role):
+    monkeypatch.setenv("AUTH_REQUIRED", "true")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+    client = TestClient(_protected_app())
+    resp = client.get("/me", headers={"Authorization": f"Bearer {_role_token(bad_role)}"})
+    assert resp.status_code == 401
+    assert "Bearer" not in resp.text and TEST_JWT_SECRET not in resp.text
+
+
+def test_require_auth_rejects_service_role_token_from_normal_flow(monkeypatch, service_role_jwt):
+    """A real service-role JWT (as issued for automated/CI callers) must never
+    grant access through the ordinary user-facing require_auth dependency."""
+    monkeypatch.setenv("AUTH_REQUIRED", "true")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+    client = TestClient(_protected_app())
+    resp = client.get("/me", headers={"Authorization": f"Bearer {service_role_jwt}"})
+    assert resp.status_code == 401
+
+
+def test_require_auth_accepts_only_exact_authenticated_role(monkeypatch):
+    monkeypatch.setenv("AUTH_REQUIRED", "true")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+    client = TestClient(_protected_app())
+    resp = client.get("/me", headers={"Authorization": f"Bearer {_role_token('authenticated')}"})
+    assert resp.status_code == 200
+    assert resp.json()["auth_id"] == "user-1"
+
+
+def test_verify_supabase_jwt_required_role_rejects_mismatch(monkeypatch):
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+    token = _hs256(TEST_JWT_SECRET, role="anon")
+    with pytest.raises(HTTPException) as excinfo:
+        _verify_supabase_jwt(
+            token,
+            required_claims=("sub", "exp", "iat", "role"),
+            allow_rest_fallback=False,
+            required_role="authenticated",
+        )
+    assert excinfo.value.status_code == 401
+
+
+def test_verify_supabase_jwt_required_role_none_skips_check(monkeypatch):
+    """verify_service_role and other callers that don't pass required_role
+    keep their own separate role handling untouched."""
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+    token = _hs256(TEST_JWT_SECRET, role="service_role")
+    payload = _verify_supabase_jwt(
+        token,
+        required_claims=("sub", "exp", "iat", "role"),
+        allow_rest_fallback=False,
+    )
+    assert payload["role"] == "service_role"
+
+
+def test_verify_supabase_jwt_required_role_rest_fallback_fails_closed(monkeypatch):
+    """REST-fallback payloads never carry a role claim, so a caller that
+    requires a specific role must be rejected rather than trusted blindly."""
+    monkeypatch.delenv("SUPABASE_JWT_SECRET", raising=False)
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_ANON_KEY", "test-anon-key")
+    token = _hs256("irrelevant-since-no-local-secret")
+    with patch.object(
+        auth_mod, "_verify_jwt_via_supabase_rest",
+        return_value={"sub": "u-rest", "email": "u@example.com"},
+    ):
+        with pytest.raises(HTTPException) as excinfo:
+            _verify_supabase_jwt(
+                token,
+                required_claims=("sub", "exp", "iat", "role"),
+                allow_rest_fallback=True,
+                required_role="authenticated",
+            )
+    assert excinfo.value.status_code == 401
+
+
+def test_require_websocket_auth_rejects_anon_role_header_token(monkeypatch):
+    import asyncio
+    from app.services.auth import require_websocket_auth
+
+    monkeypatch.setenv("AUTH_REQUIRED", "true")
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)
+
+    class _WS:
+        headers = {"Authorization": f"Bearer {_role_token('anon')}"}
+        query_params = {}
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(require_websocket_auth(_WS()))
+    assert excinfo.value.status_code == 401
+
+
 def test_optional_auth_returns_none_when_missing(monkeypatch):
     monkeypatch.setenv("AUTH_REQUIRED", "true")
     monkeypatch.setenv("SUPABASE_JWT_SECRET", TEST_JWT_SECRET)

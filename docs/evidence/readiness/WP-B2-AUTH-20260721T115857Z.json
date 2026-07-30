@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-AUTH-20260721T115857Z",
+  "work_package": "WP-B2-AUTH",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "route inspection + auth test census",
+  "scenario": "Endpoint auth matrix + verified rejection coverage",
+  "preconditions": [],
+  "assertions": [
+    "no missing-auth endpoint found",
+    "admin routes _require_admin",
+    "refresh-all service-role in prod",
+    "invalid-sig/expired/malformed/missing/role/env-cross all tested"
+  ],
+  "result": "pass",
+  "metrics": {
+    "auth_tests": 109,
+    "auth_coverage_pct": 93,
+    "require_auth": 34,
+    "admin_dep": 25,
+    "optional_auth": 3
+  },
+  "failure_details": "",
+  "artifacts": [
+    "docs/security/ENDPOINT_AUTH_MATRIX.md",
+    "docs/security/GOOGLE_AUTH_CHECKLIST.md"
+  ],
+  "remaining_risks": [],
+  "reviewer_notes": "",
+  "content_sha256": "a8e486931a8d7db166fe2d10dcd7ae16001cd7734a79a82794045c3f5e37cc38"
+}

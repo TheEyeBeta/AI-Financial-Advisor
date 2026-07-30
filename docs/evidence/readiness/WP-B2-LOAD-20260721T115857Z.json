@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-LOAD-20260721T115857Z",
+  "work_package": "WP-B2-LOAD",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "node --check tests/load/*.js",
+  "scenario": "k6 load profiles validation",
+  "preconditions": [],
+  "assertions": [
+    "10/10 load scripts pass syntax check",
+    "profiles a-d define p95/p99/error-rate thresholds"
+  ],
+  "result": "partial",
+  "metrics": {
+    "scripts_ok": 10,
+    "scripts_fail": 0
+  },
+  "failure_details": "k6 binary not installed and no running backend in sandbox; execution deferred to staging.",
+  "artifacts": [],
+  "remaining_risks": [
+    "Named smoke/spike/stress/endurance profiles; run mocked soak in staging"
+  ],
+  "reviewer_notes": "",
+  "content_sha256": "399e2ea97c3bcf1876e726468c4484d3963dce065daa40536713eb3bd5aeab08"
+}

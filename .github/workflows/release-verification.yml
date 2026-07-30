@@ -3,9 +3,27 @@ name: Release Verification
 # Confirms that a deployed frontend + backend serve the expected release SHA
 # (Phase 1 — exact-SHA enforcement, docs/readiness/RELEASE_POLICY.md).
 #
+# This is a fail-closed, production-grade gate. All of the following is
+# enforced inside scripts/verify-release.mjs / scripts/lib/release-verify-core.mjs
+# (single source of truth — this workflow does not duplicate the checks in
+# bash, so there is nothing here to drift out of sync with the script):
+#   - BOTH a frontend URL and a backend URL are required. It must never
+#     report a pass having checked only one component.
+#   - expected_sha must be the FULL 40-character lowercase git SHA —
+#     no short/prefix matching is supported anywhere in this path.
+#   - Verification targets must resolve to an explicitly configured host
+#     allowlist (RELEASE_ALLOWED_HOSTS repository variable). There is no
+#     substring/heuristic host check and no default allowlist — an
+#     unconfigured allowlist fails the run rather than accepting any host.
+#   - Every outcome, including a bad invocation, writes the JSON evidence
+#     artifact uploaded below — there is no silent gap in the audit trail.
+#
 # Run this after every staging or production deployment:
 #   - expected_sha defaults to the commit the workflow runs on;
 #   - URLs default to the staging secrets so the common case is one click.
+#   - It is also invoked automatically after a successful staging deploy
+#     (workflow_run below), using only repository secrets — never
+#     PR-supplied input — for the target URLs.
 #
 # Prerequisite (EXTERNAL): the deploy targets must expose their SHA —
 #   Vercel: enable "Automatically expose System Environment Variables"
@@ -18,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       expected_sha:
-        description: "Full git SHA the deployment must serve (blank = this commit)"
+        description: "Full 40-character git SHA the deployment must serve (blank = this commit)"
         required: false
       frontend_url:
         description: "Frontend base URL (blank = STAGING_FRONTEND_URL secret)"
@@ -26,6 +44,18 @@ on:
       backend_url:
         description: "Backend base URL (blank = STAGING_BACKEND_URL secret)"
         required: false
+  workflow_run:
+    # Automatic post-deployment invocation: re-verify staging immediately
+    # after "Deploy Staging" finishes, without a human clicking "Run
+    # workflow". This intentionally does NOT read anything from the
+    # triggering workflow_run event (no PR-supplied URLs/SHAs/secrets) —
+    # it only uses this workflow's own repository secrets, exactly like the
+    # manual dispatch default path, so a pull_request-triggered deploy run
+    # cannot smuggle an arbitrary verification target. There is no loop: this
+    # workflow does not deploy anything, so it cannot re-trigger "Deploy
+    # Staging".
+    workflows: ["Deploy Staging"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -37,6 +67,11 @@ concurrency:
 jobs:
   verify-release:
     name: Verify deployed release SHA
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'staging' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -49,27 +84,41 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Unit test the verifier
+        run: node --test scripts/__tests__/verify-release.test.mjs
+
       - name: Verify frontend and backend release SHA
         env:
-          EXPECTED_SHA: ${{ inputs.expected_sha || github.sha }}
-          FRONTEND_URL: ${{ inputs.frontend_url || secrets.STAGING_FRONTEND_URL }}
-          BACKEND_URL: ${{ inputs.backend_url || secrets.STAGING_BACKEND_URL }}
+          # workflow_run cannot carry workflow_dispatch inputs — those only
+          # exist for manual runs — so the automatic path always uses the
+          # commit that triggered the deploy and the staging secrets.
+          #
+          # All required-field, SHA-format, and allowlist-presence validation
+          # lives solely in scripts/verify-release.mjs (there is no duplicate
+          # bash-side check here to drift out of sync with it) — an empty or
+          # malformed value below is deliberately passed straight through so
+          # the script's own fail-closed evidence-producing path handles it.
+          EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (inputs.expected_sha || github.sha) }}
+          FRONTEND_URL: ${{ github.event_name == 'workflow_run' && secrets.STAGING_FRONTEND_URL || (inputs.frontend_url || secrets.STAGING_FRONTEND_URL) }}
+          BACKEND_URL: ${{ github.event_name == 'workflow_run' && secrets.STAGING_BACKEND_URL || (inputs.backend_url || secrets.STAGING_BACKEND_URL) }}
+          ALLOWED_HOSTS: ${{ vars.RELEASE_ALLOWED_HOSTS }}
         run: |
-          if [ -z "$FRONTEND_URL" ] && [ -z "$BACKEND_URL" ]; then
-            echo "No target URLs available (inputs empty and staging secrets unset)." >&2
-            exit 1
-          fi
-          # Deployment targets are always HTTPS; refuse anything else so a
-          # dispatcher cannot point the runner at arbitrary plaintext or
-          # non-URL targets. (The verifier additionally fails on redirects
-          # that leave the requested host.)
-          for url in "$FRONTEND_URL" "$BACKEND_URL"; do
-            if [ -n "$url" ] && [[ "$url" != https://* ]]; then
-              echo "Refusing non-HTTPS verification target: $url" >&2
-              exit 1
-            fi
-          done
-          ARGS=(--expected-sha "$EXPECTED_SHA")
-          [ -n "$FRONTEND_URL" ] && ARGS+=(--frontend "$FRONTEND_URL")
-          [ -n "$BACKEND_URL" ] && ARGS+=(--backend "$BACKEND_URL")
-          node scripts/verify-release.mjs "${ARGS[@]}"
+          node scripts/verify-release.mjs \
+            --expected-sha "$EXPECTED_SHA" \
+            --frontend "$FRONTEND_URL" \
+            --backend "$BACKEND_URL" \
+            --allowed-hosts "$ALLOWED_HOSTS" \
+            --evidence-out release-verification-evidence.json
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-verification-evidence
+          path: release-verification-evidence.json
+          # The verifier writes this file on every outcome, including a bad
+          # invocation (see scripts/verify-release.mjs) — its absence means
+          # the job crashed before even that, which is itself worth failing
+          # loudly on rather than silently warning.
+          if-no-files-found: error
+          retention-days: 90

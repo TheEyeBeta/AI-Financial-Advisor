@@ -146,13 +146,22 @@ self._endpoint_configs: Dict[str, RateLimitConfig] = {
 }
 ```
 
+## Distributed Backend
+
+**Implemented** (this doc predates it): distributed rate limiting across
+multiple workers/replicas is backed by [Valkey](https://valkey.io)
+(BSD-3-Clause Redis fork), accessed via `app/services/rate_limit_redis.py`
+and the `REDIS_URL`/`RATE_LIMIT_REDIS_URL` env vars — see
+`docs/runbooks/redis-unavailable.md` and `deployment/DEPLOYMENT.md`. Single
+in-memory (`ALLOW_IN_MEMORY_RATE_LIMIT=true`) fallback remains for
+single-worker beta deployments only.
+
 ## Future Enhancements
 
-1. **Redis Backend**: For distributed rate limiting across multiple instances
-2. **Per-User Tiers**: Different limits for free/premium users
-3. **Dynamic Limits**: Adjust limits based on system load
-4. **Cost Alerts**: Notify admins when costs exceed thresholds
-5. **Whitelist/Blacklist**: Manual override for specific users/IPs
+1. **Per-User Tiers**: Different limits for free/premium users
+2. **Dynamic Limits**: Adjust limits based on system load
+3. **Cost Alerts**: Notify admins when costs exceed thresholds
+4. **Whitelist/Blacklist**: Manual override for specific users/IPs
 
 ## Testing
 

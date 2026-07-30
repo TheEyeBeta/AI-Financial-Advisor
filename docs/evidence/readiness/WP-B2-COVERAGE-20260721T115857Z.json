@@ -1,0 +1,32 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B2-COVERAGE-20260721T115857Z",
+  "work_package": "WP-B2-COVERAGE",
+  "environment": "test",
+  "app_version": "readiness-batch2",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T11:58:57Z",
+  "finished_at": "2026-07-21T11:58:57Z",
+  "command": "pytest --cov (writable COVERAGE_FILE=/tmp)",
+  "scenario": "Critical-module coverage",
+  "preconditions": [],
+  "assertions": [
+    "critical modules well covered"
+  ],
+  "result": "pass",
+  "metrics": {
+    "auth_pct": 93,
+    "ai_budget_guard_pct": 84,
+    "env_validation_pct": 91,
+    "correlation_pct": 91,
+    "invite_pct": 97,
+    "recovery_pct": 84
+  },
+  "failure_details": "",
+  "artifacts": [],
+  "remaining_risks": [
+    "Global --cov run exceeds 45s sandbox window; CI enforces --cov-fail-under=69"
+  ],
+  "reviewer_notes": "",
+  "content_sha256": "9f42241864ffe2d3d4c041f85eecf5b7b5a17c4962015286e1d609282062907e"
+}

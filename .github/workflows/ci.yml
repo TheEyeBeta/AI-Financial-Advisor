@@ -216,6 +216,34 @@ jobs:
           fi
           grep -q "FATAL" /tmp/cfg-fail.log
 
+      - name: Smoke test — image resolves Alembic head from an arbitrary working directory
+        # Readiness reports schema_revision.status "unknown" whenever the build
+        # can't read its own Alembic head (#208). That head resolution must not
+        # depend on the process's cwd matching the repo checkout layout — the
+        # deployed image only ships backend/websearch_service, and Railway does
+        # not guarantee any particular launch directory. Run from /tmp (neither
+        # /app nor the repo root) to prove it's launch-directory-independent.
+        #
+        # The expected value is derived from the image's own shipped Alembic
+        # history (source of truth), not hard-coded — so this doesn't need a
+        # manual bump every time a new revision is added.
+        run: |
+          source_of_truth=$(docker run --rm ai-financial-advisor-backend:test \
+            python -m alembic -c alembic.ini heads | awk '{print $1}')
+          echo "alembic heads (source of truth): $source_of_truth"
+          docker run --rm -w /tmp \
+            -e EXPECTED_HEAD="$source_of_truth" \
+            ai-financial-advisor-backend:test python -c "
+          import os, sys
+          sys.path.insert(0, '/app')
+          from app.health_checks import expected_schema_revision
+          head = expected_schema_revision()
+          expected = os.environ['EXPECTED_HEAD']
+          print('resolved head:', head)
+          assert head, 'expected_schema_revision() returned nothing'
+          assert head == expected, f'{head!r} != {expected!r}'
+          "
+
       - name: Smoke test — container serves /health/live with valid config
         run: |
           docker run -d --rm --name backend-smoke -p 18000:8000 \
@@ -239,4 +267,31 @@ jobs:
           docker logs backend-smoke || true
           docker stop backend-smoke || true
           exit 1
+
+      # ── Frontend image + compose config (folded in from the former
+      #    docker-build.yml — that workflow only ran on path-filtered PR
+      #    triggers, so it could silently skip and was never a reliable
+      #    required check; this job runs on every push/PR). ─────────────────
+      - name: Build frontend Docker image
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          file: ./deployment/Dockerfile.frontend
+          push: false
+          tags: ai-financial-advisor-frontend:test
+          build-args: |
+            VITE_SUPABASE_URL=https://test.supabase.co
+            VITE_SUPABASE_ANON_KEY=test-key
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Validate docker-compose config
+        # docker-compose.yml interpolates ${VITE_SUPABASE_URL}/${VITE_SUPABASE_ANON_KEY}
+        # from the shell env; `compose config` doesn't fail on an unset
+        # variable (silently substitutes empty), so these must be set here
+        # for the check to actually validate the env-variable contract.
+        env:
+          VITE_SUPABASE_URL: https://test.supabase.co
+          VITE_SUPABASE_ANON_KEY: test-key
+        run: docker compose -f deployment/docker-compose.yml config
 

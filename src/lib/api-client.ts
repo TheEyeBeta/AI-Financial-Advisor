@@ -1,8 +1,6 @@
 import { supabase } from '@/lib/supabase';
+import { getPythonApiUrl } from '@/lib/env';
 import type { StockDetail } from '@/types/database';
-
-const BASE_URL = import.meta.env.VITE_API_URL ||
-  'https://ai-financial-advisor-backend-production.up.railway.app';
 
 // ─── Error type ──────────────────────────────────────────────────────────────
 
@@ -80,8 +78,11 @@ async function request<T>(
     ...fetchOptions
   } = options;
 
-  const base = baseUrl ?? BASE_URL;
-  const url = path.startsWith('http') ? path : `${base}${path}`;
+  // Resolved lazily (not at module load), and only for relative paths, so
+  // the single fail-fast resolver in lib/env.ts — not a locally hardcoded
+  // fallback — decides the backend URL without being called (and possibly
+  // throwing in production when unconfigured) for already-absolute URLs.
+  const url = path.startsWith('http') ? path : `${baseUrl ?? getPythonApiUrl()}${path}`;
 
   // Build headers
   const headers = new Headers(extraHeaders);

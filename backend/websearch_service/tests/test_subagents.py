@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from app.services import subagents
+from app.services.ai_budget_guard import AIBudgetDenied
 from app.services.subagents import (
     SUBAGENT_PROMPTS,
     VALID_CATEGORIES,
@@ -151,6 +152,23 @@ async def test_classify_via_api_returns_general_without_api_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     result = await subagents._classify_via_api("hello", timeout=2.0)
     assert result == "general"
+
+
+@pytest.mark.asyncio
+async def test_classify_via_api_skips_provider_call_when_budget_denied(monkeypatch):
+    """Intent classification is itself billed spend ahead of the turn's
+    atomic reserve() (#293 review) — a budget denial must short-circuit
+    before any OpenAI call, not silently make an unaccounted-for one."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    denial = AIBudgetDenied("hard_stop", "hard_stop", 60, "budget exhausted")
+
+    mock_client = AsyncMock()
+    with patch.object(subagents.ai_budget_guard, "reserve", side_effect=denial), \
+         patch.object(subagents.httpx, "AsyncClient", return_value=mock_client):
+        result = await subagents._classify_via_api("analyse AAPL", timeout=2.0)
+
+    assert result == "general"
+    mock_client.post.assert_not_called()
 
 
 @pytest.mark.asyncio

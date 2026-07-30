@@ -49,12 +49,20 @@ Everything a reviewer needs, in one place. Repo paths are authoritative.
 Ranked residual risks: `THREAT_MODEL.md` §4. Highlights:
 
 1. AI prompt-injection resistance unevaluated (eval suite exists, unexecuted).
-2. No global (cross-user) AI request/concurrency/spend ceiling.
+2. Global (cross-user) AI request/concurrency/spend ceiling is implemented
+   and tested (`docs/ai/AI_CONTROLS.md` §1, G-1 closed 2026-07-18), but
+   enforcement depends on Valkey availability — it fails closed by default
+   on an outage (503s), see item 6.
 3. GitHub branch ruleset documented but unverified.
 4. Direct RLS tests uneven across schemas (trading ✔, ai/academy ✖).
 5. Duplicate-email OAuth/password linking behaviour depends on Supabase
    project setting (undefined in code).
-6. Rate limits fall back to process-local state if Redis is absent.
+6. Valkey outage impact varies by worker count: with exactly 1 web worker
+   and `ALLOW_IN_MEMORY_RATE_LIMIT=true`, rate limits fall back to
+   process-local state; with >1 web worker/replica, the backend fails to
+   start rather than degrading. Independent of worker count, the global AI
+   budget guard fails closed (503s on AI-proxy calls) and WebSocket
+   tickets can fail cross-replica — see `docs/runbooks/redis-unavailable.md`.
 
 ## 5. Rules of engagement (proposed — confirm before testing)
 

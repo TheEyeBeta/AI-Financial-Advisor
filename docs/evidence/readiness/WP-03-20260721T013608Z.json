@@ -1,0 +1,36 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-03-20260721T013608Z",
+  "work_package": "WP-03",
+  "environment": "test",
+  "app_version": "readiness-session",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T01:36:08Z",
+  "finished_at": "2026-07-21T01:36:08Z",
+  "command": "python -m pytest tests/test_network_guard.py -o addopts=''",
+  "scenario": "Test-environment AI-provider network guard (Phase 3)",
+  "preconditions": [
+    "guard installed by tests/conftest.py at import"
+  ],
+  "assertions": [
+    "getaddrinfo to api.openai.com/perplexity/anthropic raises AIProviderNetworkGuardError",
+    "localhost and non-provider hosts (Supabase/Redis) pass through",
+    "ALLOW_REAL_AI_PROVIDER_NETWORK=1 escape hatch disables the guard",
+    "full suite still green (guard does not disturb mocked tests)"
+  ],
+  "result": "pass",
+  "metrics": {
+    "network_guard_tests_passed": 13
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/tests/ai_network_guard.py",
+    "backend/websearch_service/tests/test_network_guard.py",
+    "backend/websearch_service/tests/conftest.py"
+  ],
+  "remaining_risks": [
+    "A fuller deterministic provider stub (configurable latency/rate-limit/partial-stream) is a follow-up for the soak harness"
+  ],
+  "reviewer_notes": "",
+  "content_sha256": "577f42cdad484498bce0fbe96bcc486894098b0ec986f10f5e11e35cc718525d"
+}

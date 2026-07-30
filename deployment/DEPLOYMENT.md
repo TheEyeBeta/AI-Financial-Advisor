@@ -11,8 +11,8 @@ This guide covers professional deployment strategies for the AI Financial Adviso
 │                                                               │
 │  ┌──────────────┐         ┌──────────────┐                  │
 │  │   Frontend   │         │   Backend    │                  │
-│  │   (Vercel)   │────────▶│  (Railway/   │                  │
-│  │              │  HTTPS  │   Render)    │                  │
+│  │   (Vercel)   │────────▶│  (Railway)   │                  │
+│  │              │  HTTPS  │              │                  │
 │  └──────────────┘         └──────────────┘                  │
 │         │                        │                            │
 │         │                        │                            │
@@ -29,7 +29,7 @@ This guide covers professional deployment strategies for the AI Financial Adviso
 
 - GitHub account with repository access
 - Vercel account (for frontend)
-- Railway/Render account (for backend)
+- Railway account (for backend)
 - Supabase project
 - OpenAI API key
 - Tavily API key (optional, for web search)
@@ -80,6 +80,7 @@ Use the Vercel dashboard to redeploy a previous commit or manually promote a dep
    SUPABASE_SERVICE_ROLE_KEY=...
    SUPABASE_JWT_SECRET=...
    OPENAI_API_KEY=sk-...
+   AUDIT_PSEUDONYM_PEPPER=...  # long random secret; startup refuses to boot without it outside dev/test
    ENVIRONMENT=production
    CORS_ORIGINS=https://your-frontend.vercel.app   # exact origins, comma-separated, no wildcard
    TRUSTED_HOSTS=your-backend.up.railway.app        # bare hostnames, comma-separated, no wildcard
@@ -92,9 +93,28 @@ Use the Vercel dashboard to redeploy a previous commit or manually promote a dep
    PORT=8000
    WORKERS=1
    REDIS_URL=redis://...            # Required for multi-worker rate limits + WebSocket tickets
-   ALLOW_IN_MEMORY_RATE_LIMIT=true  # Only when WORKERS=1 and Redis intentionally omitted
+   ALLOW_IN_MEMORY_RATE_LIMIT=true  # Only when WORKERS=1 and Redis/Valkey intentionally omitted
    SCHEDULER_ENABLED=false          # Web service — do NOT enable on API replicas
    ```
+
+   **Backing store for `REDIS_URL`:** use [Valkey](https://valkey.io)
+   (BSD-3-Clause, Linux Foundation-governed fork of Redis 7.2.4), not Redis
+   Ltd.'s Redis — Redis relicensed under RSALv2/SSPL as of 7.4/8, which is
+   source-available but not OSI open source. Valkey is wire-compatible
+   (same RESP protocol, same Lua `EVAL`/`register_script` support this repo's
+   `rate_limit_redis.py` and `ai_budget_guard.py` use), so the app code and
+   the `REDIS_URL`/`RATE_LIMIT_REDIS_URL` env var names are unchanged —
+   only the server behind the URL differs. On Railway, add a service from
+   the official `valkey/valkey` Docker image (or the Railway Valkey
+   template if listed in the marketplace) and point `REDIS_URL` at its
+   internal connection string, same as you would a Redis addon.
+
+   If you hit a crash-loop where every worker dies with `FATAL: Production
+   is configured with multiple workers but REDIS_URL is missing` even
+   though `REDIS_URL` **is** set, check the store's `maxclients` limit —
+   `validate_rate_limit_configuration()` treats a failed `ping()` (e.g.
+   "max number of clients reached") identically to "no Redis/Valkey
+   configured." See `docs/runbooks/redis-unavailable.md`.
 
    **Process topology (beta):**
    - **Web service** (`uvicorn app.main:app`): `WORKERS=1`, `SCHEDULER_ENABLED=false`, health check `/health/ready`.
@@ -104,29 +124,7 @@ Use the Vercel dashboard to redeploy a previous commit or manually promote a dep
 3. **Deploy**
    Push to the configured branch and let Railway's native GitHub integration deploy the backend.
 
-### Option 2: Render
-
-1. **Create Web Service**
-   - Go to [Render Dashboard](https://dashboard.render.com)
-   - Click "New +" → "Web Service"
-   - Connect your GitHub repository
-
-2. **Configure Service**
-   - **Name**: `ai-financial-advisor-backend`
-   - **Root Directory**: `backend/websearch_service`
-   - **Environment**: `Docker`
-   - **Dockerfile Path**: `backend/websearch_service/Dockerfile`
-   - **Port**: `8000`
-
-3. **Environment Variables**
-   ```
-   OPENAI_API_KEY=sk-...
-   TAVILY_API_KEY=tvly-...
-   APP_VERSION=0.1.0
-   ENVIRONMENT=production
-   ```
-
-### Option 3: Docker Deployment
+### Option 2: Docker Deployment
 
 #### Using Docker Compose
 
@@ -148,7 +146,7 @@ docker-compose logs -f backend
 
 See `k8s/` directory for Kubernetes manifests (create if needed).
 
-### Option 4: AWS/GCP/Azure
+### Option 3: AWS/GCP/Azure
 
 See cloud-specific deployment guides in `docs/deployment/` directory.
 
@@ -208,7 +206,7 @@ The staging branch is `staging`.
 
 ### CODEOWNERS and Approval
 
-Add reviewer ownership in `.github/CODEOWNERS` and configure the GitHub `production` environment to require approval from that reviewer before `promote-to-prod.yml` can continue.
+Add reviewer ownership in `.github/CODEOWNERS` and configure the GitHub `reliable-ambition / production` environment (the name Railway's GitHub integration actually created — not a bare `production` environment) to require approval from that reviewer before `promote-to-prod.yml` can continue.
 
 The repository uses:
 
@@ -258,6 +256,13 @@ Use separate values for staging:
 - `STAGING_FRONTEND_URL` points to the Vercel preview or staging frontend URL used by E2E.
 - `STAGING_BACKEND_URL` points to the Railway staging backend URL used for health checks.
 - Supabase staging credentials should live in the staging project and should not be reused from production.
+- `STAGING_DATABASE_URL` / `PRODUCTION_DATABASE_URL` — direct Postgres connection strings (not the Supabase REST URL) with migration privileges, one per GitHub Environment (`reliable-ambition / main-staging` / `reliable-ambition / production` — these are the exact names Railway's GitHub integration auto-created, not bare `main-staging` / `production`). Used by `.github/workflows/run-db-migrations.yml`, the manual `workflow_dispatch` job that runs `alembic upgrade head` against the selected environment, and by `.github/workflows/staging-seed.yml`. Configure these on the matching GitHub Environment (not as bare repo secrets) so the `production` value is only ever exposed to a run that has passed that Environment's required-reviewer gate.
+- `RELEASE_ALLOWED_HOSTS` (GitHub repo → Settings → Secrets and variables →
+  Actions → **Variables**, not Secrets — it is not sensitive) must list the
+  exact approved staging and production Vercel/Railway hostnames,
+  comma-separated (e.g. `app-staging.example.com,api-staging.example.com`).
+  `release-verification.yml` fails closed until this is set — see
+  `docs/readiness/RELEASE_POLICY.md` §5/§7.
 
 ## Health Checks
 
@@ -306,10 +311,6 @@ Vercel automatically scales based on traffic. No configuration needed.
 - Auto-scaling based on CPU/memory
 - Configure in Railway dashboard → Settings → Scaling
 
-#### Render
-- Set instance type and count in service settings
-- Auto-scaling available on paid plans
-
 #### Docker Swarm/Kubernetes
 - Configure replicas in deployment manifests
 - Use horizontal pod autoscaling
@@ -347,9 +348,6 @@ Use the Vercel dashboard: go to Deployments, select the previous deployment, and
 
 #### Railway
 Use the Railway dashboard: open the backend service deployments, select a previous successful deployment, and redeploy or roll back it.
-
-#### Render
-- Go to Deployments → Select previous deployment → Rollback
 
 #### Docker
 ```bash

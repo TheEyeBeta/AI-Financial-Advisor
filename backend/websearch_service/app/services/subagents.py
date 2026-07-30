@@ -9,6 +9,8 @@ from typing import Dict
 
 import httpx
 
+from .ai_budget_guard import AIBudgetDenied, ai_budget_guard
+
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -239,6 +241,23 @@ async def _classify_via_api(message: str, timeout: float) -> str:
         "Authorization": f"Bearer {openai_api_key}",
     }
 
+    # This is billed OpenAI spend made ahead of the turn's atomic reserve()
+    # at generation time (#293 review) — without its own reservation, intent
+    # classifier traffic was invisible to the global budget guard's
+    # accounting. Non-essential: deniable like any other non-critical call
+    # during hard_stop.
+    try:
+        reservation = ai_budget_guard.reserve(
+            provider="openai",
+            model=_CLASSIFIER_MODEL,
+            estimated_input_tokens=int(len(prompt) / 4 * 1.2) + 50,
+            estimated_output_tokens=20,
+            essential=False,
+        )
+    except AIBudgetDenied:
+        logger.debug("IRIS subagent: classifier skipped — AI budget guard denied, defaulting to general")
+        return "general"
+
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(_OPENAI_ENDPOINT, headers=headers, json=payload)
@@ -251,6 +270,13 @@ async def _classify_via_api(message: str, timeout: float) -> str:
             return "general"
 
         data = response.json()
+        usage = data.get("usage", {}) or {}
+        ai_budget_guard.reconcile(
+            reservation,
+            actual_input_tokens=usage.get("prompt_tokens", 0) or 0,
+            actual_output_tokens=usage.get("completion_tokens", 0) or 0,
+        )
+
         choices = data.get("choices") or []
         if not choices:
             return "general"
@@ -277,6 +303,8 @@ async def _classify_via_api(message: str, timeout: float) -> str:
     except Exception as exc:
         logger.debug("IRIS subagent: classifier error %s, defaulting to general", exc)
         return "general"
+    finally:
+        ai_budget_guard.release(reservation)
 
 
 # ── Regex intent classification patterns (precompiled) ─────────────────────────

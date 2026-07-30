@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-B3-CLEAN-BACKEND-20260721T164238Z",
+  "work_package": "WP-B3-CLEAN-BACKEND",
+  "environment": "clean-linux-ubuntu2204-py31012",
+  "app_version": "readiness-batch3",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T16:42:38Z",
+  "finished_at": "2026-07-21T16:42:38Z",
+  "command": "python -m pytest -o addopts='' -q  (Ubuntu 22.04, Python 3.10.12, pytest 9.1.1)",
+  "scenario": "EXECUTED: full backend suite + CI gates + global coverage on clean Linux",
+  "preconditions": [],
+  "assertions": [
+    "1247 passed / 41 skipped / 0 failed, exit 0",
+    "env-schema gate: safe=exit0, unsafe=exit1",
+    "evidence-schema gate: 15 verified",
+    "network-guard gate: blocked",
+    "global backend coverage 76% (> 69% CI floor)"
+  ],
+  "result": "pass",
+  "metrics": {
+    "passed": 1247,
+    "skipped": 41,
+    "failed": 0,
+    "exit_code": 0,
+    "duration_s": 37,
+    "global_coverage_pct": 76,
+    "auth_pct": 93,
+    "budget_pct": 84
+  },
+  "failure_details": "",
+  "artifacts": [
+    "backend/websearch_service/tests/"
+  ],
+  "remaining_risks": [],
+  "reviewer_notes": "",
+  "content_sha256": "fba34ff6d8a9d0491b4c81321abf09b46fcbb45efc2a191c26c0c8a0ba6639b5"
+}

@@ -1,0 +1,31 @@
+{
+  "schema_version": "1.0",
+  "run_id": "WP-13-20260721T013608Z",
+  "work_package": "WP-13",
+  "environment": "test",
+  "app_version": "readiness-session",
+  "commit_sha": "5bad7e946653d44e41482637df05f2b0a1a5d076",
+  "started_at": "2026-07-21T01:36:08Z",
+  "finished_at": "2026-07-21T01:36:08Z",
+  "command": "python -m pytest scripts/__tests__/test_evidence_recorder.py -q",
+  "scenario": "Unified evidence recorder (JSON + Markdown + tamper-evident digest)",
+  "preconditions": [],
+  "assertions": [
+    "all required fields present",
+    "SHA-256 digest verifies and detects tampering",
+    "JSON + Markdown emitted",
+    "arbitrary env/secrets not captured"
+  ],
+  "result": "pass",
+  "metrics": {
+    "evidence_recorder_tests_passed": 5
+  },
+  "failure_details": "",
+  "artifacts": [
+    "scripts/evidence_recorder.py",
+    "scripts/__tests__/test_evidence_recorder.py"
+  ],
+  "remaining_risks": [],
+  "reviewer_notes": "",
+  "content_sha256": "759b7fc71e6016a2b66a69d091b48edfa88f065201cd3f5327e4ec1573bec3df"
+}
