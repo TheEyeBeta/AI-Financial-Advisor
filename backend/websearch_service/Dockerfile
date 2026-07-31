@@ -33,7 +33,16 @@ FROM python:3.12-slim@sha256:423ed6ab25b1921a477529254bfeeabf5855151dc2c3141699a
 
 # ARGs are stage-scoped: redeclare here so the ENV lines below actually
 # receive values (#210 — previously these resolved to empty strings).
-ARG APP_VERSION=0.1.0
+#
+# APP_VERSION has no default: a non-empty default here would be baked into
+# every image regardless of --build-arg, permanently shadowing the
+# GIT_SHA/RAILWAY_GIT_COMMIT_SHA fallback in app/main.py, app/config.py, and
+# app/health_checks.py::release_info() — verified live in production, where
+# ARG APP_VERSION=0.1.0 baked "0.1.0" into the image and every deploy reported
+# that instead of the real commit, no matter what Railway variable was set or
+# deleted at runtime. Leave this empty so the fallback chain actually runs;
+# pass --build-arg APP_VERSION=<value> only when deliberately pinning one.
+ARG APP_VERSION=
 ARG ENVIRONMENT=production
 
 # Set environment variables
