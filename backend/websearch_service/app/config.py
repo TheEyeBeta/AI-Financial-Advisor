@@ -49,7 +49,12 @@ def get_app_settings() -> AppSettings:
 
     return AppSettings(
         environment=environment,
-        app_version=os.getenv("APP_VERSION", "0.1.0"),
+        app_version=(
+            (os.getenv("APP_VERSION") or "").strip()
+            or (os.getenv("GIT_SHA") or "").strip()
+            or (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "").strip()
+            or "0.1.0"
+        ),
         cors_origins=parse_csv_env(os.getenv("CORS_ORIGINS")),
         trusted_hosts=parse_csv_env(os.getenv("TRUSTED_HOSTS")),
         enable_debug_routes=enable_debug_routes,

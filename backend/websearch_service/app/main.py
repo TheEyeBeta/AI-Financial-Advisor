@@ -174,7 +174,16 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="AI Financial Advisor - Web Search Service",
-        version=os.getenv("APP_VERSION", "0.1.0"),
+        # Same fallback chain as health_checks.py::release_info()'s git_sha —
+        # an empty (not just unset) APP_VERSION previously reached here, and
+        # FastAPI's own constructor asserts a truthy version string, crashing
+        # startup.
+        version=(
+            (os.getenv("APP_VERSION") or "").strip()
+            or (os.getenv("GIT_SHA") or "").strip()
+            or (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "").strip()
+            or "0.1.0"
+        ),
         lifespan=_lifespan,
         description=(
             "A small FastAPI microservice that provides a unified web search "
