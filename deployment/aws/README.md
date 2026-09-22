@@ -200,9 +200,11 @@ normal: delete the Railway services and cancel the plan.
 | `AWS_STAGING_SSH_KEY` | deploy-staging.yml | Same key pair, reused |
 | `VERCEL_TOKEN` | deploy-staging.yml (`run_e2e: true` path only) | Used to update the Preview environment's `VITE_PYTHON_API_URL` and deploy a fresh preview from `staging`, pointed at the freshly-discovered backend IP |
 
-Environments referenced (`production`, `main-staging`) must exist under
-Settings → Environments with matching secrets/protection rules — see the
-note earlier about renaming these from their Railway-prefixed originals.
+Environments referenced (`aws-production`, `main-staging`) must exist
+under Settings → Environments with matching secrets/protection rules.
+`aws-production` (not bare `production`) because GitHub Environment
+names collide case-insensitively and a bare `Production` already exists
+(Vercel's own, auto-created for its deployment status reporting).
 
 ## Security follow-ups
 

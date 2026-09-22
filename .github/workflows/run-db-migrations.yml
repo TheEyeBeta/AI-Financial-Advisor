@@ -65,14 +65,13 @@ jobs:
     # model note above.
     if: github.ref == 'refs/heads/main'
     environment:
-      # Bare "production" / "main-staging" GitHub Environments. Previously
-      # these were prefixed ("reliable-ambition / production" etc.) because
-      # Railway's GitHub integration auto-created them under its project
-      # name; that integration is gone now the backend runs on EC2 we
-      # manage ourselves. Rename the existing Environments under
-      # Settings → Environments (carrying over their secrets/protection
-      # rules) before this workflow can gate on them by the new name.
-      name: ${{ inputs.target_environment == 'production' && 'production' || 'main-staging' }}
+      # "aws-production" / "main-staging" GitHub Environments (the input
+      # value stays plain "production" — that's just the workflow_dispatch
+      # choice, not the Environment name). Not bare "production": GitHub
+      # Environment names collide case-insensitively and a bare
+      # "Production" already exists (Vercel's own, auto-created for its
+      # deployment status reporting — unrelated to this gate).
+      name: ${{ inputs.target_environment == 'production' && 'aws-production' || 'main-staging' }}
     permissions:
       contents: read
 
