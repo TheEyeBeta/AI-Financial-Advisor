@@ -69,6 +69,11 @@ aws ec2 revoke-security-group-ingress --group-id sg-0c81a063d376b31d0 \
   --protocol tcp --port 22 --cidr 102.88.169.82/32
 ```
 
+`deploy-prod.yml`/`deploy-staging.yml` do this automatically for
+GitHub-hosted runners (whose egress IP changes every run): each authorizes
+its own runner's current IP before the SSH step and revokes it again
+afterward (`if: always()`), so no manual step is needed there.
+
 The AWS CLI on this machine was installed via `pip install --user awscli`
 (no admin rights available) — invoke it as `python -m awscli ...` unless
 you've since added `%APPDATA%\Roaming\Python\Python310\Scripts` to PATH.
@@ -150,9 +155,10 @@ Vercel's prod `VITE_PYTHON_API_URL` was updated (`vercel env rm` +
 `https://afa-api.theeyebeta.store`. Verified by grepping the deployed JS
 bundle for the new hostname and confirming the Railway one is gone.
 
-For staging/preview deploys, since the IP changes per session, set the
-env var manually before a staging test run, or treat staging as a manual
-curl/Postman target rather than something Vercel calls automatically.
+For staging: `deploy-staging.yml`'s `run_e2e: true` path now automates
+this — it points a fresh Vercel preview deployment at whatever IP that
+run's staging instance got, so no manual `vercel env` step is needed
+before running E2E.
 
 Also check `vercel.json`'s CSP `connect-src` includes
 `https://afa-api.theeyebeta.store` if it's still listing the Railway
@@ -182,6 +188,21 @@ normal: delete the Railway services and cancel the plan.
 - Supabase: same prod/staging projects, same RLS, same Alembic flow.
 - Frontend hosting: still Vercel.
 - Application code: nothing in `backend/websearch_service/app/` changed.
+
+## GitHub Actions secrets required
+
+| Secret | Used by | Notes |
+|---|---|---|
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | deploy-prod.yml, deploy-staging.yml | Authorizes/revokes the runner's IP for SSH, and starts/stops the staging instance |
+| `AWS_PROD_HOST` | deploy-prod.yml | The prod Elastic IP |
+| `AWS_PROD_DOMAIN` | deploy-prod.yml | `afa-api.theeyebeta.store` |
+| `AWS_PROD_SSH_KEY` | deploy-prod.yml | Contents of `~/.ssh/afa-aws-backend.pem` |
+| `AWS_STAGING_SSH_KEY` | deploy-staging.yml | Same key pair, reused |
+| `VERCEL_TOKEN` | deploy-staging.yml (`run_e2e: true` path only) | Used to update the Preview environment's `VITE_PYTHON_API_URL` and deploy a fresh preview from `staging`, pointed at the freshly-discovered backend IP |
+
+Environments referenced (`production`, `main-staging`) must exist under
+Settings → Environments with matching secrets/protection rules — see the
+note earlier about renaming these from their Railway-prefixed originals.
 
 ## Security follow-ups
 

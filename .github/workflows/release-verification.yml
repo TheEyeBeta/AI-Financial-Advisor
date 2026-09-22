@@ -46,15 +46,24 @@ on:
         required: false
   workflow_run:
     # Automatic post-deployment invocation: re-verify staging immediately
-    # after "Deploy Staging" finishes, without a human clicking "Run
-    # workflow". This intentionally does NOT read anything from the
-    # triggering workflow_run event (no PR-supplied URLs/SHAs/secrets) —
-    # it only uses this workflow's own repository secrets, exactly like the
-    # manual dispatch default path, so a pull_request-triggered deploy run
-    # cannot smuggle an arbitrary verification target. There is no loop: this
-    # workflow does not deploy anything, so it cannot re-trigger "Deploy
-    # Staging".
-    workflows: ["Deploy Staging"]
+    # after "Deploy Staging (AWS, on-demand)" finishes, without a human
+    # clicking "Run workflow". This intentionally does NOT read anything
+    # from the triggering workflow_run event (no PR-supplied
+    # URLs/SHAs/secrets) — it only uses this workflow's own repository
+    # secrets, exactly like the manual dispatch default path, so a
+    # pull_request-triggered deploy run cannot smuggle an arbitrary
+    # verification target. There is no loop: this workflow does not
+    # deploy anything, so it cannot re-trigger the staging deploy.
+    #
+    # Note: since the AWS migration, "Deploy Staging (AWS, on-demand)" is
+    # workflow_dispatch-only (staging's EC2 instance stays stopped between
+    # runs to avoid billing for idle compute — see deployment/aws/README.md),
+    # so this chain now only fires after someone manually runs that
+    # workflow, not on every push to staging the way Railway's auto-deploy
+    # did. promote-to-prod.yml's gate on a matching release-verification
+    # run still holds, but expect to run "Deploy Staging (AWS, on-demand)"
+    # by hand before promoting.
+    workflows: ["Deploy Staging (AWS, on-demand)"]
     types: [completed]
 
 permissions:

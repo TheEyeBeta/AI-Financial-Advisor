@@ -8,21 +8,19 @@ name: Deploy Staging (AWS, on-demand)
 # (using the IP discovered in this same run), and always stops the
 # instance again afterward regardless of outcome.
 #
-# Full frontend E2E against staging requires the Vercel staging/preview
-# environment's VITE_PYTHON_API_URL to point at the IP this run prints —
-# update that in Vercel manually (or via `vercel env`) and redeploy the
-# staging frontend before setting run_e2e: true, or the E2E job will hit a
-# frontend still pointed at a stale/previous backend.
+# When run_e2e is true, the "deploy" job automatically points a fresh
+# Vercel preview deployment (built from the staging branch) at this run's
+# backend before the E2E job runs — no manual Vercel step needed.
 
 on:
   workflow_dispatch:
     inputs:
       run_e2e:
-        description: 'Run the Playwright E2E suite after deploy (requires staging_frontend_url to already point at this run'"'"'s backend)'
+        description: "Run the Playwright E2E suite after deploy (auto-provisions a Vercel preview pointed at this run's backend, unless staging_frontend_url is set)"
         type: boolean
         default: false
       staging_frontend_url:
-        description: 'Staging frontend URL to test against (only used if run_e2e is true)'
+        description: 'Optional: skip auto-provisioning and test against this frontend URL instead (only used if run_e2e is true)'
         type: string
         default: ''
 
@@ -34,19 +32,33 @@ env:
   NODE_VERSION: '20'
   AWS_REGION: 'us-east-1'
   STAGING_INSTANCE_ID: 'i-09cb8ab036f055e7e'
+  STAGING_SECURITY_GROUP_ID: 'sg-0c81a063d376b31d0'
 
 jobs:
   deploy:
     name: Start, deploy, and health-check staging
     runs-on: ubuntu-latest
     environment:
-      name: staging
+      # Matches "main-staging", the established GitHub Environment name
+      # used by run-db-migrations.yml/staging-seed.yml for this org's
+      # staging secrets/protection rules — not a bare "staging", which
+      # would be created fresh with none of those rules attached.
+      name: main-staging
     permissions:
       contents: read
     outputs:
       backend_url: ${{ steps.wait_ip.outputs.backend_url }}
+      frontend_url: ${{ steps.vercel_preview.outputs.frontend_url }}
 
     steps:
+      - name: Checkout staging branch
+        # Needed for the Vercel preview deploy step further down, which
+        # builds this checkout — not whatever ref workflow_dispatch ran on.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: staging
+          persist-credentials: false
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
         with:
@@ -68,12 +80,27 @@ jobs:
           echo "ip=$IP" >> "$GITHUB_OUTPUT"
           echo "backend_url=http://$IP:8002" >> "$GITHUB_OUTPUT"
 
+      - name: Authorize this runner's IP for SSH
+        # The security group only allows SSH from the IP that provisioned
+        # it (see deployment/aws/README.md) — GitHub-hosted runners get a
+        # different, changing egress IP on every run, so the SSH step
+        # below would time out without this. Revoked again in the always()
+        # cleanup step further down, regardless of outcome.
+        id: runner_ip
+        run: |
+          IP=$(curl -fsS https://checkip.amazonaws.com)
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$STAGING_SECURITY_GROUP_ID" \
+            --protocol tcp --port 22 --cidr "$IP/32"
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
         with:
           host: ${{ steps.wait_ip.outputs.ip }}
           username: ubuntu
           key: ${{ secrets.AWS_STAGING_SSH_KEY }}
+          envs: GIT_SHA
           script: |
             set -euo pipefail
             cd ~/ai-financial-advisor
@@ -81,29 +108,66 @@ jobs:
             git checkout staging
             git reset --hard origin/staging
             cd deployment/aws
-            docker compose -p afa-staging --env-file .env.staging \
+            GIT_SHA="$GIT_SHA" docker compose -p afa-staging --env-file .env.staging \
               -f docker-compose.aws.yml up -d --build
+        env:
+          # deployed commit SHA — release-verification.yml requires the
+          # backend to report the exact SHA it's running, and the env
+          # templates otherwise leave this blank on every deploy.
+          GIT_SHA: ${{ github.sha }}
 
       - name: Wait for backend health
-        run: |
-          for attempt in $(seq 1 30); do
-            if curl -fsS "${{ steps.wait_ip.outputs.backend_url }}/health/live" >/dev/null; then
-              echo "Staging backend healthy at ${{ steps.wait_ip.outputs.backend_url }}"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Staging backend health check failed." >&2
-          exit 1
+        # Curls localhost from inside the instance over SSH rather than
+        # the public IP: BACKEND_BIND_ADDR defaults to 127.0.0.1 and port
+        # 8002 is deliberately not opened in the security group (see the
+        # no-TLS/no-domain tradeoff discussion in deployment/aws/README.md)
+        # — a direct public curl would always time out.
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        with:
+          host: ${{ steps.wait_ip.outputs.ip }}
+          username: ubuntu
+          key: ${{ secrets.AWS_STAGING_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8002/health/live >/dev/null; then
+                echo "Staging backend healthy."
+                exit 0
+              fi
+              sleep 10
+            done
+            echo "Staging backend health check failed." >&2
+            exit 1
 
-      - name: Print next steps for full E2E
-        if: inputs.run_e2e != true
+      - name: Revoke this runner's IP
+        if: always()
         run: |
-          echo "Staging backend is up at ${{ steps.wait_ip.outputs.backend_url }}"
-          echo "To run frontend E2E against it: point the Vercel staging"
-          echo "environment's VITE_PYTHON_API_URL / VITE_WEBSEARCH_API_URL at"
-          echo "this URL, redeploy the staging frontend, then re-run this"
-          echo "workflow with run_e2e=true and staging_frontend_url set."
+          aws ec2 revoke-security-group-ingress \
+            --group-id "$STAGING_SECURITY_GROUP_ID" \
+            --protocol tcp --port 22 --cidr "${{ steps.runner_ip.outputs.ip }}/32" || true
+
+      - name: Print backend URL
+        if: inputs.run_e2e != true
+        run: echo "Staging backend is up at ${{ steps.wait_ip.outputs.backend_url }}"
+
+      - name: Point a Vercel preview at this run's backend and deploy it
+        # The staging backend's IP is only known once this job starts, so
+        # E2E can't target a frontend built before this run — this step
+        # updates the Preview environment's backend URL and deploys a
+        # fresh preview from the staging branch in the same run, closing
+        # the loop so run_e2e: true actually works end to end without a
+        # separate manual pass.
+        if: inputs.run_e2e == true && inputs.staging_frontend_url == ''
+        id: vercel_preview
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          npx --yes vercel@latest link --yes --token="$VERCEL_TOKEN" --project ai-financial-advisor --scope the-eye-betas-projects
+          npx --yes vercel@latest env rm VITE_PYTHON_API_URL preview --yes --token="$VERCEL_TOKEN" || true
+          printf '%s' "${{ steps.wait_ip.outputs.backend_url }}" | \
+            npx --yes vercel@latest env add VITE_PYTHON_API_URL preview --token="$VERCEL_TOKEN"
+          DEPLOY_URL=$(npx --yes vercel@latest deploy --token="$VERCEL_TOKEN" --yes)
+          echo "frontend_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
 
   e2e:
     name: Run Full E2E Suite
@@ -136,7 +200,10 @@ jobs:
       - name: Run E2E suite against staging
         id: e2e
         env:
-          PLAYWRIGHT_BASE_URL: ${{ inputs.staging_frontend_url }}
+          # Manual override takes precedence if provided; otherwise use the
+          # preview deployment the "deploy" job just pointed at this run's
+          # backend.
+          PLAYWRIGHT_BASE_URL: ${{ inputs.staging_frontend_url != '' && inputs.staging_frontend_url || needs.deploy.outputs.frontend_url }}
         run: |
           npx playwright test --reporter=json > "$RUNNER_TEMP/playwright-staging-results.json"
 
