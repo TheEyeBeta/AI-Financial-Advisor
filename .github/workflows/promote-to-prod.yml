@@ -17,12 +17,13 @@ jobs:
     name: Open promotion PR staging → main
     runs-on: ubuntu-latest
     environment:
-      # This must exactly match the GitHub Environment name. Railway's GitHub
-      # integration auto-creates "<railway-project> / production" (not bare
-      # "production") when it links the Railway production environment — a
-      # bare-named environment does not exist and would otherwise be silently
-      # auto-created here with zero protection rules on first run.
-      name: "reliable-ambition / production"
+      # Matches the "production" GitHub Environment used by deploy-prod.yml
+      # (AWS EC2 deploy). Previously this pointed at the Railway-GitHub-App
+      # auto-created "<railway-project> / production" environment name;
+      # that integration is gone now the backend runs on EC2 we manage
+      # ourselves. Configure protection rules on "production" directly
+      # under Settings → Environments if none exist yet.
+      name: "production"
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

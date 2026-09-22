@@ -1,0 +1,91 @@
+name: Deploy Production (AWS)
+
+# Replaces Railway's GitHub-App auto-deploy. Railway rebuilt the backend
+# container automatically on every push to main; that integration is gone
+# now that the backend runs on an EC2 instance we manage ourselves, so this
+# workflow does the equivalent: SSH in, pull, rebuild, restart. Supabase,
+# Vercel, and application code are unchanged by this move.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: 'us-east-1'
+  PROD_SECURITY_GROUP_ID: 'sg-0c81a063d376b31d0'
+
+jobs:
+  deploy:
+    name: Deploy backend to prod EC2
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Authorize this runner's IP for SSH
+        # The security group only allows SSH from the IP that provisioned
+        # it — GitHub-hosted runners get a different, changing egress IP
+        # on every run, so the SSH step below would time out without
+        # this. Revoked again in the always() cleanup step further down.
+        id: runner_ip
+        run: |
+          IP=$(curl -fsS https://checkip.amazonaws.com)
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+          aws ec2 authorize-security-group-ingress \
+            --group-id "$PROD_SECURITY_GROUP_ID" \
+            --protocol tcp --port 22 --cidr "$IP/32"
+
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        with:
+          host: ${{ secrets.AWS_PROD_HOST }}
+          username: ubuntu
+          key: ${{ secrets.AWS_PROD_SSH_KEY }}
+          envs: GIT_SHA
+          script: |
+            set -euo pipefail
+            cd ~/ai-financial-advisor
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+            cd deployment/aws
+            GIT_SHA="$GIT_SHA" docker compose -p afa-prod --env-file .env.production \
+              -f docker-compose.aws.yml up -d --build
+        env:
+          # deployed commit SHA — release-verification.yml requires the
+          # backend to report the exact SHA it's running, and the env
+          # template otherwise leaves this blank on every deploy.
+          GIT_SHA: ${{ github.sha }}
+
+      - name: Revoke this runner's IP
+        if: always()
+        run: |
+          aws ec2 revoke-security-group-ingress \
+            --group-id "$PROD_SECURITY_GROUP_ID" \
+            --protocol tcp --port 22 --cidr "${{ steps.runner_ip.outputs.ip }}/32" || true
+
+      - name: Wait for health check
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "https://${{ secrets.AWS_PROD_DOMAIN }}/health/live" >/dev/null 2>&1; then
+              echo "Backend healthy."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Prod backend health check failed after deploy." >&2
+          exit 1

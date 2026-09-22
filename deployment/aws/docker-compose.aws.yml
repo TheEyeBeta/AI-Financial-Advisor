@@ -1,0 +1,102 @@
+version: '3.8'
+
+# One environment (prod OR staging) per compose project. Deploy this file
+# twice on the same EC2 box with different -p project names, .env files,
+# and BACKEND_PORT values. Prod is fronted by a Cloudflare Tunnel
+# (cloudflared, see ../README.md) rather than Nginx/certbot — no inbound
+# port needs to be open. Supabase stays managed/cloud; nothing here runs a
+# database. This is deployment/docker-compose.yml plus AWS-specific
+# changes: backend is bound to 127.0.0.1 by default (cloudflared/Nginx is
+# the intended public entrypoint) and an explicit container name suffix
+# avoids collisions between the two projects on one host.
+
+services:
+  valkey:
+    image: valkey/valkey:8-alpine@sha256:94365b275456ae14621001c03556c732b1d93a0cdeacc317d1bdd52eba680885
+    container_name: ai-financial-advisor-valkey-${ENVIRONMENT:-production}
+    ports:
+      - "127.0.0.1:${VALKEY_PORT:-6379}:6379"
+    volumes:
+      - valkey-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: ../../backend/websearch_service
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-0.1.0}
+        ENVIRONMENT: ${ENVIRONMENT:-production}
+    container_name: ai-financial-advisor-backend-${ENVIRONMENT:-production}
+    # BACKEND_BIND_ADDR defaults to 127.0.0.1 (Nginx-only access, once TLS
+    # is set up). Temporarily set to 0.0.0.0 in .env.production/.env.staging
+    # to expose the port directly (no TLS) until a domain is ready — revert
+    # to 127.0.0.1 once Nginx + certbot are in front.
+    ports:
+      - "${BACKEND_BIND_ADDR:-127.0.0.1}:${BACKEND_PORT:-8000}:8000"
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - APP_VERSION=${APP_VERSION:-0.1.0}
+      - GIT_SHA=${GIT_SHA:-}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - TRUSTED_HOSTS=${TRUSTED_HOSTS}
+      - AUDIT_PSEUDONYM_PEPPER=${AUDIT_PSEUDONYM_PEPPER}
+      - AI_AUDIT_LOG_PATH=/app/logs/audit.jsonl
+      - WORKERS=${WORKERS:-1}
+      - REDIS_URL=${REDIS_URL:-redis://valkey:6379/0}
+      - RATE_LIMIT_REDIS_URL=${RATE_LIMIT_REDIS_URL:-redis://valkey:6379/0}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - AI_BUDGET_ALLOW_IN_MEMORY=${AI_BUDGET_ALLOW_IN_MEMORY:-}
+      - ALLOW_IN_MEMORY_RATE_LIMIT=${ALLOW_IN_MEMORY_RATE_LIMIT:-}
+      - MERIDIAN_CRON_SECRET=${MERIDIAN_CRON_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
+      - DATAAPI_ENABLED=${DATAAPI_ENABLED:-}
+      - DATAAPI_URL=${DATAAPI_URL:-}
+      - DATAAPI_CLIENT_ID=${DATAAPI_CLIENT_ID:-}
+      - DATAAPI_CLIENT_SECRET=${DATAAPI_CLIENT_SECRET:-}
+      - DATAAPI_ADMIN_CLIENT_ID=${DATAAPI_ADMIN_CLIENT_ID:-}
+      - DATAAPI_ADMIN_CLIENT_SECRET=${DATAAPI_ADMIN_CLIENT_SECRET:-}
+    volumes:
+      - ./logs-${ENVIRONMENT:-production}:/app/logs
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health/live', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - app-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  valkey-data:

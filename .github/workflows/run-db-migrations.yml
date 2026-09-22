@@ -65,11 +65,14 @@ jobs:
     # model note above.
     if: github.ref == 'refs/heads/main'
     environment:
-      # GitHub Environment names as auto-created by Railway's GitHub
-      # integration: "reliable-ambition / main-staging" and
-      # "reliable-ambition / production" (prefixed with the Railway project
-      # name) — not bare "main-staging" / "production".
-      name: ${{ inputs.target_environment == 'production' && 'reliable-ambition / production' || 'reliable-ambition / main-staging' }}
+      # Bare "production" / "main-staging" GitHub Environments. Previously
+      # these were prefixed ("reliable-ambition / production" etc.) because
+      # Railway's GitHub integration auto-created them under its project
+      # name; that integration is gone now the backend runs on EC2 we
+      # manage ourselves. Rename the existing Environments under
+      # Settings → Environments (carrying over their secrets/protection
+      # rules) before this workflow can gate on them by the new name.
+      name: ${{ inputs.target_environment == 'production' && 'production' || 'main-staging' }}
     permissions:
       contents: read
 
