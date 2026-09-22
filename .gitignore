@@ -106,3 +106,7 @@ private/
 .env.staging
 .env.test
 backend/websearch_service/coverage.xml
+.env*
+# ...but *.example templates are safe, non-secret, and meant to be committed
+!*.env.example
+!.env.*.example

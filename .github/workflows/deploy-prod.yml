@@ -1,0 +1,54 @@
+name: Deploy Production (AWS)
+
+# Replaces Railway's GitHub-App auto-deploy. Railway rebuilt the backend
+# container automatically on every push to main; that integration is gone
+# now that the backend runs on an EC2 instance we manage ourselves, so this
+# workflow does the equivalent: SSH in, pull, rebuild, restart. Supabase,
+# Vercel, and application code are unchanged by this move.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy backend to prod EC2
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    permissions:
+      contents: read
+
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        with:
+          host: ${{ secrets.AWS_PROD_HOST }}
+          username: ubuntu
+          key: ${{ secrets.AWS_PROD_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd ~/ai-financial-advisor
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+            cd deployment/aws
+            docker compose -p afa-prod --env-file .env.production \
+              -f docker-compose.aws.yml up -d --build
+
+      - name: Wait for health check
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "https://${{ secrets.AWS_PROD_DOMAIN }}/health/live" >/dev/null 2>&1; then
+              echo "Backend healthy."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Prod backend health check failed after deploy." >&2
+          exit 1

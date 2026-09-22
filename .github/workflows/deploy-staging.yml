@@ -1,67 +1,115 @@
-name: Deploy Staging
+name: Deploy Staging (AWS, on-demand)
+
+# Staging runs on an EC2 instance that is normally STOPPED to avoid billing
+# for idle compute — it has no static IP, so it can't be wired to a fixed
+# STAGING_BACKEND_URL secret or to Vercel's build-time VITE_PYTHON_API_URL
+# the way Railway's staging was. This workflow is manual-trigger only: it
+# starts the instance, deploys, health-checks the backend it just started
+# (using the IP discovered in this same run), and always stops the
+# instance again afterward regardless of outcome.
+#
+# Full frontend E2E against staging requires the Vercel staging/preview
+# environment's VITE_PYTHON_API_URL to point at the IP this run prints —
+# update that in Vercel manually (or via `vercel env`) and redeploy the
+# staging frontend before setting run_e2e: true, or the E2E job will hit a
+# frontend still pointed at a stale/previous backend.
 
 on:
-  push:
-    branches: [staging]
-  pull_request:
-    branches: [staging]
   workflow_dispatch:
+    inputs:
+      run_e2e:
+        description: 'Run the Playwright E2E suite after deploy (requires staging_frontend_url to already point at this run'"'"'s backend)'
+        type: boolean
+        default: false
+      staging_frontend_url:
+        description: 'Staging frontend URL to test against (only used if run_e2e is true)'
+        type: string
+        default: ''
 
 concurrency:
-  group: deploy-staging-${{ github.ref }}
-  cancel-in-progress: true
+  group: deploy-staging
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: '20'
-  PYTHON_VERSION: '3.12'
-  STAGING_FRONTEND_URL: ${{ secrets.STAGING_FRONTEND_URL }}
-  STAGING_BACKEND_URL: ${{ secrets.STAGING_BACKEND_URL }}
+  AWS_REGION: 'us-east-1'
+  STAGING_INSTANCE_ID: 'i-09cb8ab036f055e7e'
 
 jobs:
-  verify-staging:
-    name: Verify Staging Backend
+  deploy:
+    name: Start, deploy, and health-check staging
     runs-on: ubuntu-latest
+    environment:
+      name: staging
     permissions:
       contents: read
-
     outputs:
-      backend_url: ${{ steps.endpoints.outputs.backend_url }}
-      frontend_url: ${{ steps.endpoints.outputs.frontend_url }}
+      backend_url: ${{ steps.wait_ip.outputs.backend_url }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
         with:
-          persist-credentials: false
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve staging endpoints
-        id: endpoints
+      - name: Start staging instance
+        run: aws ec2 start-instances --instance-ids "$STAGING_INSTANCE_ID"
+
+      - name: Wait for instance to be running and reachable
+        id: wait_ip
         run: |
-          if [ -z "${STAGING_FRONTEND_URL}" ] || [ -z "${STAGING_BACKEND_URL}" ]; then
-            echo "Missing staging URLs. Set STAGING_FRONTEND_URL and STAGING_BACKEND_URL." >&2
-            exit 1
-          fi
+          aws ec2 wait instance-running --instance-ids "$STAGING_INSTANCE_ID"
+          aws ec2 wait instance-status-ok --instance-ids "$STAGING_INSTANCE_ID"
+          IP=$(aws ec2 describe-instances --instance-ids "$STAGING_INSTANCE_ID" \
+            --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          echo "Staging IP: $IP"
+          echo "ip=$IP" >> "$GITHUB_OUTPUT"
+          echo "backend_url=http://$IP:8002" >> "$GITHUB_OUTPUT"
 
-          echo "frontend_url=${STAGING_FRONTEND_URL}" >> "$GITHUB_OUTPUT"
-          echo "backend_url=${STAGING_BACKEND_URL}" >> "$GITHUB_OUTPUT"
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262 # v1.0.3
+        with:
+          host: ${{ steps.wait_ip.outputs.ip }}
+          username: ubuntu
+          key: ${{ secrets.AWS_STAGING_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd ~/ai-financial-advisor
+            git fetch origin staging
+            git checkout staging
+            git reset --hard origin/staging
+            cd deployment/aws
+            docker compose -p afa-staging --env-file .env.staging \
+              -f docker-compose.aws.yml up -d --build
 
       - name: Wait for backend health
         run: |
           for attempt in $(seq 1 30); do
-            if curl -fsS "${STAGING_BACKEND_URL}/health/live" >/dev/null; then
+            if curl -fsS "${{ steps.wait_ip.outputs.backend_url }}/health/live" >/dev/null; then
+              echo "Staging backend healthy at ${{ steps.wait_ip.outputs.backend_url }}"
               exit 0
             fi
             sleep 10
           done
-
-          echo "Backend staging health check failed for ${STAGING_BACKEND_URL}" >&2
+          echo "Staging backend health check failed." >&2
           exit 1
+
+      - name: Print next steps for full E2E
+        if: inputs.run_e2e != true
+        run: |
+          echo "Staging backend is up at ${{ steps.wait_ip.outputs.backend_url }}"
+          echo "To run frontend E2E against it: point the Vercel staging"
+          echo "environment's VITE_PYTHON_API_URL / VITE_WEBSEARCH_API_URL at"
+          echo "this URL, redeploy the staging frontend, then re-run this"
+          echo "workflow with run_e2e=true and staging_frontend_url set."
 
   e2e:
     name: Run Full E2E Suite
     runs-on: ubuntu-latest
-    if: needs.verify-staging.result == 'success'
-    needs: verify-staging
+    needs: deploy
+    if: inputs.run_e2e == true
     permissions:
       contents: read
       issues: write
@@ -88,16 +136,9 @@ jobs:
       - name: Run E2E suite against staging
         id: e2e
         env:
-          PLAYWRIGHT_BASE_URL: ${{ env.STAGING_FRONTEND_URL }}
+          PLAYWRIGHT_BASE_URL: ${{ inputs.staging_frontend_url }}
         run: |
           npx playwright test --reporter=json > "$RUNNER_TEMP/playwright-staging-results.json"
-
-      - name: Summarize results
-        id: summary
-        if: always()
-        run: |
-          SUMMARY_JSON=$(node -e "const fs=require('fs'); const path=process.argv[1]; let stats={expected:0,unexpected:0,skipped:0,flaky:0,duration:0}; if (fs.existsSync(path)) { try { const data=JSON.parse(fs.readFileSync(path,'utf8')); stats=data.stats || stats; } catch (error) { stats.error=String(error.message || error); } } else { stats.error='Playwright JSON report was not generated.'; } process.stdout.write(JSON.stringify(stats));" "$RUNNER_TEMP/playwright-staging-results.json")
-          echo "summary=$SUMMARY_JSON" >> "$GITHUB_OUTPUT"
 
       - name: Upload E2E report
         if: always()
@@ -107,55 +148,22 @@ jobs:
           path: ${{ runner.temp }}/playwright-staging-results.json
           retention-days: 7
 
-      - name: Comment on PR
-        if: github.event_name == 'pull_request' && always()
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
-        env:
-          STAGING_FRONTEND_URL: ${{ env.STAGING_FRONTEND_URL }}
-          STAGING_BACKEND_URL: ${{ env.STAGING_BACKEND_URL }}
-          E2E_SUMMARY: ${{ steps.summary.outputs.summary }}
-          E2E_CONCLUSION: ${{ steps.e2e.outcome }}
+  stop:
+    name: Stop staging instance
+    runs-on: ubuntu-latest
+    needs: [deploy, e2e]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4
         with:
-          script: |
-            const marker = '<!-- staging-e2e -->';
-            const summary = JSON.parse(process.env.E2E_SUMMARY || '{}');
-            const conclusion = process.env.E2E_CONCLUSION || 'unknown';
-            const body = [
-              marker,
-              `Staging E2E result: **${conclusion.toUpperCase()}**`,
-              '',
-              `Frontend: ${process.env.STAGING_FRONTEND_URL}`,
-              `Backend: ${process.env.STAGING_BACKEND_URL}`,
-              '',
-              `Expected: ${summary.expected ?? 0}`,
-              `Unexpected: ${summary.unexpected ?? 0}`,
-              `Skipped: ${summary.skipped ?? 0}`,
-              `Flaky: ${summary.flaky ?? 0}`,
-              `Duration(ms): ${summary.duration ?? 0}`,
-              summary.error ? `Error: ${summary.error}` : null,
-            ].filter(Boolean).join('\n');
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-            const { owner, repo } = context.repo;
-            const issue_number = context.payload.pull_request.number;
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              owner,
-              repo,
-              issue_number,
-              per_page: 100,
-            });
-            const existing = comments.find((comment) => comment.body && comment.body.includes(marker));
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner,
-                repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number,
-                body,
-              });
-            }
+      - name: Stop staging instance
+        run: |
+          aws ec2 stop-instances --instance-ids "$STAGING_INSTANCE_ID"
+          echo "Staging instance stopping — no further compute billing until next run."
