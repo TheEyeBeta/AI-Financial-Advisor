@@ -24,7 +24,11 @@ jobs:
     name: Deploy backend to prod EC2
     runs-on: ubuntu-latest
     environment:
-      name: production
+      # Named "aws-production", not bare "production" — GitHub Environment
+      # names collide case-insensitively, and a bare "Production" already
+      # exists (auto-created by Vercel's GitHub integration for its own
+      # deployment status reporting, unrelated to this AWS deploy).
+      name: aws-production
     permissions:
       contents: read
 

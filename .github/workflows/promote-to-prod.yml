@@ -17,13 +17,13 @@ jobs:
     name: Open promotion PR staging → main
     runs-on: ubuntu-latest
     environment:
-      # Matches the "production" GitHub Environment used by deploy-prod.yml
-      # (AWS EC2 deploy). Previously this pointed at the Railway-GitHub-App
-      # auto-created "<railway-project> / production" environment name;
-      # that integration is gone now the backend runs on EC2 we manage
-      # ourselves. Configure protection rules on "production" directly
-      # under Settings → Environments if none exist yet.
-      name: "production"
+      # Matches "aws-production", the GitHub Environment used by
+      # deploy-prod.yml (AWS EC2 deploy). Named with the aws- prefix
+      # rather than bare "production" because GitHub Environment names
+      # collide case-insensitively and a bare "Production" already
+      # exists (Vercel's own, auto-created for its deployment status
+      # reporting — unrelated to this gate).
+      name: "aws-production"
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
