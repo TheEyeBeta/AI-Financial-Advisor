@@ -26,7 +26,7 @@ You are working in **AI-Financial-Advisor**: a Vite + React + TypeScript fronten
 
 Read **local** `AGENTS.md` in the directory you edit (`src/`, `backend/websearch_service/`, `sql/`, `deployment/`) before substantive work.
 
-**Task playbooks:** recurring workflows live under `skills/` — start at `skills/INDEX.md` and pick the narrowest skill.
+**Task playbooks:** recurring workflows live under `skills/` — start at `skills/INDEX.md` and pick the narrowest skill. **Mandatory, not just narrowest-fit:** any AWS CLI operation against this app's live infra (EC2, SSM, CloudWatch, SNS, Budgets, Scheduler, Parameter Store) must go through `skills/aws-cli-ops/SKILL.md` by default — it carries the verified account/region preflight, the real resource IDs, and the environment gotchas (Python interpreter path, PowerShell quoting) that a generic AWS CLI approach will get wrong.
 
 ## 4. Mandatory verification (run from repo root unless noted)
 
