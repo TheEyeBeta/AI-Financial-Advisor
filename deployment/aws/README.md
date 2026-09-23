@@ -6,8 +6,10 @@ Vercel-hosted frontend is unchanged except for the API URL it calls.
 
 **Status: prod is live** at `https://afa-api.theeyebeta.store`, reached via
 a **Cloudflare Tunnel** (not Nginx/certbot — see "Ingress" below for why).
-Railway is left running, untouched, as a rollback path until AWS has been
-observed under real traffic for a while.
+Railway is fully decommissioned — both Railway projects have been deleted
+(2026-09) — so there is no Railway rollback path anymore; a rollback means
+reverting to a prior AWS deploy (redeploy an earlier commit via
+`deploy-prod.yml`), not switching platforms.
 
 ## What's already provisioned (account 005185643725, us-east-1)
 
@@ -177,11 +179,11 @@ docker compose -p afa-prod --env-file deployment/aws/.env.production \
   -f deployment/aws/docker-compose.aws.yml up -d --build
 ```
 
-## 7. Decommission Railway
+## 7. Railway decommission (done)
 
-Only after prod has run stable on AWS for a real observation window
-(recommend 1-2 weeks including a deploy or two) and logs/Sentry look
-normal: delete the Railway services and cancel the plan.
+Both Railway projects (`reliable-ambition` backend, `carefree-charisma`
+standalone Valkey cache) were deleted 2026-09 after AWS ran stable in
+production. There is nothing left on Railway for this app.
 
 ## What did NOT change
 
