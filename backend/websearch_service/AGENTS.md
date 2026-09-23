@@ -43,15 +43,15 @@ alembic -c alembic.ini upgrade head
 alembic -c alembic.ini check
 ```
 
-## Local stack (test without Railway)
+## Local stack (test without deploying)
 
 Use two terminals from the **repo root**:
 
 1. **Backend (latest `subagents.py` / `ai_proxy.py`):** `npm run start:backend`  
-   Serves **`http://localhost:7000`** by default (avoids common collisions on 8000). Override: `PORT=8000 npm run start:backend`. Resolves a venv from `backend/websearch_service/.venv` or the **repo root** `.venv`. `app/main.py` loads env from `backend/websearch_service/.env` or the **repo root** `.env` (same keys as Railway: `OPENAI_API_KEY`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, etc. — see `.env.example` in this folder).
+   Serves **`http://localhost:7000`** by default (avoids common collisions on 8000). Override: `PORT=8000 npm run start:backend`. Resolves a venv from `backend/websearch_service/.venv` or the **repo root** `.venv`. `app/main.py` loads env from `backend/websearch_service/.env` or the **repo root** `.env` (same keys as production on AWS EC2: `OPENAI_API_KEY`, `SUPABASE_JWT_SECRET`, `SUPABASE_SERVICE_ROLE_KEY`, etc. — see `.env.example` in this folder and `deployment/aws/.env.production.example`).
 
 2. **Frontend forced to local API:** `npm run dev:local`  
-   Sets `VITE_PYTHON_API_URL=http://localhost:7000` for that Vite process only (your committed `.env` can still point at Railway). Optional override: `VITE_PYTHON_API_URL_LOCAL=https://host:port npm run dev:local`.
+   Sets `VITE_PYTHON_API_URL=http://localhost:7000` for that Vite process only (your committed `.env` can still point at the deployed AWS backend). Optional override: `VITE_PYTHON_API_URL_LOCAL=https://host:port npm run dev:local`.
 
 ## Forbidden
 
