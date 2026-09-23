@@ -3152,10 +3152,13 @@ async def chat_completion(
 
         payload = {
             "model": _chat_model,
-            "reasoning": {"effort": reasoning_effort},  # ← dynamically set based on classification
             "input": input_messages,
             "max_output_tokens": effective_max_output_tokens,
         }
+        if _is_reasoning_model(_chat_model):
+            # Responses API rejects "reasoning" with HTTP 400 for non-reasoning
+            # models (e.g. gpt-4o) — only reasoning-family models accept it.
+            payload["reasoning"] = {"effort": reasoning_effort}
 
         # Step 3: Call Responses API
         usage_entries: List[Dict[str, Any]] = []
