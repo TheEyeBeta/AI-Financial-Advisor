@@ -32,10 +32,14 @@ jobs:
     # ALLOW_SYNTHETIC_SEED below) — misconfiguring the environment itself
     # cannot be bypassed from this workflow file.
     environment:
-      # Real name as auto-created by Railway's GitHub integration (prefixed
-      # with the Railway project name) — bare "staging"/"main-staging" does
-      # not exist.
-      name: "reliable-ambition / main-staging"
+      # Bare "main-staging" GitHub Environment. Previously prefixed
+      # ("reliable-ambition / main-staging") because Railway's GitHub
+      # integration auto-created it under its project name; that
+      # integration is gone now the backend runs on EC2 we manage
+      # ourselves. Rename the existing Environment under
+      # Settings → Environments (carrying over its secrets/protection
+      # rules) before this workflow can gate on it by the new name.
+      name: "main-staging"
     permissions:
       contents: read
 
