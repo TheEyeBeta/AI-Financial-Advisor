@@ -88,11 +88,20 @@ services:
       start_period: 10s
     networks:
       - app-network
+    # Ships container stdout/stderr to CloudWatch Logs so application-level
+    # events (chat requests, OpenAI API errors, 5xx responses) are actually
+    # observable — previously only OS-level syslog was shipped, meaning a
+    # real chat-breaking bug (2026-09-23) produced zero CloudWatch signal and
+    # was found only via manual `docker compose logs`. Note: the awslogs
+    # driver disables `docker logs`/`docker compose logs` locally — use
+    # CloudWatch Logs (log group below) or Logs Insights instead.
     logging:
-      driver: "json-file"
+      driver: awslogs
       options:
-        max-size: "10m"
-        max-file: "3"
+        awslogs-region: us-east-1
+        awslogs-group: /afa/${ENVIRONMENT:-production}/app
+        awslogs-create-group: "true"
+        awslogs-stream: backend
 
 networks:
   app-network:
