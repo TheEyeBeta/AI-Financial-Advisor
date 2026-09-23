@@ -186,26 +186,31 @@ def _upsert_insight_sync(
     The Supabase PostgREST client does not support a WHERE clause on conflict
     updates, so the confidence guard is implemented as a read-before-write.
     This is safe here because the extraction cycle processes one chat at a time
-    with a 1-second gap, making concurrent writes to the same (user_id, key)
-    extremely unlikely.
+    with a 1-second gap, making concurrent writes to the same
+    (user_id, insight_type, key) extremely unlikely.
 
     Returns True if the row was written, False if skipped (existing row has
     equal-or-higher confidence).
 
     user_id is auth.users.id — the Supabase auth UUID — which matches the
-    foreign key on meridian.user_insights.
+    foreign key on meridian.user_insights. The table's actual unique
+    constraint is on (user_id, insight_type, key) — on_conflict below must
+    match it exactly or PostgREST raises 42P10.
     """
     key = insight.get("key", "")
+    insight_type = insight.get("insight_type", "")
     new_confidence = float(insight.get("confidence", 0))
     uid_tail = user_id[-8:] if user_id else "unknown"
 
     try:
-        # Check whether a higher-confidence insight already exists for this key.
+        # Check whether a higher-confidence insight already exists for this
+        # (user_id, insight_type, key) — must match the table's unique constraint.
         existing_res = (
             supabase_client.schema("meridian")
             .table("user_insights")
             .select("confidence")
             .eq("user_id", user_id)
+            .eq("insight_type", insight_type)
             .eq("key", key)
             .maybe_single()
             .execute()
@@ -219,14 +224,14 @@ def _upsert_insight_sync(
         supabase_client.schema("meridian").table("user_insights").upsert(
             {
                 "user_id": user_id,
-                "insight_type": insight.get("insight_type", ""),
+                "insight_type": insight_type,
                 "key": key,
                 "value": str(insight.get("value", "")),
                 "confidence": new_confidence,
                 "source_chat_id": source_chat_id,
                 "is_active": True,
             },
-            on_conflict="user_id,key",
+            on_conflict="user_id,insight_type,key",
         ).execute()
         return True
 
