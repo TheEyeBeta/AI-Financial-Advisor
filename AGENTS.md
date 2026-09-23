@@ -8,7 +8,7 @@ You are working in **AI-Financial-Advisor**: a Vite + React + TypeScript fronten
 - **Backend:** `backend/websearch_service/` — FastAPI, AI proxy (`app/routes/ai_proxy.py`), search, trade engine routes, scheduled jobs in `app/main.py`.
 - **Client ↔ API:** Browser calls backend via `VITE_PYTHON_API_URL` / `VITE_WEBSEARCH_API_URL` (see `src/lib/env`, `src/services/api.ts` and related modules).
 - **Database:** Six logical schemas used from the app: `core`, `ai`, `trading`, `market`, `academy`, `meridian` (see `src/lib/supabase.ts`). **Authoritative schema history:** `backend/websearch_service/alembic/`. **`sql/` is reference and manual verification only** — see `sql/README.md`.
-- **Deploy:** Frontend → Vercel; backend → Railway; DB/Auth → Supabase. Details: `deployment/DEPLOYMENT.md`. (`render.yaml` was removed — stale since initial commit, never wired into CI, and its documented env vars omitted `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, which the backend requires at startup.)
+- **Deploy:** Frontend → Vercel; backend → **AWS EC2** (Docker Compose + Cloudflare Tunnel, replacing Railway as of 2026-09); DB/Auth → Supabase. Details: `deployment/aws/README.md` (authoritative for live infra: instance IDs, security groups, Cloudflare Tunnel, required GitHub secrets) and `deployment/DEPLOYMENT.md`. Railway is fully decommissioned — both Railway projects were deleted; do not reintroduce Railway-specific deploy steps. (`render.yaml` was removed — stale since initial commit, never wired into CI, and its documented env vars omitted `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY`, which the backend requires at startup.)
 - **Generated API types:** `docs/openapi.json` + `src/lib/generated/api-types.ts` (CI enforces drift).
 
 ## 2. Dependency and change-direction rules
@@ -19,7 +19,7 @@ You are working in **AI-Financial-Advisor**: a Vite + React + TypeScript fronten
 
 ## 3. Forbidden zones (unless the task explicitly requires touching them and you follow the matching skill)
 
-- **Production platform dashboards** (Vercel/Railway/Supabase) — no changes from agents without human-run steps; document what to set instead.
+- **Production platform dashboards and infra** (Vercel/Supabase/AWS console, IAM, security groups, GitHub Environment protection rules) — no changes from agents without human-run steps or explicit human go-ahead; document what to set instead. AWS specifics: never weaken/remove a required-reviewer rule on a GitHub Environment, widen a security group, or rotate/create IAM credentials without explicit human instruction in the current task.
 - **Applying raw `sql/*.sql` to production** as the primary migration path — use Alembic; use `sql/` for inspection or documented manual checks only.
 - **Disabling security checks** in CI workflows to pass builds.
 - **Shipping service-role keys to the browser** or reading `user_id` from unverified client input on privileged backend paths (backend must use verified JWT claims — see `app/services/auth.py`).
