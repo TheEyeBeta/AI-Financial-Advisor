@@ -26,7 +26,7 @@ You are working in **AI-Financial-Advisor**: a Vite + React + TypeScript fronten
 
 Read **local** `AGENTS.md` in the directory you edit (`src/`, `backend/websearch_service/`, `sql/`, `deployment/`) before substantive work.
 
-**Task playbooks:** recurring workflows live under `skills/` — start at `skills/INDEX.md` and pick the narrowest skill. **Mandatory, not just narrowest-fit:** any AWS CLI operation against this app's live infra (EC2, SSM, CloudWatch, SNS, Budgets, Scheduler, Parameter Store) must go through `skills/aws-cli-ops/SKILL.md` by default — it carries the verified account/region preflight, the real resource IDs, and the environment gotchas (Python interpreter path, PowerShell quoting) that a generic AWS CLI approach will get wrong.
+**Task playbooks:** recurring workflows live under `skills/` — start at `skills/INDEX.md` and pick the narrowest skill. **Mandatory, not just narrowest-fit:** any AWS CLI operation against this app's live infra (EC2, SSM, CloudWatch, SNS, Budgets, Scheduler, Parameter Store) must go through `skills/aws-cli-ops/SKILL.md` by default — it carries the verified account/region preflight, the real resource IDs, and the environment gotchas (Python interpreter path, PowerShell quoting) that a generic AWS CLI approach will get wrong. Likewise, any Vercel CLI/MCP operation against the live frontend project (env vars, preview deploys, deployment inspection/rollback, CSP checks) must go through `skills/vercel-cli-ops/SKILL.md` by default — it carries the verified project/scope identity and the CSP dual-location gotcha (`vercel.json` header vs `index.html` meta tag) that caused a real production outage.
 
 ## 4. Mandatory verification (run from repo root unless noted)
 

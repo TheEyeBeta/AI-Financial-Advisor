@@ -15,6 +15,7 @@ This repository’s **constitutional rules** live in `AGENTS.md`. **Domain rules
 - Open `skills/INDEX.md` and pick the **narrowest** skill that fits.
 - Follow the skill’s **ordered steps**, **forbidden actions**, and **done-when** criteria.
 - Backend hosting is **AWS EC2** (Docker Compose + Cloudflare Tunnel — Railway is decommissioned, see root `AGENTS.md` §1). Any AWS CLI operation defaults to `skills/aws-cli-ops/SKILL.md`, not ad hoc commands — it's the mandatory choice here, not just the narrowest-fit one.
+- Frontend hosting is **Vercel** (project `ai-financial-advisor`, scope `the-eye-betas-projects`, native GitHub integration owns production deploys). Any Vercel CLI/MCP operation (env vars, preview deploys, deployment inspection/rollback, CSP checks) defaults to `skills/vercel-cli-ops/SKILL.md`, not ad hoc commands.
 - When **changing governance** (root or local `AGENTS.md`, `CLAUDE.md`, or the structure of `skills/`), follow `skills/instruction-stack-steward/SKILL.md` so edits stay evidence-based and layered.
 - Do not duplicate long checklists here — keep `CLAUDE.md` workflow-shaped.
 
