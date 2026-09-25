@@ -2,10 +2,10 @@
 name: aws-cli-ops
 description: >-
   Operates this repository's live AWS backend infrastructure through the AWS CLI:
-  EC2 production/staging lifecycle, SSM access, CloudWatch alarms, SNS alerts,
-  Budgets/Cost Explorer, and the staging auto-stop Scheduler. Use only for the
-  verified account 005185643725 in us-east-1. Do not use for generic AWS design
-  or unapproved infrastructure changes.
+  EC2 production/staging lifecycle, SSM access and Parameter Store, CloudWatch
+  alarms, SNS alerts, Budgets/Cost Explorer, and the staging auto-stop
+  Scheduler. Use only for the verified account 005185643725 in us-east-1. Do
+  not use for generic AWS design or unapproved infrastructure changes.
 ---
 
 # Skill: aws-cli-ops
@@ -13,7 +13,7 @@ description: >-
 ## When to use
 
 - Checking or operating the repository's production/staging EC2 instances.
-- Using Systems Manager for preferred remote access and non-interactive checks.
+- Using Systems Manager for preferred remote access, non-interactive checks, and Parameter Store (credential backup/rotation under `/afa/production/*` and `/afa/staging/*`).
 - Inspecting CloudWatch alarms/metrics, SNS subscriptions, AWS Budgets / Cost Explorer, or the staging EventBridge Scheduler.
 - Temporarily allowing a single trusted public IP on SSH/22 when raw SSH is explicitly required and a human has approved the security-group change in the current task.
 
@@ -273,6 +273,73 @@ $commandId = & $py -m awscli ssm send-command `
 ~~~
 
 Inspect Status, ResponseCode, StandardOutputContent, and StandardErrorContent. Do not use Run Command to bypass repo governance or execute destructive shell commands without explicit authorization.
+
+## Systems Manager Parameter Store
+
+Used to back up and rotate the same credentials that live in `.env.production`/`.env.staging` on the EC2 boxes, under `/afa/production/<KEY>` and `/afa/staging/<KEY>` as `SecureString` parameters. Every value here is a live secret — treat it with the same discipline as the on-box `.env.*` files (never printed, copied into docs, committed, or sent to tools).
+
+### Discover names without reading values
+
+~~~bash
+"$PY" -m awscli ssm describe-parameters \
+  --region us-east-1 \
+  --parameter-filters Key=Name,Option=BeginsWith,Values=/afa/production/ \
+  --query 'Parameters[].Name' --output table
+
+"$PY" -m awscli ssm describe-parameters \
+  --region us-east-1 \
+  --parameter-filters Key=Name,Option=BeginsWith,Values=/afa/staging/ \
+  --query 'Parameters[].Name' --output table
+~~~
+
+`describe-parameters` never returns values, so it is safe to run and print freely.
+
+### Verify a value exists and looks right — without displaying it
+
+Query only metadata derived from the value (length, last-modified date), never the value itself:
+
+~~~bash
+"$PY" -m awscli ssm get-parameter \
+  --region us-east-1 \
+  --name "/afa/production/SUPABASE_ANON_KEY" \
+  --with-decryption \
+  --query "length(Parameter.Value)" --output text
+
+"$PY" -m awscli ssm get-parameter \
+  --region us-east-1 \
+  --name "/afa/production/SUPABASE_ANON_KEY" \
+  --with-decryption \
+  --query "Parameter.LastModifiedDate" --output text
+~~~
+
+To compare two parameters (e.g. confirming a rotated value actually changed) without printing either one, hash both server-side in the same command and compare only the hash:
+
+~~~bash
+"$PY" -m awscli ssm get-parameter --region us-east-1 --name "/afa/production/KEY" \
+  --with-decryption --query "Parameter.Value" --output text | sha256sum
+~~~
+
+Never pipe a decrypted value to `echo`, a log file, a chat tool response, or any command whose output you will display. Redirect straight into a hashing/length/comparison step and discard the rest.
+
+### Write or rotate a value
+
+Setting or overwriting a parameter is a mutation and follows the same current-task-approval bar as any other AWS write:
+
+~~~bash
+"$PY" -m awscli ssm put-parameter \
+  --region us-east-1 \
+  --name "/afa/staging/KEY_NAME" \
+  --value "$VALUE" \
+  --type SecureString \
+  --overwrite
+~~~
+
+Pass the value through a shell variable populated from a local file or prior secure source, never as a literal secret typed into a chat-visible command. When pushing many keys from a `KEY=VALUE` file, script it so failures are caught by exit code/stderr per key (a script that unconditionally prints "ok" regardless of the real AWS CLI exit status will hide silent failures) and set `MSYS_NO_PATHCONV=1` on Windows Git Bash so parameter names starting with `/` are not mangled into local filesystem paths.
+
+### Do not use for
+
+- Reading the on-box `.env.production`/`.env.staging` files directly (that is a "Production Reads" restricted operation covered by root AGENTS.md, not this skill) — Parameter Store is the approved off-box backup, not a bypass to fetch the live file's contents another way.
+- Storing anything that is not one of the app's own runtime credentials (no unrelated third-party secrets, no personal credentials).
 
 ## SSH security-group /32 procedure
 

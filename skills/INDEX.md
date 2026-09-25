@@ -15,7 +15,7 @@ Use the **narrowest** skill that fits. Each skill lists its own preconditions an
 | Boundary and invariant enforcement across layers | `architecture-compliance` |
 | Release checklist: env, build, migrations, CI | `deployment-readiness` |
 | CI/CD-safe changes without weakening quality gates | `ci-cd-safe-change` |
-| AWS EC2/SSM/CloudWatch/SNS/Budgets/Scheduler operations for the deployed backend | `aws-cli-ops` |
+| AWS EC2/SSM/Parameter Store/CloudWatch/SNS/Budgets/Scheduler operations for the deployed backend | `aws-cli-ops` |
 | Vercel env vars, preview deploys, deployment inspection/rollback, CSP drift checks for the frontend | `vercel-cli-ops` |
 | Governance: design or audit agent instruction layers (`AGENTS.md`, `CLAUDE.md`, skills) | `instruction-stack-steward` |
 
