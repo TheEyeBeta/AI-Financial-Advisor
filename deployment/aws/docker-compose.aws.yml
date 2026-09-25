@@ -50,7 +50,7 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
-      - APP_VERSION=${APP_VERSION:-0.1.0}
+      - APP_VERSION=${APP_VERSION:-${GIT_SHA:-0.1.0}}
       - GIT_SHA=${GIT_SHA:-}
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - CORS_ORIGINS=${CORS_ORIGINS}
@@ -102,6 +102,66 @@ services:
         awslogs-group: /afa/${ENVIRONMENT:-production}/app
         awslogs-create-group: "true"
         awslogs-stream: backend
+
+  # Dedicated scheduler process — Railway ran this in-process on a single
+  # web worker via SCHEDULER_ENABLED=true, which is unsafe to replicate here
+  # if WORKERS is ever raised above 1 (duplicate cron execution). A separate
+  # single-replica service is the safe equivalent; without it, no process
+  # runs run_scheduler.py at all, so ranking, memory extraction, chat
+  # reconciliation, and the admin job worker never execute in AWS.
+  scheduler:
+    build:
+      context: ../../backend/websearch_service
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-${GIT_SHA:-0.1.0}}
+        ENVIRONMENT: ${ENVIRONMENT:-production}
+    container_name: ai-financial-advisor-scheduler-${ENVIRONMENT:-production}
+    command: ["python", "run_scheduler.py"]
+    environment:
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_ANON_KEY=${SUPABASE_ANON_KEY}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+      - SUPABASE_JWT_SECRET=${SUPABASE_JWT_SECRET}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - APP_VERSION=${APP_VERSION:-${GIT_SHA:-0.1.0}}
+      - GIT_SHA=${GIT_SHA:-}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+      - AUDIT_PSEUDONYM_PEPPER=${AUDIT_PSEUDONYM_PEPPER}
+      - AI_AUDIT_LOG_PATH=/app/logs/audit.jsonl
+      - REDIS_URL=${REDIS_URL:-redis://valkey:6379/0}
+      - RATE_LIMIT_REDIS_URL=${RATE_LIMIT_REDIS_URL:-redis://valkey:6379/0}
+      - SENTRY_DSN=${SENTRY_DSN:-}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - AI_BUDGET_ALLOW_IN_MEMORY=${AI_BUDGET_ALLOW_IN_MEMORY:-}
+      - ALLOW_IN_MEMORY_RATE_LIMIT=${ALLOW_IN_MEMORY_RATE_LIMIT:-}
+      - MERIDIAN_CRON_SECRET=${MERIDIAN_CRON_SECRET:-}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      - OTEL_EXPORTER_OTLP_HEADERS=${OTEL_EXPORTER_OTLP_HEADERS:-}
+      - DATAAPI_ENABLED=${DATAAPI_ENABLED:-}
+      - DATAAPI_URL=${DATAAPI_URL:-}
+      - DATAAPI_CLIENT_ID=${DATAAPI_CLIENT_ID:-}
+      - DATAAPI_CLIENT_SECRET=${DATAAPI_CLIENT_SECRET:-}
+      - DATAAPI_ADMIN_CLIENT_ID=${DATAAPI_ADMIN_CLIENT_ID:-}
+      - DATAAPI_ADMIN_CLIENT_SECRET=${DATAAPI_ADMIN_CLIENT_SECRET:-}
+    volumes:
+      - ./logs-${ENVIRONMENT:-production}:/app/logs
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+    networks:
+      - app-network
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: us-east-1
+        awslogs-group: /afa/${ENVIRONMENT:-production}/scheduler
+        awslogs-create-group: "true"
+        awslogs-stream: scheduler
 
 networks:
   app-network:

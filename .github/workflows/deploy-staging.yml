@@ -100,21 +100,23 @@ jobs:
           host: ${{ steps.wait_ip.outputs.ip }}
           username: ubuntu
           key: ${{ secrets.AWS_STAGING_SSH_KEY }}
-          envs: GIT_SHA
           script: |
             set -euo pipefail
             cd ~/ai-financial-advisor
             git fetch origin staging
             git checkout staging
             git reset --hard origin/staging
+            # Resolve GIT_SHA from the commit actually checked out above, not
+            # github.sha — workflow_dispatch defaults to whatever ref an
+            # operator ran this on (commonly main), but the box always
+            # deploys origin/staging regardless. Trusting github.sha here
+            # would report a commit the backend isn't running, and
+            # release-verification.yml's workflow_run trigger only fires
+            # when head_branch == 'staging'.
+            GIT_SHA="$(git rev-parse HEAD)"
             cd deployment/aws
             GIT_SHA="$GIT_SHA" docker compose -p afa-staging --env-file .env.staging \
               -f docker-compose.aws.yml up -d --build
-        env:
-          # deployed commit SHA — release-verification.yml requires the
-          # backend to report the exact SHA it's running, and the env
-          # templates otherwise leave this blank on every deploy.
-          GIT_SHA: ${{ github.sha }}
 
       - name: Wait for backend health
         # Curls localhost from inside the instance over SSH rather than
@@ -151,17 +153,26 @@ jobs:
         run: echo "Staging backend is up at ${{ steps.wait_ip.outputs.backend_url }}"
 
       - name: Point a Vercel preview at this run's backend and deploy it
-        # The staging backend's IP is only known once this job starts, so
-        # E2E can't target a frontend built before this run — this step
-        # updates the Preview environment's backend URL and deploys a
-        # fresh preview from the staging branch in the same run, closing
-        # the loop so run_e2e: true actually works end to end without a
-        # separate manual pass.
+        # KNOWN LIMITATION (Codex review, PR #328, 2026-09): backend_url is
+        # http://<ephemeral-ip>:8002 — port 8002 is intentionally closed to
+        # the public internet and not behind TLS (see README's no-TLS
+        # tradeoff note). A browser loading this HTTPS Vercel preview will
+        # block any *real* fetch to that URL as mixed content, and the
+        # committed CSP doesn't allow a dynamic http:// origin either.
+        # Playwright's own request mocking means the E2E suite below can
+        # still pass without ever exercising a real network call to this
+        # URL — a genuine staging backend integration check needs staging
+        # behind its own HTTPS endpoint (e.g. a second Cloudflare Tunnel,
+        # not yet built). Until then, treat a green run_e2e here as
+        # "frontend behavior against mocked responses", not "AWS staging
+        # backend verified reachable" — do not use it as promotion evidence
+        # for real backend integration.
         if: inputs.run_e2e == true && inputs.staging_frontend_url == ''
         id: vercel_preview
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
+          echo "::warning::run_e2e preview points VITE_PYTHON_API_URL at an http:// ephemeral IP that browsers will block as mixed content — Playwright's mocks paper over this, so this run does NOT prove real backend connectivity. See step comment for why."
           npx --yes vercel@latest link --yes --token="$VERCEL_TOKEN" --project ai-financial-advisor --scope the-eye-betas-projects
           npx --yes vercel@latest env rm VITE_PYTHON_API_URL preview --yes --token="$VERCEL_TOKEN" || true
           printf '%s' "${{ steps.wait_ip.outputs.backend_url }}" | \

@@ -21,9 +21,16 @@ name: Release Verification
 # Run this after every staging or production deployment:
 #   - expected_sha defaults to the commit the workflow runs on;
 #   - URLs default to the staging secrets so the common case is one click.
-#   - It is also invoked automatically after a successful staging deploy
-#     (workflow_run below), using only repository secrets — never
-#     PR-supplied input — for the target URLs.
+#
+# No automatic workflow_run trigger: staging's EC2 instance has no static
+# IP and deploy-staging.yml stops it again as its own final job, so any
+# invocation triggered by that workflow's *completion* would either target
+# a stale STAGING_BACKEND_URL secret or an instance already shutting down
+# — silently reporting a pass with no real evidence (found via Codex review
+# on PR #328, 2026-09). Run this manually right after "Deploy Staging (AWS,
+# on-demand)" finishes, passing that run's actual discovered backend_url —
+# see its job summary/logs for the ephemeral IP — before promote-to-prod.yml
+# will accept the result as the required gate.
 #
 # Prerequisite (EXTERNAL): the deploy targets must expose their SHA —
 #   Vercel: enable "Automatically expose System Environment Variables"
@@ -42,29 +49,8 @@ on:
         description: "Frontend base URL (blank = STAGING_FRONTEND_URL secret)"
         required: false
       backend_url:
-        description: "Backend base URL (blank = STAGING_BACKEND_URL secret)"
+        description: "Backend base URL (blank = STAGING_BACKEND_URL secret) — use the ephemeral IP from the Deploy Staging run you're verifying"
         required: false
-  workflow_run:
-    # Automatic post-deployment invocation: re-verify staging immediately
-    # after "Deploy Staging (AWS, on-demand)" finishes, without a human
-    # clicking "Run workflow". This intentionally does NOT read anything
-    # from the triggering workflow_run event (no PR-supplied
-    # URLs/SHAs/secrets) — it only uses this workflow's own repository
-    # secrets, exactly like the manual dispatch default path, so a
-    # pull_request-triggered deploy run cannot smuggle an arbitrary
-    # verification target. There is no loop: this workflow does not
-    # deploy anything, so it cannot re-trigger the staging deploy.
-    #
-    # Note: since the AWS migration, "Deploy Staging (AWS, on-demand)" is
-    # workflow_dispatch-only (staging's EC2 instance stays stopped between
-    # runs to avoid billing for idle compute — see deployment/aws/README.md),
-    # so this chain now only fires after someone manually runs that
-    # workflow, not on every push to staging the way Railway's auto-deploy
-    # did. promote-to-prod.yml's gate on a matching release-verification
-    # run still holds, but expect to run "Deploy Staging (AWS, on-demand)"
-    # by hand before promoting.
-    workflows: ["Deploy Staging (AWS, on-demand)"]
-    types: [completed]
 
 permissions:
   contents: read
@@ -76,11 +62,6 @@ concurrency:
 jobs:
   verify-release:
     name: Verify deployed release SHA
-    if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'staging' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -98,18 +79,14 @@ jobs:
 
       - name: Verify frontend and backend release SHA
         env:
-          # workflow_run cannot carry workflow_dispatch inputs — those only
-          # exist for manual runs — so the automatic path always uses the
-          # commit that triggered the deploy and the staging secrets.
-          #
           # All required-field, SHA-format, and allowlist-presence validation
           # lives solely in scripts/verify-release.mjs (there is no duplicate
           # bash-side check here to drift out of sync with it) — an empty or
           # malformed value below is deliberately passed straight through so
           # the script's own fail-closed evidence-producing path handles it.
-          EXPECTED_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || (inputs.expected_sha || github.sha) }}
-          FRONTEND_URL: ${{ github.event_name == 'workflow_run' && secrets.STAGING_FRONTEND_URL || (inputs.frontend_url || secrets.STAGING_FRONTEND_URL) }}
-          BACKEND_URL: ${{ github.event_name == 'workflow_run' && secrets.STAGING_BACKEND_URL || (inputs.backend_url || secrets.STAGING_BACKEND_URL) }}
+          EXPECTED_SHA: ${{ inputs.expected_sha || github.sha }}
+          FRONTEND_URL: ${{ inputs.frontend_url || secrets.STAGING_FRONTEND_URL }}
+          BACKEND_URL: ${{ inputs.backend_url || secrets.STAGING_BACKEND_URL }}
           ALLOWED_HOSTS: ${{ vars.RELEASE_ALLOWED_HOSTS }}
         run: |
           node scripts/verify-release.mjs \
