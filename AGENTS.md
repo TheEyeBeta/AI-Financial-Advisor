@@ -19,14 +19,14 @@ You are working in **AI-Financial-Advisor**: a Vite + React + TypeScript fronten
 
 ## 3. Forbidden zones (unless the task explicitly requires touching them and you follow the matching skill)
 
-- **Production platform dashboards and infra** (Vercel/Supabase/AWS console, IAM, security groups, GitHub Environment protection rules) — no changes from agents without human-run steps or explicit human go-ahead; document what to set instead. AWS specifics: never weaken/remove a required-reviewer rule on a GitHub Environment, widen a security group, or rotate/create IAM credentials without explicit human instruction in the current task.
+- **Production platform dashboards and infra** (Vercel/Supabase/AWS console, IAM, security groups, GitHub Environment protection rules) — no changes from agents without human-run steps or explicit human go-ahead; document what to set instead. AWS specifics: never weaken/remove a required-reviewer rule on a GitHub Environment, widen a security group, or rotate/create IAM credentials without explicit human instruction in the current task. Exception, already reviewed and approved: `deploy-prod.yml`/`deploy-staging.yml`'s own CI-authorized, scoped-to-`/32`, auto-revoked-on-completion SSH IP allowlist against `sg-0c81a063d376b31d0` — this is a standing, deliberate mechanism, not a per-run decision an agent is making; do not remove or "fix" it as a security-group-widening violation without a new explicit instruction to change the access model (e.g. to SSM-only).
 - **Applying raw `sql/*.sql` to production** as the primary migration path — use Alembic; use `sql/` for inspection or documented manual checks only.
 - **Disabling security checks** in CI workflows to pass builds.
 - **Shipping service-role keys to the browser** or reading `user_id` from unverified client input on privileged backend paths (backend must use verified JWT claims — see `app/services/auth.py`).
 
 Read **local** `AGENTS.md` in the directory you edit (`src/`, `backend/websearch_service/`, `sql/`, `deployment/`) before substantive work.
 
-**Task playbooks:** recurring workflows live under `skills/` — start at `skills/INDEX.md` and pick the narrowest skill.
+**Task playbooks:** recurring workflows live under `skills/` — start at `skills/INDEX.md` and pick the narrowest skill. **Mandatory, not just narrowest-fit:** any AWS CLI operation against this app's live infra (EC2, SSM, CloudWatch, SNS, Budgets, Scheduler, Parameter Store) must go through `skills/aws-cli-ops/SKILL.md` by default — it carries the verified account/region preflight, the real resource IDs, and the environment gotchas (Python interpreter path, PowerShell quoting) that a generic AWS CLI approach will get wrong. Likewise, any Vercel CLI/MCP operation against the live frontend project (env vars, preview deploys, deployment inspection/rollback, CSP checks) must go through `skills/vercel-cli-ops/SKILL.md` by default — it carries the verified project/scope identity and the CSP dual-location gotcha (`vercel.json` header vs `index.html` meta tag) that caused a real production outage.
 
 ## 4. Mandatory verification (run from repo root unless noted)
 
