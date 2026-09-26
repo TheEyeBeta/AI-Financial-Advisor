@@ -153,6 +153,12 @@ services:
     depends_on:
       valkey:
         condition: service_healthy
+    # Without this, the container inherits the backend image's Dockerfile
+    # HEALTHCHECK (an HTTP probe against :8000/health/live) — run_scheduler.py
+    # never starts an HTTP server, so that probe would fail forever and mark
+    # this container permanently unhealthy despite scheduled jobs running fine.
+    healthcheck:
+      disable: true
     networks:
       - app-network
     logging:
